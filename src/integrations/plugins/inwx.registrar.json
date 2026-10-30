@@ -1,0 +1,16 @@
+{
+  "id": "inwx.registrar",
+  "provider": "INWX",
+  "use": "Registrar: DS records set by hand",
+  "operations": [
+    {
+      "name": "set-ds",
+      "class": "M",
+      "route": "none"
+    }
+  ],
+  "setup": [
+    "Set the DS records at the registrar by hand"
+  ],
+  "detect": {}
+}

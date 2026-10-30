@@ -1,0 +1,24 @@
+{
+  "id": "google.calendar",
+  "provider": "Google",
+  "use": "Calendar capacity",
+  "operations": [
+    {
+      "name": "read",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Share the calendar with the service account"
+  ],
+  "detect": {
+    "hosts": [
+      "calendar.googleapis.com",
+      "calendar.google.com"
+    ],
+    "patterns": [
+      "googleapis\\.com/calendar|\\bcalendar/v3\\b|build\\(\\s*[\\\"']calendar[\\\"']"
+    ]
+  }
+}

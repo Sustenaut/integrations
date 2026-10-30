@@ -1,0 +1,46 @@
+{
+  "id": "google.cloud",
+  "provider": "Google",
+  "use": "Cloud Run, IAP, Secret Manager, Artifact Registry and the billing budget",
+  "operations": [
+    {
+      "name": "provision",
+      "class": "M",
+      "route": "none"
+    },
+    {
+      "name": "deploy",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create the project",
+    "Enable the APIs",
+    "Set up workload identity for the deploying repository"
+  ],
+  "detect": {
+    "actions": [
+      "google-github-actions/"
+    ],
+    "commands": [
+      "gcloud"
+    ],
+    "hosts": [
+      "*.run.app",
+      "*.pkg.dev",
+      "www.googleapis.com",
+      "oauth2.googleapis.com",
+      "accounts.google.com",
+      "storage.googleapis.com",
+      "cloud.google.com",
+      "www.gstatic.com"
+    ],
+    "env": [
+      "IAP_OAUTH_CLIENT_(?:ID|SECRET)"
+    ],
+    "patterns": [
+      "\\bgoogle_(?:cloud_run|iap|secret_manager|artifact_registry|billing)\\w*"
+    ]
+  }
+}

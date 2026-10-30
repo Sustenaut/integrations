@@ -1,0 +1,30 @@
+{
+  "id": "npm.publish",
+  "provider": "npm",
+  "use": "Publishing and version checks for npm packages",
+  "operations": [
+    {
+      "name": "setup",
+      "class": "M",
+      "route": "none"
+    },
+    {
+      "name": "publish",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Claim the package name",
+    "Set up trusted publishing"
+  ],
+  "detect": {
+    "hosts": [
+      "registry.npmjs.org",
+      "npmjs.com"
+    ],
+    "patterns": [
+      "\\bnpm publish\\b"
+    ]
+  }
+}

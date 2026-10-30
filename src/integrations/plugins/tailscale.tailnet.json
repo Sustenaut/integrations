@@ -1,0 +1,37 @@
+{
+  "id": "tailscale.tailnet",
+  "provider": "Tailscale",
+  "use": "Tailnet membership, CI joins and ACLs",
+  "operations": [
+    {
+      "name": "setup",
+      "class": "M",
+      "route": "none"
+    },
+    {
+      "name": "join",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create an OAuth client",
+    "Send its id and secret to the repository"
+  ],
+  "detect": {
+    "actions": [
+      "tailscale/github-action"
+    ],
+    "commands": [
+      "tailscale"
+    ],
+    "hosts": [
+      "*.ts.net",
+      "tailscale.com",
+      "login.tailscale.com"
+    ],
+    "env": [
+      "TAILSCALE_\\w+|TS_(?:GH_)?OAUTH_\\w+"
+    ]
+  }
+}

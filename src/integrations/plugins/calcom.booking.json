@@ -1,0 +1,27 @@
+{
+  "id": "calcom.booking",
+  "provider": "Cal.com",
+  "use": "Booking page that creates Google Calendar entries (setup only, plus a regular check)",
+  "operations": [
+    {
+      "name": "book",
+      "class": "H",
+      "route": "none"
+    },
+    {
+      "name": "check",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the booking type",
+    "Connect it to the calendar"
+  ],
+  "detect": {
+    "hosts": [
+      "cal.com",
+      "*.cal.com"
+    ]
+  }
+}

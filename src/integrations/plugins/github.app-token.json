@@ -1,0 +1,28 @@
+{
+  "id": "github.app-token",
+  "provider": "GitHub",
+  "use": "GitHub App installation tokens for nightly, release and reader jobs",
+  "operations": [
+    {
+      "name": "mint",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create the GitHub App",
+    "Install it on the owner",
+    "Send its id and key to the repository"
+  ],
+  "detect": {
+    "actions": [
+      "actions/create-github-app-token"
+    ],
+    "env": [
+      "[A-Z_]+_APP_(?:ID|KEY|INSTALLATION_ID)"
+    ],
+    "hosts": [
+      "api.github.com"
+    ]
+  }
+}

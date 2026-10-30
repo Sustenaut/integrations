@@ -1,0 +1,29 @@
+{
+  "id": "google.firestore",
+  "provider": "Google",
+  "use": "Firestore for planning and the review site",
+  "operations": [
+    {
+      "name": "read",
+      "class": "H",
+      "route": "routed"
+    },
+    {
+      "name": "write",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the database",
+    "Grant the service account access"
+  ],
+  "detect": {
+    "hosts": [
+      "firestore.googleapis.com"
+    ],
+    "patterns": [
+      "\\bgoogle\\.cloud\\.firestore\\b|\\bfrom google\\.cloud import firestore\\b|\\bgoogle_firestore_\\w+"
+    ]
+  }
+}

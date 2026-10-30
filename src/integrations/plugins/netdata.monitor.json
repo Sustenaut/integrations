@@ -1,0 +1,24 @@
+{
+  "id": "netdata.monitor",
+  "provider": "Netdata",
+  "use": "Host metrics and alarms",
+  "operations": [
+    {
+      "name": "alert",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Install the agent"
+  ],
+  "detect": {
+    "hosts": [
+      "get.netdata.cloud",
+      "app.netdata.cloud"
+    ],
+    "patterns": [
+      "\\bnetdata/netdata\\b"
+    ]
+  }
+}

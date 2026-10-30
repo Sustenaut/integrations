@@ -1,0 +1,27 @@
+{
+  "id": "github.actions-oidc",
+  "provider": "GitHub",
+  "use": "Actions OIDC tokens as the identity for other services",
+  "operations": [
+    {
+      "name": "identity",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Grant the workflow id-token: write",
+    "Trust the repository at the relying service"
+  ],
+  "detect": {
+    "hosts": [
+      "token.actions.githubusercontent.com"
+    ],
+    "env": [
+      "ACTIONS_ID_TOKEN_REQUEST_(?:URL|TOKEN)"
+    ],
+    "patterns": [
+      "\\bid-token:\\s*write\\b"
+    ]
+  }
+}

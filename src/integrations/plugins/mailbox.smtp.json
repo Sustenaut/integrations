@@ -1,0 +1,29 @@
+{
+  "id": "mailbox.smtp",
+  "provider": "mailbox.org",
+  "use": "SMTP for Keycloak and alerts, and the MX and DKIM records",
+  "operations": [
+    {
+      "name": "send",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the mailbox",
+    "Store its SMTP password in Bitwarden",
+    "Publish MX and DKIM records"
+  ],
+  "detect": {
+    "hosts": [
+      "*.mailbox.org",
+      "mailbox.org"
+    ],
+    "env": [
+      "[A-Z_]*MAILBOX_SMTP_\\w+"
+    ],
+    "patterns": [
+      "\\bmailbox-org\\b"
+    ]
+  }
+}

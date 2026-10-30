@@ -1,0 +1,28 @@
+{
+  "id": "slack.post",
+  "provider": "Slack",
+  "use": "Bot posts and direct messages",
+  "operations": [
+    {
+      "name": "post",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the Slack app",
+    "Invite the bot to its channels",
+    "Store the bot token in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "slack.com"
+    ],
+    "env": [
+      "[A-Z_]*SLACK[A-Z_]*(?:TOKEN|USER_ID)"
+    ],
+    "patterns": [
+      "chat\\.postMessage"
+    ]
+  }
+}

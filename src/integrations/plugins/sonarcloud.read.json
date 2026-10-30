@@ -1,0 +1,23 @@
+{
+  "id": "sonarcloud.read",
+  "provider": "SonarCloud",
+  "use": "Quality grades for the board",
+  "operations": [
+    {
+      "name": "read",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create a read token if the project is private"
+  ],
+  "detect": {
+    "hosts": [
+      "sonarcloud.io"
+    ],
+    "env": [
+      "SONAR_TOKEN"
+    ]
+  }
+}

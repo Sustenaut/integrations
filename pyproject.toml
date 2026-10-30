@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "integrations"
+version = "0.1.0"
+description = "The registry of every outside service our code calls, and the check that keeps it true."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "David Schryer", email = "schryer@gmail.com" }]
+# None: the scan workflow runs this from a plain checkout.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Sustenaut/integrations"
+
+[project.scripts]
+integrations = "integrations.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+integrations = ["*.json", "plugins/*.json", "schemas/*.json"]
+
+# `make functional` measures the suite, the `integrations` processes it starts
+# included, into coverage/coverage.xml for SonarQube Cloud.
+[tool.coverage.run]
+source = ["integrations"]
+patch = ["subprocess"]
+parallel = true
+
+[tool.coverage.xml]
+output = "coverage/coverage.xml"

@@ -1,0 +1,21 @@
+{
+  "id": "finto.terms",
+  "provider": "Finto",
+  "use": "YSO subject terms for the decimal classification",
+  "operations": [
+    {
+      "name": "import",
+      "class": "M",
+      "route": "none"
+    }
+  ],
+  "setup": [
+    "Run the import by hand"
+  ],
+  "detect": {
+    "hosts": [
+      "api.finto.fi",
+      "finto.fi"
+    ]
+  }
+}

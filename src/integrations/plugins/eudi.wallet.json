@@ -1,0 +1,25 @@
+{
+  "id": "eudi.wallet",
+  "provider": "EUDI wallet issuers",
+  "use": "OIDC4VP sign-in and the trust list",
+  "operations": [
+    {
+      "name": "sign-in",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Fetch the trust list",
+    "Register the verifier"
+  ],
+  "detect": {
+    "hosts": [
+      "*.eudiw.dev"
+    ],
+    "patterns": [
+      "\\bopenid4vp\\b|\\boid4vp\\b|\\bOIDC4VP\\b",
+      "\\bTRUST_LIST\\w*"
+    ]
+  }
+}

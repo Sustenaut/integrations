@@ -1,0 +1,25 @@
+{
+  "uses": [
+    {
+      "plugin": "sonarcloud.scan",
+      "paths": [
+        ".github/workflows/pr.yml",
+        ".github/workflows/main.yml"
+      ]
+    }
+  ],
+  "exclude": [
+    {
+      "path": "src/integrations/plugins/**",
+      "reason": "the signatures themselves"
+    },
+    {
+      "path": "src/integrations/not-providers.json",
+      "reason": "the names the scan skips"
+    },
+    {
+      "path": "tests/**",
+      "reason": "scenarios about the signatures"
+    }
+  ]
+}

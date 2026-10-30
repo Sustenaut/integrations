@@ -1,0 +1,14 @@
+# This repository's own scan, with the scanner of the commit under test.
+name: integrations
+
+on:
+  pull_request:
+  merge_group:
+  push: { branches: [main] }
+
+permissions:
+  contents: read
+
+jobs:
+  integrations:
+    uses: ./.github/workflows/scan.yml

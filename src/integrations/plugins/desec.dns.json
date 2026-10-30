@@ -1,0 +1,27 @@
+{
+  "id": "desec.dns",
+  "provider": "deSEC",
+  "use": "Second DNS signer",
+  "operations": [
+    {
+      "name": "reconcile",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create a deSEC token",
+    "Store it in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "desec.io",
+      "*.desec.io",
+      "desec.org",
+      "*.desec.org"
+    ],
+    "env": [
+      "(?:TF_VAR_)?DESEC_(?:API_)?TOKEN"
+    ]
+  }
+}

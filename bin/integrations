@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs integrations from this checkout. It needs Python and nothing else, so
+# the reusable scan workflow can run it from a plain checkout.
+here=$(cd "$(dirname "$0")/.." && pwd)
+PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m integrations "$@"

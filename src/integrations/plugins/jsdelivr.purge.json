@@ -1,0 +1,19 @@
+{
+  "id": "jsdelivr.purge",
+  "provider": "jsDelivr",
+  "use": "CDN purge after a tag",
+  "operations": [
+    {
+      "name": "purge",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [],
+  "detect": {
+    "hosts": [
+      "purge.jsdelivr.net",
+      "cdn.jsdelivr.net"
+    ]
+  }
+}

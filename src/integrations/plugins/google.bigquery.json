@@ -1,0 +1,29 @@
+{
+  "id": "google.bigquery",
+  "provider": "Google",
+  "use": "BigQuery warehouse",
+  "operations": [
+    {
+      "name": "load",
+      "class": "S",
+      "route": "routed"
+    },
+    {
+      "name": "query",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the dataset",
+    "Grant the service account access"
+  ],
+  "detect": {
+    "hosts": [
+      "bigquery.googleapis.com"
+    ],
+    "patterns": [
+      "\\bgoogle\\.cloud\\.bigquery\\b|\\bfrom google\\.cloud import bigquery\\b|\\bgoogle_bigquery_\\w+"
+    ]
+  }
+}

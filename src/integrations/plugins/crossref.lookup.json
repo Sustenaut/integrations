@@ -1,0 +1,18 @@
+{
+  "id": "crossref.lookup",
+  "provider": "Crossref",
+  "use": "Paper metadata lookups",
+  "operations": [
+    {
+      "name": "lookup",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [],
+  "detect": {
+    "hosts": [
+      "api.crossref.org"
+    ]
+  }
+}
