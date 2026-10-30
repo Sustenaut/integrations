@@ -224,6 +224,8 @@ class Scanner:
         for use in consumer.uses:
             if self.plugins[use.plugin].manual:
                 continue
+            if not use.paths:
+                stale.append(f"{use.plugin}: it names no paths, and only a manual plugin may")
             own = [h for h in hits if use.plugin in h.plugins]
             for pattern, regex in zip(use.paths, use.regexes):
                 if not any(regex.match(h.path) for h in own):

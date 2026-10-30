@@ -37,6 +37,13 @@ Feature: Comparing a repository's calls with its integrations.json
     Then it fails
     And it prints "stale: linear.sync: nothing in tools/b.py uses it"
 
+  Scenario: A plugin with signatures must name where it is used
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json declares "linear.sync" with no paths
+    When I scan it
+    Then it fails
+    And it prints "stale: linear.sync: it names no paths"
+
   Scenario: A signature several plugins share is declared by any of them
     Given a repository with "lib/pr.py" containing "https://api.github.com/repos"
     And its integrations.json declares "github.edit-pr" in "lib/"
