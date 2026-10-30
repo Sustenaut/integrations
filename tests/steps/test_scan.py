@@ -48,6 +48,11 @@ def declares(repository, plugin, paths):
     declare(repository, uses=[{"plugin": plugin, "paths": paths.split(",")}])
 
 
+@given(parsers.parse('its integrations.json declares "{plugin}" with no paths'))
+def declares_no_paths(repository, plugin):
+    declare(repository, uses=[{"plugin": plugin, "paths": []}])
+
+
 @given(parsers.parse('its integrations.json lists "{key}" entry "{name}" "{value}"'))
 def lists(repository, key, name, value):
     declare(repository, **{key: [{name: value, "reason": "because"}]})
