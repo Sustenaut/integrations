@@ -11,11 +11,6 @@ name: scan
 
 on:
   workflow_call:
-    inputs:
-      ref:
-        type: string
-        default: ''
-        description: The scanner's commit. Only this repository's own CI gives it; a caller's pin decides otherwise.
 
 permissions:
   contents: read
@@ -29,7 +24,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: Sustenaut/integrations
-          ref: ${{ inputs.ref || github.job_workflow_sha }}
+          ref: ${{ job.workflow_sha }}
           path: scanner
           persist-credentials: false
       - run: scanner/bin/integrations scan repository

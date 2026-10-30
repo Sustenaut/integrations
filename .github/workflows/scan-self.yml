@@ -12,5 +12,3 @@ permissions:
 jobs:
   integrations:
     uses: ./.github/workflows/scan.yml
-    with:
-      ref: ${{ github.event.pull_request.head.sha || github.sha }}
