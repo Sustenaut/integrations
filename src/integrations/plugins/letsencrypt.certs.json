@@ -1,0 +1,24 @@
+{
+  "id": "letsencrypt.certs",
+  "provider": "Let's Encrypt",
+  "use": "Certificates through the ingress's ACME resolver",
+  "operations": [
+    {
+      "name": "renew",
+      "class": "S",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Configure the resolver on the ingress"
+  ],
+  "detect": {
+    "hosts": [
+      "*.letsencrypt.org"
+    ],
+    "patterns": [
+      "cert-manager\\.io/",
+      "certresolver"
+    ]
+  }
+}

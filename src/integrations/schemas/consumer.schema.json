@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sustenaut/integrations/blob/main/src/integrations/schemas/consumer.schema.json",
+  "title": "A repository's integrations.json: the plugins it uses and where",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "uses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["plugin", "paths"],
+        "additionalProperties": false,
+        "properties": {
+          "plugin": {"type": "string", "minLength": 1},
+          "paths": {"$ref": "#/$defs/strings", "description": "Path patterns: ** crosses directories; a trailing / means everything under it. Empty only for a manual plugin"}
+        }
+      }
+    },
+    "terraform": {
+      "type": "array",
+      "description": "Terraform stacks. Each plugin is declared for everything under dir",
+      "items": {
+        "type": "object",
+        "required": ["dir", "plugins", "runs"],
+        "additionalProperties": false,
+        "properties": {
+          "dir": {"type": "string", "minLength": 1},
+          "plugins": {"$ref": "#/$defs/strings"},
+          "runs": {"type": "array", "items": {"enum": ["laptop", "actions"]}}
+        }
+      }
+    },
+    "own_hosts": {"$ref": "#/$defs/strings", "description": "This owner's own domains; any name under them counts"},
+    "other_hosts": {"$ref": "#/$defs/reasoned_hosts"},
+    "other_secrets": {
+      "type": "array",
+      "description": "Workflow secrets that reach no outside provider, such as a deploy key to our own server",
+      "items": {
+        "type": "object",
+        "required": ["name", "reason"],
+        "additionalProperties": false,
+        "properties": {"name": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1}}
+      }
+    },
+    "exclude": {
+      "type": "array",
+      "description": "Paths the scan does not read, such as test fakes or generated data",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "additionalProperties": false,
+        "properties": {"path": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1}}
+      }
+    }
+  },
+  "$defs": {
+    "strings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "reasoned_hosts": {
+      "type": "array",
+      "description": "Hosts code names that are not a registered provider and need not be, each with the reason",
+      "items": {
+        "type": "object",
+        "required": ["host", "reason"],
+        "additionalProperties": false,
+        "properties": {"host": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

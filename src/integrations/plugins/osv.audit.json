@@ -1,0 +1,21 @@
+{
+  "id": "osv.audit",
+  "provider": "OSV",
+  "use": "Dependency audits",
+  "operations": [
+    {
+      "name": "audit",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [],
+  "detect": {
+    "hosts": [
+      "api.osv.dev"
+    ],
+    "actions": [
+      "google/osv-scanner-action"
+    ]
+  }
+}

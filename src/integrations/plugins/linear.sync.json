@@ -1,0 +1,30 @@
+{
+  "id": "linear.sync",
+  "provider": "Linear",
+  "use": "Issues, projects, cycles and resource sync",
+  "operations": [
+    {
+      "name": "sync",
+      "class": "S",
+      "route": "routed"
+    },
+    {
+      "name": "read",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create a Linear API key",
+    "Store it in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "api.linear.app",
+      "linear.app"
+    ],
+    "env": [
+      "LINEAR_API_KEY"
+    ]
+  }
+}

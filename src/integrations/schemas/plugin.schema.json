@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sustenaut/integrations/blob/main/src/integrations/schemas/plugin.schema.json",
+  "title": "An integration plugin: one way we use one provider",
+  "type": "object",
+  "required": ["id", "provider", "use", "operations", "setup", "detect"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$", "description": "provider.use; also the file's name"},
+    "provider": {"type": "string", "minLength": 1},
+    "use": {"type": "string", "minLength": 1},
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "class", "route"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "class": {"enum": ["H", "E", "S", "M"], "description": "classes.json gives its targets"},
+          "route": {"enum": ["routed", "reported", "none"], "description": "routed: through the service; reported: a vendor's own action makes the call and a record is posted; none: nothing to log"}
+        }
+      }
+    },
+    "setup": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "The manual steps, in order"},
+    "detect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {"$ref": "#/$defs/strings", "description": "Host names; *.name means any name under it"},
+        "env": {"$ref": "#/$defs/strings", "description": "Regexes for whole environment or secret names"},
+        "commands": {"$ref": "#/$defs/strings", "description": "Command names, found on shell lines and as argv[0]"},
+        "actions": {"$ref": "#/$defs/strings", "description": "Prefixes of a GitHub Action's uses: value"},
+        "terraform_providers": {"$ref": "#/$defs/strings", "description": "Provider sources, as namespace/name"},
+        "files": {"$ref": "#/$defs/strings", "description": "Path patterns whose presence is a use"},
+        "patterns": {"$ref": "#/$defs/strings", "description": "Other regexes, for a line of code or config"}
+      }
+    }
+  },
+  "if": {"properties": {"detect": {"maxProperties": 0}}},
+  "then": {"properties": {"operations": {"items": {"properties": {"class": {"const": "M"}}}}}},
+  "$defs": {
+    "strings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "comment": "What the scan never counts as an unregistered provider: names that identify a standard, a document or a local tool, which code names but does not call as a service, and what GitHub gives every workflow. Anything a repository alone uses goes in its integrations.json with a reason.",
+  "hosts": ["localhost", "example", "example.com", "example.org", "example.net", "example.eu", "invalid", "test", "local", "internal",
+            "w3.org", "schema.org", "purl.org", "xmlns.com", "json-schema.org", "ietf.org", "etsi.org", "rfc-editor.org", "apache.org", "creativecommons.org", "doi.org", "orcid.org", "wikipedia.org", "unitsofmeasure.org", "ucum.org", "sitemaps.org", "docs.rs", "rust-lang.org", "python.org", "nodejs.org", "mozilla.org", "astral.sh", "github.com", "githubusercontent.com"],
+  "secrets": ["GITHUB_TOKEN"],
+  "terraform_providers": ["hashicorp/random", "hashicorp/tls", "hashicorp/null", "hashicorp/local", "hashicorp/external", "hashicorp/time", "hashicorp/archive"]
+}

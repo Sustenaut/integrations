@@ -1,0 +1,14 @@
+{
+  "kind": "utility",
+  "bin": "integrations",
+  "ci": {
+    "language": "python",
+    "release": false
+  },
+  "protect": {
+    "checks": [
+      "ci / passed"
+    ],
+    "tags": false
+  }
+}

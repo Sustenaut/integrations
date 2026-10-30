@@ -1,0 +1,25 @@
+{
+  "id": "ilert.alert",
+  "provider": "iLert",
+  "use": "Alert routing",
+  "operations": [
+    {
+      "name": "alert",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the alert source",
+    "Store its key in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "*.ilert.com",
+      "ilert.com"
+    ],
+    "env": [
+      "[A-Z_]*ILERT_\\w+"
+    ]
+  }
+}

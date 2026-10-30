@@ -1,0 +1,27 @@
+{
+  "id": "slack.channel-heal",
+  "provider": "Slack",
+  "use": "Channel healing with the owner's token",
+  "operations": [
+    {
+      "name": "heal",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create an owner token with channel scopes",
+    "Store it in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "slack.com"
+    ],
+    "env": [
+      "[A-Z_]*SLACK[A-Z_]*(?:TOKEN|USER_ID)"
+    ],
+    "patterns": [
+      "conversations\\.(?:invite|unarchive|create)"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "github.board-read",
+  "provider": "GitHub",
+  "use": "REST and GraphQL reads for the release board, repos and rulesets",
+  "operations": [
+    {
+      "name": "read",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Install the reader GitHub App on the owner"
+  ],
+  "detect": {
+    "hosts": [
+      "api.github.com"
+    ],
+    "commands": [
+      "gh"
+    ],
+    "env": [
+      "GH_TOKEN"
+    ]
+  }
+}

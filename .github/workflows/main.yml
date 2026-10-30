@@ -1,0 +1,64 @@
+# Written by `pubkit sync` from the ci block of pubkit.json. Do not edit:
+# change pubkit.json and run `pubkit sync`.
+name: main
+
+on:
+  push: { branches: [main] }
+
+permissions:
+  contents: read
+
+jobs:
+  # Whether the merge queue already passed this commit: then the jobs
+  # it ran are skipped, and nothing here tests less than the queue did.
+  tested:
+    name: ci
+    uses: Sustenaut/pubkit/.github/workflows/job-tested.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    with: {"workflow": ".github/workflows/pr.yml"}
+    permissions:
+      actions: read
+      contents: read
+
+  functional:
+    name: ci
+    needs: [tested]
+    if: ${{ needs.tested.outputs.tested != 'true' }}
+    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+
+  audit:
+    name: ci
+    needs: [tested]
+    if: ${{ needs.tested.outputs.tested != 'true' }}
+    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+
+  osv:
+    name: ci
+    needs: [tested]
+    if: ${{ needs.tested.outputs.tested != 'true' }}
+    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+
+  sonar:
+    name: ci
+    needs: [tested, functional]
+    if: ${{ !failure() && !cancelled() }}
+    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    permissions:
+      actions: read
+      contents: read
+    with: {"reports": "sonar.python.coverage.reportPaths=*.xml", "layout": "-Dsonar.sources=src -Dsonar.tests=tests", "coverage-run": "${{ needs.tested.outputs.run-id }}"}
+    secrets: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' }
+
+  # The one check a ruleset requires: it passes only when every job
+  # above succeeded or, where the merge queue already passed the
+  # commit, was skipped for it. None is skipped for not being asked for.
+  passed:
+    name: ci / passed
+    if: always()
+    needs: [tested, functional, audit, osv, sonar]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "$RESULTS"
+          echo "$RESULTS" | jq -e --arg tested "$TESTED" '.tested.result == "success"
+            and all(.[]; .result == "success" or (.result == "skipped" and $tested == "true"))' > /dev/null
+        env: { RESULTS: '${{ toJSON(needs) }}', TESTED: '${{ needs.tested.outputs.tested }}' }

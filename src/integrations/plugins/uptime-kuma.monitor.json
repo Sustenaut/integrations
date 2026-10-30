@@ -1,0 +1,23 @@
+{
+  "id": "uptime-kuma.monitor",
+  "provider": "Uptime Kuma",
+  "use": "Monitors and status pages",
+  "operations": [
+    {
+      "name": "check",
+      "class": "S",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Install Uptime Kuma"
+  ],
+  "detect": {
+    "terraform_providers": [
+      "breml/uptimekuma"
+    ],
+    "env": [
+      "[A-Z_]*KUMA_\\w+"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "anthropic.api",
+  "provider": "Anthropic API",
+  "use": "Audit drafts and suggestions (kept unused)",
+  "operations": [
+    {
+      "name": "draft",
+      "class": "M",
+      "route": "none"
+    }
+  ],
+  "setup": [
+    "Create an API key",
+    "Store it in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "api.anthropic.com"
+    ],
+    "env": [
+      "ANTHROPIC_API_KEY"
+    ]
+  }
+}

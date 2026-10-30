@@ -1,0 +1,18 @@
+{
+  "id": "openssf.scorecard",
+  "provider": "OpenSSF Scorecard",
+  "use": "Security grades for the board",
+  "operations": [
+    {
+      "name": "read",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [],
+  "detect": {
+    "hosts": [
+      "api.securityscorecards.dev"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "cloudflare.dns",
+  "provider": "Cloudflare",
+  "use": "DNS and DNSSEC multi-signer",
+  "operations": [
+    {
+      "name": "reconcile",
+      "class": "E",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create a DNS-scoped API token",
+    "Store it in Bitwarden"
+  ],
+  "detect": {
+    "hosts": [
+      "api.cloudflare.com"
+    ],
+    "env": [
+      "CLOUDFLARE_API_TOKEN"
+    ]
+  }
+}

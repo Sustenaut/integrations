@@ -1,0 +1,29 @@
+{
+  "id": "github.edit-pr",
+  "provider": "GitHub",
+  "use": "Open a pull request from an edit made in a web editor",
+  "operations": [
+    {
+      "name": "open-pr",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Install a GitHub App with contents and pull-request write on the target repository"
+  ],
+  "detect": {
+    "hosts": [
+      "api.github.com"
+    ],
+    "commands": [
+      "gh"
+    ],
+    "env": [
+      "GH_TOKEN"
+    ],
+    "actions": [
+      "peter-evans/create-pull-request"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+# The functional suite's direct dependencies. Exact pins only; the resolved
+# set with hashes lives in requirements.lock. Regenerate it with `pubkit lock`.
+-r requirements-pubkit.txt
+# The tests hold the registry and consumer files to their JSON schemas.
+jsonschema==4.25.1
+# `make functional` measures the suite, the `integrations` processes it starts included.
+coverage==7.16.2

@@ -1,0 +1,28 @@
+{
+  "id": "github.ghcr",
+  "provider": "GitHub",
+  "use": "Container images in the GitHub Container Registry",
+  "operations": [
+    {
+      "name": "push",
+      "class": "E",
+      "route": "reported"
+    },
+    {
+      "name": "pull",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Grant the workflow packages: write"
+  ],
+  "detect": {
+    "hosts": [
+      "ghcr.io"
+    ],
+    "patterns": [
+      "\\bpackages:\\s*write\\b"
+    ]
+  }
+}

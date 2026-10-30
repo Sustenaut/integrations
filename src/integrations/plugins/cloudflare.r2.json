@@ -1,0 +1,24 @@
+{
+  "id": "cloudflare.r2",
+  "provider": "Cloudflare",
+  "use": "R2 and Functions behind a storage service",
+  "operations": [
+    {
+      "name": "store",
+      "class": "H",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Create the bucket",
+    "Bind it in wrangler.toml"
+  ],
+  "detect": {
+    "hosts": [
+      "*.r2.cloudflarestorage.com"
+    ],
+    "patterns": [
+      "\\br2_buckets\\b|\\bR2Bucket\\b"
+    ]
+  }
+}

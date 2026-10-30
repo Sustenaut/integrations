@@ -1,0 +1,28 @@
+{
+  "id": "sonarcloud.scan",
+  "provider": "SonarCloud",
+  "use": "Scans in CI",
+  "operations": [
+    {
+      "name": "scan",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create the project in SonarCloud with GitHub Actions analysis",
+    "Turn Automatic Analysis off",
+    "Send SONAR_TOKEN to the repository"
+  ],
+  "detect": {
+    "actions": [
+      "SonarSource/sonarqube-scan-action"
+    ],
+    "env": [
+      "SONAR_TOKEN"
+    ],
+    "files": [
+      "sonar-project.properties"
+    ]
+  }
+}

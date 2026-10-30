@@ -1,0 +1,6 @@
+{
+  "H": {"name": "human-driven", "trigger": "A person in one of our apps", "response_p95": "2 s to acknowledge, 10 s to finish", "uptime": "99.5% during working hours", "on_failure": "The app shows the error at once and keeps the person's edit"},
+  "E": {"name": "event-driven", "trigger": "A machine event from our side: a push, a tag, a merge, a deploy", "response_p95": "5 min", "uptime": "99%", "on_failure": "Retry with backoff, then alert in Slack"},
+  "S": {"name": "scheduled", "trigger": "A timer", "response_p95": "Within its window (e.g. hourly)", "uptime": "Missed runs counted", "on_failure": "The next run catches up; two misses alert"},
+  "M": {"name": "manual setup", "trigger": "A person following steps outside our code", "response_p95": "None", "uptime": "None", "on_failure": "A checklist step stays open until check() confirms it"}
+}

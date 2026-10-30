@@ -1,0 +1,29 @@
+{
+  "id": "cloudflare.pages",
+  "provider": "Cloudflare",
+  "use": "Pages deploys",
+  "operations": [
+    {
+      "name": "deploy",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create the Pages project",
+    "Create a Pages-scoped API token",
+    "Send the token and account id to the repository"
+  ],
+  "detect": {
+    "commands": [
+      "wrangler"
+    ],
+    "env": [
+      "CLOUDFLARE_(?:ACCOUNT_ID|PAGES_TOKEN|GITHUB_API_TOKEN)"
+    ],
+    "hosts": [
+      "api.cloudflare.com",
+      "*.pages.dev"
+    ]
+  }
+}

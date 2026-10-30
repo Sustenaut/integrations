@@ -1,0 +1,26 @@
+{
+  "id": "github.repo-ops",
+  "provider": "GitHub",
+  "use": "Releases, repository settings and other calls a job or tool makes with its own token",
+  "operations": [
+    {
+      "name": "call",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Grant the workflow the permission it needs, or sign in to gh"
+  ],
+  "detect": {
+    "hosts": [
+      "api.github.com"
+    ],
+    "commands": [
+      "gh"
+    ],
+    "env": [
+      "GH_TOKEN"
+    ]
+  }
+}

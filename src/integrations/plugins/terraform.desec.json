@@ -1,0 +1,20 @@
+{
+  "id": "terraform.desec",
+  "provider": "deSEC",
+  "use": "deSEC zones, through Terraform",
+  "operations": [
+    {
+      "name": "apply",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create a token for the provider and store it in the project's Bitwarden project"
+  ],
+  "detect": {
+    "terraform_providers": [
+      "valodim/desec"
+    ]
+  }
+}

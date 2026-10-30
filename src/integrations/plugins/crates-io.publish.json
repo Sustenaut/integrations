@@ -1,0 +1,30 @@
+{
+  "id": "crates-io.publish",
+  "provider": "crates.io",
+  "use": "Publishing and version checks for crates",
+  "operations": [
+    {
+      "name": "setup",
+      "class": "M",
+      "route": "none"
+    },
+    {
+      "name": "publish",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Claim the crate name",
+    "Set up trusted publishing"
+  ],
+  "detect": {
+    "hosts": [
+      "crates.io",
+      "static.crates.io"
+    ],
+    "patterns": [
+      "\\bcargo publish\\b"
+    ]
+  }
+}

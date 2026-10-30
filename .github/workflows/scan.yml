@@ -1,0 +1,35 @@
+# Compare a repository's calls to outside services with its integrations.json.
+# A repository calls this, pinned by commit like every other reusable workflow:
+#
+#   jobs:
+#     scan:
+#       uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
+#
+# It runs the scanner at the commit the caller pinned, from a plain checkout:
+# the scanner needs Python and nothing else, and no job here has secrets.
+name: scan
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+        description: The scanner's commit. Only this repository's own CI gives it; a caller's pin decides otherwise.
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with: { path: repository, persist-credentials: false }
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: Sustenaut/integrations
+          ref: ${{ inputs.ref || github.job_workflow_sha }}
+          path: scanner
+          persist-credentials: false
+      - run: scanner/bin/integrations scan repository
