@@ -2,7 +2,7 @@
 # A repository calls this, pinned by commit like every other reusable workflow:
 #
 #   jobs:
-#     scan:
+#     integrations:
 #       uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
 #
 # It runs the scanner at the commit the caller pinned, from a plain checkout:

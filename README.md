@@ -94,7 +94,7 @@ permissions:
   contents: read
 
 jobs:
-  scan:
+  integrations:
     uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
 ```
 
