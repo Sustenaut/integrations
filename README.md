@@ -77,8 +77,14 @@ It fails, exit code 1, listing `file:line` for each:
 Exit code 2 means it could not compare: no `integrations.json`, or a bad one.
 
 It reads code and configuration, not prose: Markdown, lock files and comment
-lines are skipped. It sees only the repository it is given, so a call a
-reusable workflow makes belongs to the repository that holds the workflow.
+lines are skipped.
+
+## Shared packages
+
+An integration is counted in the repository whose code makes the call. A package
+or reusable workflow declares its own uses, and the repositories that consume it
+do not declare them again. This is also what the scan can see, since it reads
+only the repository it is given.
 
 ## In CI
 

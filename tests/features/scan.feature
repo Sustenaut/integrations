@@ -126,6 +126,13 @@ Feature: Comparing a repository's calls with its integrations.json
     When I scan it
     Then it succeeds
 
+  Scenario: An SDK import is a use
+    Given a repository with "draft.py" containing "    import anthropic"
+    And its integrations.json declares nothing
+    When I scan it
+    Then it fails
+    And it prints "draft.py:1: undeclared"
+
   Scenario: A file's presence can be a use
     Given a repository with "with-secrets.json" containing "{}"
     And its integrations.json declares nothing
