@@ -28,6 +28,9 @@
     ],
     "hosts": [
       "api.github.com"
+    ],
+    "patterns": [
+      "\\bintegrations\\.clients\\.github_app_token\\b"
     ]
   },
   "settings": {

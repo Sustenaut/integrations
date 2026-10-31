@@ -178,6 +178,12 @@ Feature: Comparing a repository's calls with its integrations.json
     Then it fails
     And it prints "draft.py:1: undeclared"
 
+  Scenario: Using a client here is a use of its plugin
+    Given a repository with "app.py" containing "from integrations.clients.github_edit_pr import Change"
+    And its integrations.json declares "github.edit-pr" in "app.py"
+    When I scan it
+    Then it succeeds
+
   Scenario: A file's presence can be a use
     Given a repository with "with-secrets.json" containing "{}"
     And its integrations.json declares nothing
