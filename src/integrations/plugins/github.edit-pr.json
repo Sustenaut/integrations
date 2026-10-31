@@ -29,6 +29,9 @@
     ],
     "actions": [
       "peter-evans/create-pull-request"
+    ],
+    "patterns": [
+      "\\bintegrations\\.clients\\.github_edit_pr\\b"
     ]
   },
   "settings": {

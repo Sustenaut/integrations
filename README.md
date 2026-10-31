@@ -104,7 +104,8 @@ lines are skipped.
 
 An integration is counted in the repository whose code makes the call. A package
 or reusable workflow declares its own uses, and the repositories that consume it
-do not declare them again. This is also what the scan can see, since it reads
+do not declare them again. This library's clients are the exception: importing one
+is how a repository makes that call, so it declares the plugin. This is also what the scan can see, since it reads
 only the repository it is given.
 
 ## In CI
@@ -141,7 +142,9 @@ pulls = EditPullRequests(caller, token, "owner/name")
 url = pulls.propose(stem="edit/card-", changes=[Change("a.md", old, new)], title=title, body=body)
 ```
 
-Each client module has a fake with the same methods, for a program's tests, and a
+A repository that imports a client declares that plugin in its `integrations.json`,
+so its mode and paths are still its own: an import of a client is the plugin's
+signature. Each client module has a fake with the same methods, for a program's tests, and a
 `check()` that says whether the plugin works now. `health()` turns checks into
 what mode means: a required plugin that fails makes a service unhealthy, and an
 advisory one only alerts.
