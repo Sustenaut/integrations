@@ -53,6 +53,21 @@ def declares_no_paths(repository, plugin):
     declare(repository, uses=[{"plugin": plugin, "paths": []}])
 
 
+@given(parsers.parse('its integrations.json declares "{plugin}" in "{paths}" as advisory'))
+def declares_advisory(repository, plugin, paths):
+    declare(repository, uses=[{"plugin": plugin, "paths": paths.split(","), "mode": "advisory"}])
+
+
+@given(parsers.parse('its integrations.json declares "{plugin}" as advisory with no paths'))
+def declares_advisory_no_paths(repository, plugin):
+    declare(repository, uses=[{"plugin": plugin, "paths": [], "mode": "advisory"}])
+
+
+@given(parsers.parse('its integrations.json has an advisory stack "{where}" with "{plugin}"'))
+def advisory_stack(repository, where, plugin):
+    declare(repository, terraform=[{"dir": where, "plugins": [plugin], "runs": [], "mode": "advisory"}])
+
+
 @given(parsers.parse('its integrations.json lists "{key}" entry "{name}" "{value}"'))
 def lists(repository, key, name, value):
     declare(repository, **{key: [{name: value, "reason": "because"}]})
@@ -71,6 +86,11 @@ def stack(repository, where, plugin):
 @when("I scan it", target_fixture="result")
 def scan_it(run, binary, repository):
     return run(binary("integrations"), "scan", str(repository))
+
+
+@when("I scan it in GitHub Actions", target_fixture="result")
+def scan_in_actions(run, binary, repository):
+    return run(binary("integrations"), "scan", str(repository), env={"GITHUB_ACTIONS": "true"})
 
 
 @when(parsers.parse('I scan the path "{path}"'), target_fixture="result")

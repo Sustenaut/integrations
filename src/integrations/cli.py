@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -20,6 +21,16 @@ def print_report(report) -> None:
         print(f"{FILE}: stale: {line}")
     for line in report.unregistered:
         print(line)
+    for line in report.advisory_stale:
+        warn(f"{FILE}: advisory: stale: {line}")
+
+
+def warn(line: str) -> None:
+    """A finding that does not fail the scan: in a passing job's log nobody
+    reads it, so in CI it is also an annotation."""
+    print(line)
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::warning file={FILE}::{line}")
 
 
 def suggest(scanner: Scanner, root: Path) -> dict:
@@ -59,7 +70,9 @@ def scan(path: str, draft: bool) -> int:
         print(f"{len(report.undeclared)} undeclared, {len(report.stale)} stale, "
               f"{len(report.unregistered)} unregistered", file=sys.stderr)
         return 1
-    print(f"{len(consumer.uses)} uses declared, {len(report.hits)} signature hits, all accounted for")
+    advisory = len(report.advisory_stale)
+    print(f"{len(consumer.uses)} uses declared, {len(report.hits)} signature hits, all accounted for"
+          + (f", with {advisory} advisory findings" if advisory else ""))
     return 0
 
 

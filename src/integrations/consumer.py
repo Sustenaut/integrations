@@ -14,6 +14,7 @@ from pathlib import Path
 
 FILE = "integrations.json"
 RUNS = {"laptop", "actions"}
+MODES = {"required", "advisory"}
 KEYS = {"$schema", "uses", "terraform", "own_hosts", "other_hosts", "other_secrets", "exclude"}
 
 
@@ -45,6 +46,7 @@ def glob_regex(pattern: str) -> re.Pattern[str]:
 class Use:
     plugin: str
     paths: list[str]
+    advisory: bool = False
     regexes: list[re.Pattern[str]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -84,6 +86,13 @@ def _reasoned(data: dict, key: str, name: str) -> list[dict]:
     return entries
 
 
+def _advisory(entry: dict, where: str) -> bool:
+    mode = entry.get("mode", "required")
+    if mode not in MODES:
+        raise BadConsumer(f"{where}.mode must be required or advisory")
+    return mode == "advisory"
+
+
 def parse(data: object, known: set[str]) -> Consumer:
     if not isinstance(data, dict):
         raise BadConsumer("it must be a JSON object")
@@ -94,20 +103,21 @@ def parse(data: object, known: set[str]) -> Consumer:
         raise BadConsumer("uses must be a list")
     uses = []
     for i, use in enumerate(raw_uses):
-        if not isinstance(use, dict) or set(use) != {"plugin", "paths"}:
-            raise BadConsumer(f'uses[{i}] must be {{"plugin": ..., "paths": [...]}}')
-        uses.append(Use(use["plugin"], _strings(use["paths"], f"uses[{i}].paths")))
+        if not isinstance(use, dict) or not {"plugin", "paths"} <= set(use) <= {"plugin", "paths", "mode"}:
+            raise BadConsumer(f'uses[{i}] must be {{"plugin": ..., "paths": [...]}}, with an optional "mode"')
+        uses.append(Use(use["plugin"], _strings(use["paths"], f"uses[{i}].paths"), _advisory(use, f"uses[{i}]")))
     raw_stacks = data.get("terraform", [])
     if not isinstance(raw_stacks, list):
         raise BadConsumer("terraform must be a list")
     for i, stack in enumerate(raw_stacks):
-        if not isinstance(stack, dict) or set(stack) != {"dir", "plugins", "runs"}:
-            raise BadConsumer(f'terraform[{i}] must be {{"dir": ..., "plugins": [...], "runs": [...]}}')
+        if not isinstance(stack, dict) or not {"dir", "plugins", "runs"} <= set(stack) <= {"dir", "plugins", "runs", "mode"}:
+            raise BadConsumer(f'terraform[{i}] must be {{"dir": ..., "plugins": [...], "runs": [...]}}, with an optional "mode"')
         if not set(_strings(stack["runs"], f"terraform[{i}].runs")) <= RUNS:
             raise BadConsumer(f"terraform[{i}].runs may name only {', '.join(sorted(RUNS))}")
         where = stack["dir"].rstrip("/")
         pattern = "**" if where in ("", ".") else f"{where}/**"
-        uses += [Use(p, [pattern]) for p in _strings(stack["plugins"], f"terraform[{i}].plugins")]
+        advisory = _advisory(stack, f"terraform[{i}]")
+        uses += [Use(p, [pattern], advisory) for p in _strings(stack["plugins"], f"terraform[{i}].plugins")]
     for use in uses:
         if use.plugin not in known:
             raise BadConsumer(f"{use.plugin} is not a registered plugin")
