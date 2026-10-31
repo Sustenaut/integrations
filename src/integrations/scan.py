@@ -9,6 +9,10 @@ Signatures only find what the registry already knows, so three checks catch a
 provider it does not: a URL in code on a host no plugin names, a secret a
 workflow reads that no plugin names, and a Terraform provider no plugin names.
 Each must be registered, or listed in integrations.json with a reason.
+
+A use whose mode is advisory may be stale without failing the scan, so a
+repository can declare a backup or an integration still being built. A signature
+hit that no use covers fails whatever the modes.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .consumer import FILE, Consumer, glob_regex
@@ -61,6 +65,7 @@ class Report:
     undeclared: list[Hit]
     stale: list[str]
     unregistered: list[str]
+    advisory_stale: list[str] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
@@ -211,17 +216,19 @@ class Scanner:
                 continue
             for found in self.scan_file(path, relative, consumer):
                 (hits if isinstance(found, Hit) else unregistered).append(found)
-        return Report(hits, self._undeclared(hits, consumer), self._stale(hits, consumer),
-                      sorted(set(unregistered)))
+        stale, advisory_stale = self._stale(hits, consumer)
+        return Report(hits, self._undeclared(hits, consumer), stale, sorted(set(unregistered)), advisory_stale)
 
     @staticmethod
     def _undeclared(hits: list[Hit], consumer: Consumer) -> list[Hit]:
         return [hit for hit in hits
                 if not any(u.plugin in hit.plugins and u.covers(hit.path) for u in consumer.uses)]
 
-    def _stale(self, hits: list[Hit], consumer: Consumer) -> list[str]:
-        stale = []
+    def _stale(self, hits: list[Hit], consumer: Consumer) -> tuple[list[str], list[str]]:
+        required: list[str] = []
+        advisory: list[str] = []
         for use in consumer.uses:
+            stale = advisory if use.advisory else required
             if self.plugins[use.plugin].manual:
                 continue
             if not use.paths:
@@ -230,4 +237,4 @@ class Scanner:
             for pattern, regex in zip(use.paths, use.regexes):
                 if not any(regex.match(h.path) for h in own):
                     stale.append(f"{use.plugin}: nothing in {pattern} uses it")
-        return stale
+        return required, advisory

@@ -57,6 +57,26 @@ The registry names no consumer. Each repository says what it uses, in its own
 In `paths`, `**` crosses directories, `*` and `?` do not, and a trailing `/`
 means everything under that directory.
 
+## Required or advisory
+
+Each repository chooses, per integration, by giving a use or a Terraform stack a
+`mode`. It is `required` unless it says otherwise.
+
+```json
+{ "plugin": "linear.sync", "paths": ["tools/linear_api.py"], "mode": "advisory" }
+```
+
+An advisory use is a backup, or an integration being built for a version not
+released yet. If it is stale or names no paths, the scan warns, as an annotation
+in CI, and passes. A required use in that state fails.
+
+A signature hit that no use covers always fails, whatever the modes: code reaching
+a provider must be declared, even if only as advisory for those paths.
+
+`mode` will also drive runtime health once the service runs (phase 5): a required
+integration being down makes the service unhealthy, and an advisory one being down
+only alerts. Nothing reads it for that yet.
+
 ## The scan
 
 ```sh
@@ -68,7 +88,8 @@ It fails, exit code 1, listing `file:line` for each:
 
 - **undeclared:** a signature is found, and no plugin holding it is declared for
   that file. Where several plugins share a signature, any of them will do.
-- **stale:** a declared path holds no signature of its plugin.
+- **stale:** a required use's path holds no signature of its plugin, or a plugin
+  that has signatures names no paths.
 - **unregistered:** something that may be a provider the registry does not know:
   a URL in code on a host no plugin names, a workflow secret no plugin names, or
   a Terraform provider no plugin names. Register it, or list it in

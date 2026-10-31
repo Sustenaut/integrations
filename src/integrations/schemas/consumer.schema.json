@@ -14,7 +14,8 @@
         "additionalProperties": false,
         "properties": {
           "plugin": {"type": "string", "minLength": 1},
-          "paths": {"$ref": "#/$defs/strings", "description": "Path patterns: ** crosses directories; a trailing / means everything under it. Empty only for a manual plugin"}
+          "paths": {"$ref": "#/$defs/strings", "description": "Path patterns: ** crosses directories; a trailing / means everything under it. Empty only for a manual plugin or an advisory use"},
+          "mode": {"$ref": "#/$defs/mode"}
         }
       }
     },
@@ -28,7 +29,8 @@
         "properties": {
           "dir": {"type": "string", "minLength": 1},
           "plugins": {"$ref": "#/$defs/strings"},
-          "runs": {"type": "array", "items": {"enum": ["laptop", "actions"]}}
+          "runs": {"type": "array", "items": {"enum": ["laptop", "actions"]}},
+          "mode": {"$ref": "#/$defs/mode"}
         }
       }
     },
@@ -56,6 +58,7 @@
     }
   },
   "$defs": {
+    "mode": {"enum": ["required", "advisory"], "default": "required", "description": "advisory: a stale declaration warns and does not fail the scan. An undeclared hit always fails"},
     "strings": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "reasoned_hosts": {
       "type": "array",

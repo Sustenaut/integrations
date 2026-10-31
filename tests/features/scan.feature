@@ -44,6 +44,51 @@ Feature: Comparing a repository's calls with its integrations.json
     Then it fails
     And it prints "stale: linear.sync: it names no paths"
 
+  Scenario: An advisory use with no hit warns and passes
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json declares "linear.sync" in "a.py" as advisory
+    When I scan it
+    Then it succeeds
+    And it prints "advisory: stale: linear.sync: nothing in a.py uses it"
+    And it prints "with 1 advisory findings"
+
+  Scenario: An advisory use may name no paths yet
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json declares "linear.sync" as advisory with no paths
+    When I scan it
+    Then it succeeds
+    And it prints "advisory: stale: linear.sync: it names no paths"
+
+  Scenario: A hit outside an advisory use's paths still fails
+    Given a repository with "a.py" containing "LINEAR_API_KEY"
+    And the repository has "b.py" containing "LINEAR_API_KEY"
+    And its integrations.json declares "linear.sync" in "a.py" as advisory
+    When I scan it
+    Then it fails
+    And it prints "b.py:1: undeclared: LINEAR_API_KEY"
+
+  Scenario: A required use beside an advisory one still fails
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json declares "linear.sync" in "a.py" as advisory
+    And its integrations.json declares "anthropic.api" in "a.py"
+    When I scan it
+    Then it fails
+    And it prints "stale: anthropic.api: nothing in a.py uses it"
+
+  Scenario: An advisory finding is an annotation in CI
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json declares "linear.sync" in "a.py" as advisory
+    When I scan it in GitHub Actions
+    Then it succeeds
+    And it prints "::warning file=integrations.json::"
+
+  Scenario: A Terraform stack can be advisory
+    Given a repository with "a.py" containing "print('hello')"
+    And its integrations.json has an advisory stack "infra" with "terraform.hetzner"
+    When I scan it
+    Then it succeeds
+    And it prints "advisory: stale: terraform.hetzner"
+
   Scenario: A signature several plugins share is declared by any of them
     Given a repository with "lib/pr.py" containing "https://api.github.com/repos"
     And its integrations.json declares "github.edit-pr" in "lib/"
