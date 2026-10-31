@@ -5,3 +5,5 @@
 jsonschema==4.25.1
 # `make functional` measures the suite, the `integrations` processes it starts included.
 coverage==7.16.2
+# The github-app extra, which the tests of github.app-token use.
+cryptography==50.0.2

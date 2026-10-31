@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sustenaut/integrations/blob/main/src/integrations/schemas/call-record.schema.json",
+  "title": "One call to an outside service. Python and JavaScript clients write the same record. It holds no body, full URL, token or personal data",
+  "type": "object",
+  "required": ["at", "repo", "app", "plugin", "operation", "request_id", "latency_ms", "status", "outcome", "retries", "bytes_in", "bytes_out", "mode", "route"],
+  "additionalProperties": false,
+  "properties": {
+    "at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "repo": {"type": "string", "minLength": 1},
+    "app": {"type": "string"},
+    "plugin": {"type": "string", "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$"},
+    "operation": {"type": "string", "minLength": 1},
+    "request_id": {"type": "string", "minLength": 1},
+    "latency_ms": {"type": "integer", "minimum": 0},
+    "status": {"type": ["integer", "null"], "description": "The last HTTP status; null when nothing answered"},
+    "outcome": {"enum": ["ok", "refused", "unavailable"]},
+    "retries": {"type": "integer", "minimum": 0},
+    "bytes_in": {"type": "integer", "minimum": 0},
+    "bytes_out": {"type": "integer", "minimum": 0},
+    "mode": {"enum": ["required", "advisory"]},
+    "route": {"enum": ["routed", "reported", "none"]}
+  }
+}

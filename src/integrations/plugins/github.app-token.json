@@ -7,6 +7,11 @@
       "name": "mint",
       "class": "E",
       "route": "reported"
+    },
+    {
+      "name": "mint-in-app",
+      "class": "H",
+      "route": "routed"
     }
   ],
   "setup": [
@@ -24,5 +29,26 @@
     "hosts": [
       "api.github.com"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "app_id",
+      "private_key",
+      "installation_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "app_id": {
+        "type": "string"
+      },
+      "private_key": {
+        "type": "string",
+        "description": "The app's PEM key, from the project's Bitwarden project"
+      },
+      "installation_id": {
+        "type": "string"
+      }
+    }
   }
 }

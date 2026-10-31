@@ -125,6 +125,51 @@ jobs:
     uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
 ```
 
+## The library
+
+A program calls an outside service through a client here. Every client makes
+its calls through one `Caller`, which writes one record per call.
+
+```python
+from integrations.calls import Caller, read_modes
+from integrations.clients.github_app_token import AppToken
+from integrations.clients.github_edit_pr import Change, EditPullRequests
+
+caller = Caller("my-repo", "web", modes=read_modes(Path(".")))
+token = AppToken(caller, app_id, private_key, installation_id)
+pulls = EditPullRequests(caller, token, "owner/name")
+url = pulls.propose(stem="edit/card-", changes=[Change("a.md", old, new)], title=title, body=body)
+```
+
+Each client module has a fake with the same methods, for a program's tests, and a
+`check()` that says whether the plugin works now. `health()` turns checks into
+what mode means: a required plugin that fails makes a service unhealthy, and an
+advisory one only alerts.
+
+A record, described by `schemas/call-record.schema.json`, says who called what,
+how long it took and how it ended. It holds no body, full URL, token or personal
+data. It goes to the `Caller`'s sink, which keeps nothing by default;
+`JsonlSink` writes a file.
+
+An operation's class sets its timeout and tries. A call is tried again only when
+nothing answered or the provider asked for it (429, 502, 503, 504), and only if it
+is safe to repeat. A provider's refusal comes back to the client. No answer, or a
+failure, raises `Unavailable`, whatever the mode: a failure is never swallowed.
+
+Install it from a release's wheel, pinned by URL and hash:
+
+```
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.2.0/integrations-0.2.0-py3-none-any.whl
+```
+
+### Releasing
+
+Change `version` in `pyproject.toml` and `__version__` together. When that reaches
+`main`, `wheel.yml` tags it, makes the release and attaches the wheel.
+
+JavaScript clients keep their own package and write the same record: `pubpr` is
+`github.edit-pr` in the browser.
+
 ## Working here
 
 ```sh
