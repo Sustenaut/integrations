@@ -19,6 +19,9 @@
     ],
     "env": [
       "ANTHROPIC_API_KEY"
+    ],
+    "patterns": [
+      "^\\s*(?:import|from)\\s+anthropic\\b"
     ]
   }
 }
