@@ -1,5 +1,8 @@
 #!/bin/sh
 # Runs integrations from this checkout. It needs Python and nothing else, so
-# the reusable scan workflow can run it from a plain checkout.
+# the reusable scan workflow can run it from a plain checkout; a .venv, where
+# there is one, lets the test suite measure these processes.
 here=$(cd "$(dirname "$0")/.." && pwd)
-PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m integrations "$@"
+py="$here/.venv/bin/python"
+[ -x "$py" ] || py=python3
+PYTHONPATH="$here/src${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m integrations "$@"
