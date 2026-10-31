@@ -23,6 +23,7 @@
         }
       }
     },
+    "settings": {"type": "object", "description": "A JSON schema for what a repository gives the plugin's client"},
     "setup": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "The manual steps, in order"},
     "detect": {
       "type": "object",

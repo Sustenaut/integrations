@@ -7,6 +7,11 @@
       "name": "open-pr",
       "class": "H",
       "route": "routed"
+    },
+    {
+      "name": "check",
+      "class": "S",
+      "route": "routed"
     }
   ],
   "setup": [
@@ -25,5 +30,22 @@
     "actions": [
       "peter-evans/create-pull-request"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "repo"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "repo": {
+        "type": "string",
+        "description": "owner/name of the repository edits go to"
+      },
+      "base": {
+        "type": "string",
+        "default": "main"
+      }
+    }
   }
 }

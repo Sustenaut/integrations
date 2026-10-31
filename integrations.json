@@ -1,6 +1,27 @@
 {
   "uses": [
     {
+      "plugin": "github.app-token",
+      "paths": [
+        "src/integrations/clients/github_app_token.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.edit-pr",
+      "paths": [
+        "src/integrations/clients/github_edit_pr.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.repo-ops",
+      "paths": [
+        ".github/workflows/wheel.yml"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "sonarcloud.scan",
       "paths": [
         ".github/workflows/pr.yml",
