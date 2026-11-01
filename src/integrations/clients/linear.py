@@ -37,7 +37,8 @@ class LinearClient:
         body = json.dumps({"query": query, "variables": variables or {}}).encode()
         response = self.caller.call(self.plugin, self.operation, Request(
             "POST", API, {"Content-Type": "application/json", "Authorization": self.key()}, body,
-            repeatable=not MUTATION.match(query)), request_id=request_id)
+            repeatable=not MUTATION.match(query)), request_id=request_id,
+            refused=lambda r: bool(r.json().get("errors")))
         if not response.ok:
             raise Refused(self.plugin, self.operation, _reason(response.body, response.status))
         out = response.json()

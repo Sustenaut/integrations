@@ -8,7 +8,8 @@
   "protect": {
     "checks": [
       "ci / passed",
-      "integrations / scan"
+      "integrations / scan",
+      "clients"
     ],
     "tags": false
   }
