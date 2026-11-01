@@ -14,7 +14,7 @@ from typing import Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request as HttpRequest
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -103,6 +103,10 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
 
     if settings.docs_dir:
         app.mount("/docs", StaticFiles(directory=settings.docs_dir, html=True), name="docs")
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse("/docs/")
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict[str, str]:

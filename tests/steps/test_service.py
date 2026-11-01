@@ -250,6 +250,11 @@ def test_a_bad_proposal_is_a_validation_error():
     assert not transport.sent
 
 
+def test_the_address_alone_leads_to_the_docs():
+    response = service()[0].get("/", follow_redirects=False)
+    assert response.status_code == 307 and response.headers["location"] == "/docs/"
+
+
 def test_healthz_needs_nothing():
     client, _, _ = service()
     assert client.get("/healthz").json() == {"status": "ok"}
