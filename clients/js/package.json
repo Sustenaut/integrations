@@ -6,14 +6,16 @@
   "scripts": {
     "generate": "node generate.mjs",
     "test": "node --test test/*.test.mjs",
-    "mock": "prism mock ../../openapi/integrations.json",
+    "mock": "npx --yes @stoplight/prism-cli@5.16.0 mock ../../openapi/integrations.json",
     "docs": "redocly build-docs ../../openapi/integrations.json -o docs-site/index.html"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
     "@redocly/cli": "2.72.1",
-    "@stoplight/prism-cli": "5.16.0",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "js-yaml": "4.3.2"
   }
 }

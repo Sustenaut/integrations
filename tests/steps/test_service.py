@@ -265,4 +265,4 @@ def test_the_built_docs_are_served_and_the_interactive_ones_are_off(tmp_path):
 
 def test_the_committed_spec_is_what_the_service_gives():
     committed = (Path(__file__).parents[2] / "openapi" / "integrations.json").read_text()
-    assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec openapi/integrations.json"
+    assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec > openapi/integrations.json"
