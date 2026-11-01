@@ -12,6 +12,11 @@
       "name": "read",
       "class": "H",
       "route": "routed"
+    },
+    {
+      "name": "check",
+      "class": "S",
+      "route": "routed"
     }
   ],
   "setup": [
@@ -25,6 +30,22 @@
     ],
     "env": [
       "LINEAR_API_KEY"
+    ],
+    "patterns": [
+      "\\bintegrations\\.clients\\.linear\\b"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "key"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "A Linear API key, from the project's Bitwarden project"
+      }
+    }
   }
 }
