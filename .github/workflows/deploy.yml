@@ -1,0 +1,81 @@
+# Builds the service's image on each merge to main, and sends it to the shared k3s
+# server over SSH, where the deploy key can only run sustenaut-deploy. SSH is
+# reachable over the tailnet only, so the job joins it first.
+#
+# What a deployment serves is in repository variables, so nothing here names a
+# consumer: INTEGRATIONS_EDIT_PR_REPOS and INTEGRATIONS_ORIGINS. Without
+# SUSTENAUT_SERVER the image is built and pushed, and nothing is deployed.
+name: deploy
+
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/sustenaut/sustenaut-integrations
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with: { persist-credentials: false }
+
+      - name: Build the image
+        run: docker build -t "${IMAGE}:${GITHUB_SHA}" .
+
+      - name: Check the image starts and serves its docs
+        run: |
+          docker run -d --name app -p 8080:8080 "${IMAGE}:${GITHUB_SHA}"
+          for _ in $(seq 30); do curl -fs localhost:8080/healthz && break; sleep 1; done
+          curl -fs localhost:8080/docs/ | grep -q 'Integrations service'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8080/v1/github/edit-pr/proposals)" != 200
+          docker rm -f app
+
+      - name: Push the image
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push "${IMAGE}:${GITHUB_SHA}"
+
+      - name: Render the manifests
+        working-directory: k8s
+        env:
+          REPOS: ${{ vars.INTEGRATIONS_EDIT_PR_REPOS }}
+          ORIGINS: ${{ vars.INTEGRATIONS_ORIGINS }}
+        run: |
+          kustomize edit set image "${IMAGE}=${IMAGE}:${GITHUB_SHA}"
+          kustomize edit add configmap settings \
+            --from-literal="INTEGRATIONS_EDIT_PR_REPOS=$REPOS" --from-literal="INTEGRATIONS_ORIGINS=$ORIGINS"
+          kustomize build . > "${RUNNER_TEMP}/integrations.yaml"
+          grep -q "${IMAGE}:${GITHUB_SHA}" "${RUNNER_TEMP}/integrations.yaml"
+
+      - name: Join the tailnet
+        if: vars.SUSTENAUT_SERVER != ''
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
+        with:
+          oauth-client-id: ${{ secrets.TS_GH_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_GH_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy to the k3s server
+        if: vars.SUSTENAUT_SERVER != ''
+        env:
+          DEPLOY_KEY: ${{ secrets.SUSTENAUT_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.SUSTENAUT_KNOWN_HOSTS }}
+          SERVER: ${{ vars.SUSTENAUT_SERVER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes "deploy@${SERVER}" integrations < "${RUNNER_TEMP}/integrations.yaml"

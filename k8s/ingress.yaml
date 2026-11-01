@@ -1,0 +1,26 @@
+# integrations.sustenaut.eu through the server's shared Traefik, with a Let's
+# Encrypt certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: integrations
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: integrations.sustenaut.eu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - integrations.sustenaut.eu

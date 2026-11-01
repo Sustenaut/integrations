@@ -1,0 +1,13 @@
+# The integrations service on the shared k3s server, namespace integrations.
+# Rendered by .github/workflows/deploy.yml, which sets the image it just built and
+# the settings a deployment names, and applied by sustenaut-deploy on the server.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: integrations
+resources:
+  - service-accounts.yaml
+  - app.yaml
+  - ingress.yaml
+images:
+  - name: ghcr.io/sustenaut/sustenaut-integrations
+    newTag: unset

@@ -1,0 +1,9 @@
+*
+!clients/js/package.json
+!clients/js/package-lock.json
+!openapi/
+!service-requirements.lock
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
