@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import contextmanager
 from typing import Callable, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request as HttpRequest
+from fastapi import Depends, FastAPI, HTTPException, Query, Request as HttpRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -21,10 +22,12 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..calls import Caller, IntegrationError, Sink, StdoutSink, Transport, Unavailable
-from ..clients.github_edit_pr import GitHubRefused, OneCommitProposer
+from ..clients.github_edit_pr import GitHubRefused, OneCommitProposer, RepositoryReader
 from .settings import Settings
 
 REQUEST_ID_HEADER = "X-Request-Id"
+REPO_PATTERN = r"^[\w.-]+/[\w.-]+$"
+MAX_FILES = 2000
 bearer = HTTPBearer(description="The person's own GitHub token. It is used for this request and never kept.")
 
 
@@ -47,7 +50,7 @@ class RateLimit:
 
 
 class Proposal(BaseModel):
-    repo: str = Field(pattern=r"^[\w.-]+/[\w.-]+$", description="owner/name")
+    repo: str = Field(pattern=REPO_PATTERN, description="owner/name")
     branch: str = Field(min_length=1, description="The new branch. A branch that exists already is refused.")
     title: str = Field(min_length=1)
     changes: dict[str, str | None] = Field(description="Each file's path, to its new text or to null to delete it.")
@@ -78,6 +81,24 @@ class Stale(BaseModel):
     path: str
 
 
+class Snapshot(BaseModel):
+    branch: str
+    commit: str
+    can_push: bool = Field(description="Whether this token may write to the repository.")
+    paths: list[str] = Field(description="Every file's path at the commit.")
+    truncated: bool = Field(description="GitHub left some paths out, as the repository is very large.")
+
+
+class FilesRequest(BaseModel):
+    repo: str = Field(pattern=REPO_PATTERN, description="owner/name")
+    commit: str = Field(min_length=1, description="The commit to read from.")
+    paths: list[str] = Field(max_length=MAX_FILES, description="The paths to read.")
+
+
+class Files(BaseModel):
+    files: dict[str, str | None] = Field(description="Each path, to its text or to null if it isn't there.")
+
+
 class Problem(BaseModel):
     detail: str | list[dict]
 
@@ -88,11 +109,31 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
     # A token could only reach a page's URL by mistake, so the interactive docs,
     # which load scripts from a CDN, are off. The docs are built from the spec.
     app = FastAPI(title="Integrations service", version=__version__, docs_url=None, redoc_url=None)
-    app.add_middleware(CORSMiddleware, allow_origins=sorted(settings.allowed_origins), allow_methods=["POST"],
+    app.add_middleware(CORSMiddleware, allow_origins=sorted(settings.allowed_origins), allow_methods=["GET", "POST"],
                        allow_headers=["authorization", "content-type", REQUEST_ID_HEADER.lower()],
                        allow_credentials=False)
     caller = Caller("integrations", "service", sink=sink or StdoutSink(), transport=transport)
     edit_pr_limit = RateLimit(settings.edit_pr_per_minute)
+    edit_pr_read_limit = RateLimit(settings.edit_pr_reads_per_minute)
+    problems = {code: {"model": Problem} for code in (401, 403, 404, 413, 422, 429, 502, 503)}
+
+    def served(repo: str, limit: RateLimit) -> None:
+        if repo not in settings.edit_pr_repos:
+            raise HTTPException(403, f"{repo} is not served here")
+        if not limit.allow():
+            raise HTTPException(429, "too many requests: try again in a minute")
+
+    @contextmanager
+    def githubs_answer():
+        """GitHub's refusal, or its silence, as the person should hear it."""
+        try:
+            yield
+        except GitHubRefused as e:
+            raise HTTPException(e.status, f"GitHub said {e.status}: {e.message}") from None
+        except Unavailable:
+            raise HTTPException(503, "GitHub did not answer: try again") from None
+        except IntegrationError:
+            raise HTTPException(502, "GitHub's answer could not be used") from None
 
     @app.middleware("http")
     async def limit_body(request: HttpRequest, call_next):
@@ -114,26 +155,39 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
 
     @app.post("/v1/github/edit-pr/proposals", tags=["github.edit-pr"], operation_id="propose",
               response_model=Opened | NothingToChange | Stale, response_model_exclude_none=True,
-              responses={code: {"model": Problem} for code in (401, 403, 404, 413, 422, 429, 502, 503)})
+              responses=problems)
     def propose(proposal: Proposal, request: HttpRequest,
                 credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
         """Open a pull request with one commit, as the person whose token this is."""
-        if proposal.repo not in settings.edit_pr_repos:
-            raise HTTPException(403, f"{proposal.repo} is not served here")
-        if not edit_pr_limit.allow():
-            raise HTTPException(429, "too many proposals: try again in a minute")
+        served(proposal.repo, edit_pr_limit)
         token = credentials.credentials
         proposer = OneCommitProposer(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER))
-        try:
+        with githubs_answer():
             return proposer.propose(repo=proposal.repo, branch=proposal.branch, title=proposal.title,
                                     changes=proposal.changes, body=proposal.body, base=proposal.base,
                                     message=proposal.message, parent=proposal.parent, expect=proposal.expect,
                                     auto_merge=proposal.autoMerge)
-        except GitHubRefused as e:
-            raise HTTPException(e.status, f"GitHub said {e.status}: {e.message}") from None
-        except Unavailable:
-            raise HTTPException(503, "GitHub did not answer: try again") from None
-        except IntegrationError:
-            raise HTTPException(502, "GitHub's answer could not be used") from None
+
+    @app.get("/v1/github/edit-pr/snapshot", tags=["github.edit-pr"], operation_id="snapshot", response_model=Snapshot,
+             responses=problems)
+    def snapshot(request: HttpRequest, repo: str = Query(pattern=REPO_PATTERN, description="owner/name"),
+                 branch: str | None = Query(default=None, description="By default, the repository's default branch."),
+                 credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
+        """The newest commit on a branch, every file's path at it, and whether this token may write."""
+        served(repo, edit_pr_read_limit)
+        token = credentials.credentials
+        with githubs_answer():
+            return RepositoryReader(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER)).snapshot(repo, branch)
+
+    @app.post("/v1/github/edit-pr/files", tags=["github.edit-pr"], operation_id="readFiles", response_model=Files,
+              responses=problems)
+    def read_files(asked: FilesRequest, request: HttpRequest,
+                   credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
+        """The text of many files at one commit, in one call."""
+        served(asked.repo, edit_pr_read_limit)
+        token = credentials.credentials
+        reader = RepositoryReader(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER))
+        with githubs_answer():
+            return {"files": reader.files(asked.repo, asked.commit, asked.paths)}
 
     return app

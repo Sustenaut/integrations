@@ -1,7 +1,7 @@
 // The generated client, on a stand-in for fetch.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { propose } from "../github-edit-pr.js";
+import { propose, readFiles, snapshot } from "../github-edit-pr.js";
 
 const answering = (status, value, seen = []) => async (request) => {
   seen.push(request);
@@ -44,4 +44,21 @@ test("a validation error has no single message, so it says the status", async ()
 test("it needs a service and a token", async () => {
   await assert.rejects(propose({ token: "t", ...fields }), /needs a baseUrl/);
   await assert.rejects(propose({ baseUrl: "https://s.example", ...fields }), /needs a token/);
+});
+
+test("a snapshot sends its fields in the query", async () => {
+  const seen = [];
+  const answer = { branch: "main", commit: "c", can_push: true, paths: ["a"], truncated: false };
+  const result = await snapshot({ baseUrl: "https://s.example", token: "t", fetch: answering(200, answer, seen), repo: "o/r" });
+  assert.deepEqual(result, answer);
+  assert.equal(seen[0].method, "GET");
+  assert.equal(seen[0].url, "https://s.example/v1/github/edit-pr/snapshot?repo=o%2Fr");
+  assert.equal(seen[0].headers.get("authorization"), "Bearer t");
+});
+
+test("files are read in one call, in the body", async () => {
+  const seen = [];
+  const result = await readFiles({ baseUrl: "https://s.example", token: "t", fetch: answering(200, { files: { a: "text", b: null } }, seen), repo: "o/r", commit: "c", paths: ["a", "b"] });
+  assert.deepEqual(result, { files: { a: "text", b: null } });
+  assert.deepEqual(await seen[0].json(), { repo: "o/r", commit: "c", paths: ["a", "b"] });
 });

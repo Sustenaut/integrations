@@ -9,23 +9,34 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const USE_CASES = [{ tag: "github.edit-pr", file: "github-edit-pr.js", calls: ["propose"] }];
+// Each call says where its fields go: a request's body, or its query.
+const USE_CASES = [
+  {
+    tag: "github.edit-pr",
+    file: "github-edit-pr.js",
+    calls: [
+      { name: "propose", fields: "body" },
+      { name: "snapshot", fields: "query" },
+      { name: "readFiles", fields: "body" },
+    ],
+  },
+];
 
 const HEADER = (tag) =>
   `// Generated from openapi/integrations.json by clients/js/generate.mjs: do not edit.\n// The ${tag} client of the integrations service.`;
 
 // Takes what the service's call takes, and baseUrl, token and fetch. Answers what
 // the service answers, or throws an Error with the response's status.
-const wrapper = (call) => `
-export async function ${call}({ baseUrl, token, fetch, requestId, ...fields }) {
-  if (!baseUrl) throw new TypeError("${call} needs a baseUrl");
-  if (!token) throw new TypeError("${call} needs a token");
-  const { data, error, response } = await generated.${call}({
+const wrapper = ({ name, fields }) => `
+export async function ${name}({ baseUrl, token, fetch, requestId, ...fields }) {
+  if (!baseUrl) throw new TypeError("${name} needs a baseUrl");
+  if (!token) throw new TypeError("${name} needs a token");
+  const { data, error, response } = await generated.${name}({
     baseUrl,
     fetch,
     auth: token,
     headers: requestId ? { "X-Request-Id": requestId } : undefined,
-    body: fields,
+    ${fields}: fields,
   });
   if (response.ok) return data;
   const detail = error?.detail;

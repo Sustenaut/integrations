@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.6.0/integrations-0.6.0-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.7.0/integrations-0.7.0-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,8 +192,10 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.6.0/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.7.0/clients/js/github-edit-pr.js";
 
+const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
+const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
 const result = await propose({ baseUrl, token, repo, branch, title, changes });
 ```
 
@@ -201,7 +203,8 @@ const result = await propose({ baseUrl, token, repo, branch, title, changes });
 request is theirs. The token is used for that request and forgotten: never stored
 or logged. A deployment names the repositories it serves and the sites that may
 call it, in `INTEGRATIONS_EDIT_PR_REPOS` and `INTEGRATIONS_ORIGINS`, and with none
-named it serves nothing. `INTEGRATIONS_EDIT_PR_PER_MINUTE` limits the plugin's calls.
+named it serves nothing. `INTEGRATIONS_EDIT_PR_PER_MINUTE` and `INTEGRATIONS_EDIT_PR_READS_PER_MINUTE` limit
+its proposals and reads.
 
 It runs on the shared k3s server, namespace `integrations`. `.github/workflows/deploy.yml`
 builds the image and applies `k8s/` on each merge to main. A new server needs

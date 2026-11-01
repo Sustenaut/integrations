@@ -12,6 +12,11 @@
       "name": "check",
       "class": "S",
       "route": "routed"
+    },
+    {
+      "name": "read",
+      "class": "H",
+      "route": "routed"
     }
   ],
   "setup": [
