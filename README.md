@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.5.0/integrations-0.5.0-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.6.0/integrations-0.6.0-py3-none-any.whl
 ```
 
 ### Releasing
@@ -177,8 +177,34 @@ integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/do
 Change `version` in `pyproject.toml` and `__version__` together. When that reaches
 `main`, `wheel.yml` tags it, makes the release and attaches the wheel.
 
-JavaScript clients keep their own package and write the same record: `pubpr` is
-`github.edit-pr` in the browser.
+## The service
+
+`integrations.service` is one API per use case, in FastAPI. `openapi/integrations.json`
+is generated from it and committed, and a test fails when they differ. From that
+spec come the JavaScript clients, the docs and a mock.
+
+| From the spec | How | Where |
+|---|---|---|
+| A client per use case | `npm run generate` in `clients/js` | `clients/js/github-edit-pr.js`, a dependency-free module |
+| Docs | `npm run docs` | `/docs/` on the service |
+| A mock | `npm run mock` | for a program's tests |
+
+A browser loads a client from jsDelivr at a release's tag, with its hash:
+
+```js
+import { propose } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.6.0/clients/js/github-edit-pr.js";
+
+const result = await propose({ baseUrl, token, repo, branch, title, changes });
+```
+
+`github.edit-pr` acts as the person whose token comes with the request, so the pull
+request is theirs. The token is used for that request and forgotten: never stored
+or logged. A deployment names the repositories it serves and the sites that may
+call it, in `INTEGRATIONS_EDIT_PR_REPOS` and `INTEGRATIONS_ORIGINS`, and with none
+named it serves nothing. `INTEGRATIONS_EDIT_PR_PER_MINUTE` limits the plugin's calls.
+
+To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
+`clients/js/generate.mjs`.
 
 ## Working here
 

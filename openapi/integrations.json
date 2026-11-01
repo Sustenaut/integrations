@@ -1,0 +1,364 @@
+{
+  "components": {
+    "schemas": {
+      "NothingToChange": {
+        "properties": {
+          "status": {
+            "const": "nothing to change",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "NothingToChange",
+        "type": "object"
+      },
+      "Opened": {
+        "properties": {
+          "autoMerge": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\"on\", \"merged\", or why GitHub refused.",
+            "title": "Automerge"
+          },
+          "branch": {
+            "title": "Branch",
+            "type": "string"
+          },
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "status": {
+            "const": "opened",
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "url",
+          "number",
+          "branch",
+          "commit"
+        ],
+        "title": "Opened",
+        "type": "object"
+      },
+      "Problem": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Problem",
+        "type": "object"
+      },
+      "Proposal": {
+        "properties": {
+          "autoMerge": {
+            "default": false,
+            "description": "Merge the pull request once its required checks pass.",
+            "title": "Automerge",
+            "type": "boolean"
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "By default, the repository's default branch.",
+            "title": "Base"
+          },
+          "body": {
+            "default": "",
+            "title": "Body",
+            "type": "string"
+          },
+          "branch": {
+            "description": "The new branch. A branch that exists already is refused.",
+            "minLength": 1,
+            "title": "Branch",
+            "type": "string"
+          },
+          "changes": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Each file's path, to its new text or to null to delete it.",
+            "title": "Changes",
+            "type": "object"
+          },
+          "expect": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Each path to the blob sha it was read at, or null if it was missing.",
+            "title": "Expect"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The commit's message. By default, the title and the body.",
+            "title": "Message"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The commit to build on, instead of the newest on base.",
+            "title": "Parent"
+          },
+          "repo": {
+            "description": "owner/name",
+            "pattern": "^[\\w.-]+/[\\w.-]+$",
+            "title": "Repo",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "branch",
+          "title",
+          "changes"
+        ],
+        "title": "Proposal",
+        "type": "object"
+      },
+      "Stale": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "status": {
+            "const": "stale",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "path"
+        ],
+        "title": "Stale",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "The person's own GitHub token. It is used for this request and never kept.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Integrations service",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/github/edit-pr/proposals": {
+      "post": {
+        "description": "Open a pull request with one commit, as the person whose token this is.",
+        "operationId": "propose",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Proposal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Opened"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NothingToChange"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Stale"
+                    }
+                  ],
+                  "title": "Response Propose"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Propose",
+        "tags": [
+          "github.edit-pr"
+        ]
+      }
+    }
+  }
+}
