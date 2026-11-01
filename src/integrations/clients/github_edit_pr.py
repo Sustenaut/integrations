@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import quote
@@ -25,6 +26,8 @@ from ..calls import Caller, Check, IntegrationError, Refused, Request, Response
 PLUGIN = "github.edit-pr"
 OPERATION = "open-pr"
 API = "https://api.github.com"
+# How many files are read from GitHub at once.
+READERS = 8
 
 
 @dataclass(frozen=True)
@@ -111,27 +114,67 @@ def _path(path: str) -> str:
     return quote(path, safe="/")
 
 
-class OneCommitProposer:
+class _AsThePerson:
+    """Calls GitHub with the token of the person who is asking."""
+
+    operation = OPERATION
+
     def __init__(self, caller: Caller, token: Callable[[], str], request_id: str | None = None):
         self.caller, self.token, self.request_id = caller, token, request_id
 
-    def _api(self, method: str, url: str, payload: dict | None = None) -> Response:
-        headers = {"Authorization": f"Bearer {self.token()}", "Accept": "application/vnd.github+json",
-                   "X-GitHub-Api-Version": "2022-11-28"}
+    def _api(self, method: str, url: str, payload: dict | None = None, *, raw: bool = False) -> Response:
+        headers = {"Authorization": f"Bearer {self.token()}", "X-GitHub-Api-Version": "2022-11-28",
+                   "Accept": "application/vnd.github.raw+json" if raw else "application/vnd.github+json"}
         body = None
         if payload is not None:
             headers["Content-Type"] = "application/json"
             body = json.dumps(payload).encode()
-        return self.caller.call(PLUGIN, OPERATION, Request(method, f"{API}{url}", headers, body),
+        return self.caller.call(PLUGIN, self.operation, Request(method, f"{API}{url}", headers, body),
                                 request_id=self.request_id)
 
     def _read(self, method: str, url: str, payload: dict | None = None) -> dict:
         response = self._api(method, url, payload)
         if not response.ok:
-            detail = response.json() if response.body.strip().startswith(b"{") else {}
-            raise GitHubRefused(OPERATION, response.status, detail.get("message", "refused"))
+            self._refuse(response)
         return response.json()
 
+    def _refuse(self, response: Response) -> None:
+        detail = response.json() if response.body.strip().startswith(b"{") else {}
+        raise GitHubRefused(self.operation, response.status, detail.get("message", "refused"))
+
+
+class RepositoryReader(_AsThePerson):
+    """What an editor reads before it proposes anything."""
+
+    operation = "read"
+
+    def snapshot(self, repo: str, branch: str | None = None) -> dict:
+        """The newest commit on a branch, by default the default one, every file's
+        path at it, and whether this token may write to the repository."""
+        at = f"/repos/{repo}"
+        about = self._read("GET", at)
+        target = branch or about["default_branch"]
+        commit = self._read("GET", f"{at}/git/ref/heads/{_path(target)}")["object"]["sha"]
+        tree = self._read("GET", f"{at}/git/trees/{commit}?recursive=1")
+        return {"branch": target, "commit": commit, "can_push": bool(about.get("permissions", {}).get("push")),
+                "paths": [t["path"] for t in tree["tree"] if t["type"] == "blob"],
+                "truncated": bool(tree.get("truncated"))}
+
+    def files(self, repo: str, commit: str, paths: list[str]) -> dict[str, str | None]:
+        """Each path's text at a commit, or None for a file that isn't there."""
+        with ThreadPoolExecutor(max_workers=READERS) as pool:
+            return dict(zip(paths, pool.map(lambda path: self._file(repo, commit, path), paths)))
+
+    def _file(self, repo: str, commit: str, path: str) -> str | None:
+        response = self._api("GET", f"/repos/{repo}/contents/{_path(path)}?ref={commit}", raw=True)
+        if response.status == 404:
+            return None
+        if not response.ok:
+            self._refuse(response)
+        return response.body.decode("utf-8")
+
+
+class OneCommitProposer(_AsThePerson):
     def _blob_sha(self, at: str, path: str, ref: str) -> str | None:
         """A file's blob sha at a commit, or None if it isn't there."""
         response = self._api("GET", f"{at}/contents/{_path(path)}?ref={ref}")

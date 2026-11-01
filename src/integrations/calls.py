@@ -126,6 +126,8 @@ class Replay:
             return Response(None, error="not recorded")
         if "error" in found:
             return Response(None, error=found["error"])
+        if "text" in found:
+            return Response(found["status"], found["text"].encode("utf-8"))
         return Response(found["status"], json.dumps(found.get("json")).encode("utf-8"))
 
 

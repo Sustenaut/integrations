@@ -263,6 +263,111 @@ def test_the_built_docs_are_served_and_the_interactive_ones_are_off(tmp_path):
     assert service()[0].get("/docs").status_code == 404
 
 
+SNAPSHOT = "/v1/github/edit-pr/snapshot"
+FILES = "/v1/github/edit-pr/files"
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def repository(**extra):
+    """What GitHub answers about a repository, and its files at a commit."""
+    return {
+        f"GET {AT}": {"status": 200, "json": {"default_branch": "main", "permissions": {"push": True}}},
+        f"GET {AT}/git/ref/heads/main": {"status": 200, "json": {"object": {"sha": "tip"}}},
+        f"GET {AT}/git/trees/tip?recursive=1": {"status": 200, "json": {"tree": [
+            {"path": "a.txt", "type": "blob"}, {"path": "dir", "type": "tree"}, {"path": "dir/b.txt", "type": "blob"}]}},
+        f"GET {AT}/contents/a.txt?ref=tip": {"status": 200, "text": "text of a"},
+        f"GET {AT}/contents/dir/b%C3%A4.txt?ref=tip": {"status": 200, "text": "text of b\u00e4"},
+        f"GET {AT}/contents/gone.txt?ref=tip": {"status": 404, "json": {}},
+        **extra,
+    }
+
+
+def test_a_snapshot_is_the_newest_commit_its_paths_and_whether_the_token_may_write():
+    client, transport, sink = service(repository())
+    response = client.get(SNAPSHOT, params={"repo": "o/r"}, headers={**AUTH, "X-Request-Id": "from-the-app"})
+    assert response.json() == {"branch": "main", "commit": "tip", "can_push": True,
+                               "paths": ["a.txt", "dir/b.txt"], "truncated": False}
+    assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in transport.sent)
+    assert {(r.plugin, r.operation, r.request_id) for r in sink.records} == {("github.edit-pr", "read", "from-the-app")}
+
+
+def test_a_snapshot_says_when_the_token_may_not_write_and_when_github_left_paths_out():
+    client, _, _ = service(repository(**{
+        f"GET {AT}": {"status": 200, "json": {"default_branch": "main", "permissions": {"push": False}}},
+        f"GET {AT}/git/trees/tip?recursive=1": {"status": 200, "json": {"tree": [], "truncated": True}}}))
+    answer = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).json()
+    assert answer["can_push"] is False and answer["truncated"] is True
+
+
+def test_a_snapshot_can_be_of_another_branch():
+    client, transport, _ = service(repository(**{
+        f"GET {AT}/git/ref/heads/dev": {"status": 200, "json": {"object": {"sha": "tip"}}}}))
+    assert client.get(SNAPSHOT, params={"repo": "o/r", "branch": "dev"}, headers=AUTH).json()["branch"] == "dev"
+    assert not any(r.url.endswith("/heads/main") for r in transport.sent)
+
+
+def test_files_come_in_one_call_with_null_for_one_that_isnt_there():
+    client, transport, sink = service(repository())
+    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt", "dir/b\u00e4.txt", "gone.txt"]},
+                           headers=AUTH)
+    assert response.json() == {"files": {"a.txt": "text of a", "dir/b\u00e4.txt": "text of b\u00e4", "gone.txt": None}}
+    assert all(r.headers["Accept"] == "application/vnd.github.raw+json" for r in transport.sent)
+    assert len(sink.records) == 3
+
+
+def test_a_file_github_refuses_refuses_the_call():
+    client, _, _ = service(repository(**{f"GET {AT}/contents/a.txt?ref=tip": {"status": 403, "json": {"message": "no"}}}))
+    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
+    assert response.status_code == 403 and "no" in response.json()["detail"]
+
+
+def test_too_many_files_is_a_validation_error():
+    client, transport, _ = service(repository())
+    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a"] * 2001}, headers=AUTH)
+    assert response.status_code == 422 and not transport.sent
+
+
+@pytest.mark.parametrize(("call", "kwargs"), [
+    ("get", {"url": SNAPSHOT, "params": {"repo": "other/repo"}}),
+    ("post", {"url": FILES, "json": {"repo": "other/repo", "commit": "tip", "paths": ["a"]}}),
+])
+def test_reads_serve_only_the_repositories_named_and_need_a_token(call, kwargs):
+    client, transport, _ = service(repository())
+    assert getattr(client, call)(**kwargs, headers=AUTH).status_code == 403
+    assert getattr(client, call)(**kwargs).status_code in (401, 403)
+    assert not transport.sent
+
+
+def test_reads_have_their_own_rate_limit():
+    client, _, _ = service(repository(), edit_pr_reads_per_minute=1)
+    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 200
+    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 429
+    assert post(client).status_code != 429
+
+
+@pytest.mark.parametrize("answers", [
+    repository(),
+    repository(**{f"GET {AT}": {"status": 401, "json": {"message": "Bad credentials"}}}),
+    repository(**{f"GET {AT}/contents/a.txt?ref=tip": {"error": "no answer"}}),
+])
+def test_reads_keep_the_token_out_of_records_logs_and_answers(answers, caplog, capsys):
+    caplog.set_level(logging.DEBUG)
+    client, _, sink = service(answers)
+    snapshot = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
+    files = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
+    out = capsys.readouterr()
+    everything = "".join([snapshot.text, files.text, out.out, out.err, caplog.text,
+                          json.dumps([r.__dict__ for r in sink.records])])
+    assert TOKEN not in everything
+
+
+def test_cors_lets_the_named_sites_read():
+    client, _, _ = service()
+    allowed = client.options(SNAPSHOT, headers={"Origin": ORIGIN, "Access-Control-Request-Method": "GET",
+                                                "Access-Control-Request-Headers": "authorization"})
+    assert allowed.headers["access-control-allow-origin"] == ORIGIN
+
+
 def test_the_committed_spec_is_what_the_service_gives():
     committed = (Path(__file__).parents[2] / "openapi" / "integrations.json").read_text()
     assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec > openapi/integrations.json"
