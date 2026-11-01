@@ -7,6 +7,11 @@
       "name": "reconcile",
       "class": "E",
       "route": "routed"
+    },
+    {
+      "name": "check",
+      "class": "S",
+      "route": "routed"
     }
   ],
   "setup": [
@@ -20,5 +25,18 @@
     "env": [
       "CLOUDFLARE_API_TOKEN"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "token"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "token": {
+        "type": "string",
+        "description": "The DNS-scoped API token, from the project's Bitwarden project"
+      }
+    }
   }
 }

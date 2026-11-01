@@ -1,6 +1,13 @@
 {
   "uses": [
     {
+      "plugin": "cloudflare.dns",
+      "paths": [
+        "src/integrations/clients/cloudflare_dns.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "github.app-token",
       "paths": [
         "src/integrations/clients/github_app_token.py"
