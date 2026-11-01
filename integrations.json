@@ -22,9 +22,25 @@
       "mode": "required"
     },
     {
+      "plugin": "github.ghcr",
+      "paths": [
+        ".github/workflows/deploy.yml",
+        "k8s/app.yaml",
+        "k8s/kustomization.yaml"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "github.repo-ops",
       "paths": [
         ".github/workflows/wheel.yml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "letsencrypt.certs",
+      "paths": [
+        "k8s/ingress.yaml"
       ],
       "mode": "required"
     },
@@ -57,6 +73,13 @@
         ".github/workflows/main.yml"
       ],
       "mode": "required"
+    },
+    {
+      "plugin": "tailscale.tailnet",
+      "paths": [
+        ".github/workflows/deploy.yml"
+      ],
+      "mode": "required"
     }
   ],
   "exclude": [
@@ -71,6 +94,12 @@
     {
       "path": "tests/**",
       "reason": "scenarios about the signatures"
+    }
+  ],
+  "other_secrets": [
+    {
+      "name": "SUSTENAUT_DEPLOY_SSH_KEY",
+      "reason": "An SSH key to our own server"
     }
   ]
 }

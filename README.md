@@ -203,6 +203,11 @@ or logged. A deployment names the repositories it serves and the sites that may
 call it, in `INTEGRATIONS_EDIT_PR_REPOS` and `INTEGRATIONS_ORIGINS`, and with none
 named it serves nothing. `INTEGRATIONS_EDIT_PR_PER_MINUTE` limits the plugin's calls.
 
+It runs on the shared k3s server, namespace `integrations`. `.github/workflows/deploy.yml`
+builds the image and applies `k8s/` on each merge to main. A new server needs
+`sustenaut-app integrations` once, the deploy secrets and variables on this repository,
+and the DNS record for `integrations.sustenaut.eu`.
+
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
 
