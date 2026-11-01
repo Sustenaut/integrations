@@ -4,7 +4,17 @@
   "use": "Channel healing with the owner's token",
   "operations": [
     {
-      "name": "heal",
+      "name": "list",
+      "class": "S",
+      "route": "routed"
+    },
+    {
+      "name": "change",
+      "class": "S",
+      "route": "routed"
+    },
+    {
+      "name": "check",
       "class": "S",
       "route": "routed"
     }
@@ -21,7 +31,26 @@
       "[A-Z_]*SLACK[A-Z_]*(?:TOKEN|USER_ID)"
     ],
     "patterns": [
-      "conversations\\.(?:invite|unarchive|create)"
+      "conversations\\.(?:invite|unarchive|create)",
+      "\\bintegrations\\.clients\\.slack\\b"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "owner_token",
+      "bot_token"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "owner_token": {
+        "type": "string",
+        "description": "The workspace owner's token, which can manage channels"
+      },
+      "bot_token": {
+        "type": "string",
+        "description": "The bot's token, so new channels can invite the bot"
+      }
+    }
   }
 }

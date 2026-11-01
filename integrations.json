@@ -22,6 +22,21 @@
       "mode": "required"
     },
     {
+      "plugin": "slack.channel-heal",
+      "paths": [
+        "src/integrations/clients/slack.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "slack.post",
+      "paths": [
+        "src/integrations/cli.py",
+        "src/integrations/clients/slack.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "sonarcloud.scan",
       "paths": [
         ".github/workflows/pr.yml",
