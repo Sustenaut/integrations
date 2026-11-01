@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "integrations"
-version = "0.5.0"
+version = "0.6.0"
 description = "The registry of every outside service our code calls, and the check that keeps it true."
 readme = "README.md"
 license = "Apache-2.0"
@@ -17,6 +17,8 @@ dependencies = []
 [project.optional-dependencies]
 # Signs a GitHub App's JWT.
 github-app = ["cryptography"]
+# The running service.
+service = ["fastapi", "uvicorn"]
 
 [project.urls]
 Repository = "https://github.com/Sustenaut/integrations"

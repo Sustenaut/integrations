@@ -188,6 +188,13 @@ class MemorySink:
         self.records.append(record)
 
 
+class StdoutSink:
+    """One JSON line per call, for a service's log until the call log exists."""
+
+    def write(self, record: CallRecord) -> None:
+        print(json.dumps(asdict(record), sort_keys=True), flush=True)
+
+
 class JsonlSink:
     def __init__(self, path: Path):
         self.path = path

@@ -7,3 +7,7 @@ jsonschema==4.25.1
 coverage==7.16.2
 # The github-app extra, which the tests of github.app-token use.
 cryptography==50.0.2
+# The service extra, and FastAPI's test client.
+fastapi==0.142.2
+uvicorn==0.54.0
+httpx==0.28.1
