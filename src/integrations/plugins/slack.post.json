@@ -7,6 +7,11 @@
       "name": "post",
       "class": "E",
       "route": "routed"
+    },
+    {
+      "name": "check",
+      "class": "S",
+      "route": "routed"
     }
   ],
   "setup": [
@@ -22,7 +27,22 @@
       "[A-Z_]*SLACK[A-Z_]*(?:TOKEN|USER_ID)"
     ],
     "patterns": [
-      "chat\\.postMessage"
+      "chat\\.postMessage",
+      "\\bintegrations\\.clients\\.slack\\b",
+      "\\bintegrations slack post\\b"
     ]
+  },
+  "settings": {
+    "type": "object",
+    "required": [
+      "token"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "token": {
+        "type": "string",
+        "description": "The bot's token, from the project's Bitwarden project"
+      }
+    }
   }
 }

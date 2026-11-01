@@ -101,3 +101,8 @@ def scan_path(run, binary, path):
 @when("I ask for a suggestion", target_fixture="result")
 def suggestion(run, binary, repository):
     return run(binary("integrations"), "scan", "--suggest", str(repository))
+
+
+@when("I post to Slack with no token", target_fixture="result")
+def post_no_token(run, binary):
+    return run(binary("integrations"), "slack", "post", "--channel", "U1", "--text", "hi", env={"SLACK_TOKEN": ""})

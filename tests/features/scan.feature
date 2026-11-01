@@ -248,3 +248,8 @@ Feature: Comparing a repository's calls with its integrations.json
     When I ask for a suggestion
     Then it succeeds
     And stderr mentions "choose: a.py:1 api.github.com:"
+
+  Scenario: A script posts to Slack without its token on the command line
+    When I post to Slack with no token
+    Then the exit code is 2
+    And stderr mentions "SLACK_TOKEN is not set"

@@ -10,6 +10,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from . import __version__, registry
+from .calls import Caller, IntegrationError
+from .clients.slack import SlackPost
 from .consumer import FILE, BadConsumer, Consumer, read
 from .scan import Hit, Scanner
 
@@ -76,6 +78,21 @@ def scan(path: str, draft: bool) -> int:
     return 0
 
 
+def slack_post(channel: str, text: str) -> int:
+    """For a shell script: the token is in SLACK_TOKEN, never on the command line."""
+    token = os.environ.get("SLACK_TOKEN")
+    if not token:
+        print("integrations: SLACK_TOKEN is not set", file=sys.stderr)
+        return 2
+    caller = Caller(os.environ.get("GITHUB_REPOSITORY", "unknown"), "cli")
+    try:
+        SlackPost(caller, lambda: token).post(channel, text)
+    except IntegrationError as e:
+        print(f"integrations: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="integrations", description=__doc__)
     parser.add_argument("--version", action="version", version=f"integrations {__version__}")
@@ -83,5 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     p = commands.add_parser("scan", help="compare a repository's calls to outside services with its integrations.json")
     p.add_argument("path", nargs="?", default=".")
     p.add_argument("--suggest", action="store_true", help="print a first integrations.json instead of checking")
+    p = commands.add_parser("slack", help="post to Slack from a script")
+    actions = p.add_subparsers(dest="action", required=True)
+    p = actions.add_parser("post", help="post a message as the bot in SLACK_TOKEN")
+    p.add_argument("--channel", required=True, help="a channel's or a person's id")
+    p.add_argument("--text", required=True)
     args = parser.parse_args(argv)
+    if args.command == "slack":
+        return slack_post(args.channel, args.text)
     return scan(args.path, args.suggest)
