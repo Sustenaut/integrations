@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from . import registry
+from . import __version__, registry
 
 IDEMPOTENT = {"GET", "HEAD", "PUT", "DELETE"}
 RETRY_STATUSES = {429, 502, 503, 504}
@@ -95,8 +95,10 @@ class Network:
     def send(self, request: Request, timeout: float) -> Response:
         if not request.url.startswith("https://"):
             return Response(None, error="not https")
-        outgoing = urllib.request.Request(request.url, data=request.body, headers=request.headers,
-                                          method=request.method)
+        # Cloudflare refuses urllib's own User-Agent with a 403 before the request
+        # reaches whoever it was for.
+        outgoing = urllib.request.Request(request.url, data=request.body, method=request.method,
+                                          headers={"User-Agent": f"integrations/{__version__}", **request.headers})
         try:
             with urllib.request.urlopen(outgoing, timeout=timeout) as answer:  # noqa: S310 - https only
                 return Response(answer.status, answer.read(), etag=answer.headers.get("ETag"))
