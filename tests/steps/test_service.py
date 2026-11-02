@@ -142,8 +142,10 @@ def test_settings_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("INTEGRATIONS_EDIT_PR_REPOS", "o/r, a/b")
     monkeypatch.setenv("INTEGRATIONS_ORIGINS", ORIGIN)
     monkeypatch.setenv("INTEGRATIONS_EDIT_PR_PER_MINUTE", "5")
+    monkeypatch.setenv("INTEGRATIONS_EDIT_PR_TIMINGS_PER_MINUTE", "7")
     made = Settings.from_env()
     assert made.edit_pr_repos == {"o/r", "a/b"} and made.allowed_origins == {ORIGIN} and made.edit_pr_per_minute == 5
+    assert made.edit_pr_timings_per_minute == 7
 
 
 def test_no_token_is_refused():
@@ -449,9 +451,17 @@ def test_timings_are_only_ids_and_sensible_numbers(body):
 def test_timings_serve_only_the_repositories_named_and_are_rate_limited():
     client, _, sink = service()
     assert client.post(TIMINGS, json={"repo": "other/repo", "timings": []}).status_code == 403
-    client, _, _ = service(edit_pr_reads_per_minute=1)
+    client, _, _ = service(edit_pr_timings_per_minute=1)
     assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 202
     assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 429
+
+
+def test_timings_with_no_token_cant_use_up_what_reads_and_proposals_need():
+    client, _, _ = service(repository(), edit_pr_timings_per_minute=1, edit_pr_reads_per_minute=1, edit_pr_per_minute=1)
+    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 202
+    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 429
+    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 200
+    assert post(client).status_code != 429
 
 
 def test_the_committed_spec_is_what_the_service_gives():

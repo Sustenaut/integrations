@@ -130,6 +130,8 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
     caller = Caller("integrations", "service", sink=sink or StdoutSink(), transport=transport)
     edit_pr_limit = RateLimit(settings.edit_pr_per_minute)
     edit_pr_read_limit = RateLimit(settings.edit_pr_reads_per_minute)
+    # Its own, as timings need no token: anyone can spend this one, and no other.
+    edit_pr_timings_limit = RateLimit(settings.edit_pr_timings_per_minute)
     problems = {code: {"model": Problem} for code in (401, 403, 404, 413, 422, 429, 502, 503)}
 
     def served(repo: str, limit: RateLimit) -> None:
@@ -222,7 +224,7 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
     def report_timings(reported: Timings) -> dict:
         """How long requests took the app. It carries only ids and numbers, and needs no
         token, so a browser can send it as a page closes."""
-        served(reported.repo, edit_pr_read_limit)
+        served(reported.repo, edit_pr_timings_limit)
         for timing in reported.timings:
             caller.for_repo(reported.repo).note(EDIT_PR, "client-total", request_id=timing.request_id, status=None,
                                                 outcome="ok", latency_ms=timing.total_ms)
