@@ -31,18 +31,51 @@ const wrapper = ({ name, fields }) => `
 export async function ${name}({ baseUrl, token, fetch, requestId, ...fields }) {
   if (!baseUrl) throw new TypeError("${name} needs a baseUrl");
   if (!token) throw new TypeError("${name} needs a token");
+  const id = requestId ?? crypto.randomUUID();
+  const started = Date.now();
   const { data, error, response } = await generated.${name}({
     baseUrl,
     fetch,
     auth: token,
-    headers: requestId ? { "X-Request-Id": requestId } : undefined,
+    headers: { "X-Request-Id": id },
     ${fields}: fields,
   });
+  remember({ baseUrl, fetch, repo: fields.repo }, { request_id: id, total_ms: Date.now() - started });
   if (response.ok) return data;
   const detail = error?.detail;
   const failure = new Error(typeof detail === "string" ? detail : \`The service said \${response.status}\`);
   failure.status = response.status;
   throw failure;
+}
+`;
+
+// How long each call took as the app saw it goes to the service in batches: when the
+// page is hidden or left, or at BATCH. A timing that can't be sent is let go, as it
+// mustn't get in the way of anything the person is doing.
+const TIMINGS = `
+const BATCH = 20;
+const waiting = new Map();
+
+function remember(target, timing) {
+  const key = JSON.stringify([target.baseUrl, target.repo]);
+  const entry = waiting.get(key) ?? { target, timings: [] };
+  entry.timings.push(timing);
+  waiting.set(key, entry);
+  if (entry.timings.length >= BATCH) void flushTimings();
+}
+
+export async function flushTimings() {
+  const entries = [...waiting.values()];
+  waiting.clear();
+  await Promise.all(entries.map(({ target: { baseUrl, fetch, repo }, timings }) =>
+    generated.reportTimings({ baseUrl, fetch, keepalive: true, body: { repo, timings } }).catch(() => {})));
+}
+
+if (typeof addEventListener === "function") {
+  addEventListener("pagehide", () => void flushTimings());
+  addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void flushTimings();
+  });
 }
 `;
 
@@ -57,7 +90,7 @@ for (const { tag, file, calls } of USE_CASES) {
       logs: { level: "silent" },
     });
     const entry = join(work, "entry.ts");
-    await writeFile(entry, `import * as generated from "./gen/sdk.gen";\n${calls.map(wrapper).join("\n")}`);
+    await writeFile(entry, `import * as generated from "./gen/sdk.gen";\n${TIMINGS}${calls.map(wrapper).join("\n")}`);
     await build({
       entryPoints: [entry],
       bundle: true,

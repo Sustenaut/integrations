@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.10.1/integrations-0.10.1-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.11.0/integrations-0.11.0-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,7 +192,7 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.10.1/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.11.0/clients/js/github-edit-pr.js";
 
 const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
 const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
@@ -240,6 +240,12 @@ so a file can't load twice.
 Each project has its own private overflow tenant in the storage service, named like
 its dataset. If storage is down too, the file
 stays in the spool. At the spool's hard cap new records are refused and counted.
+
+A request's calls share one id, given by the app or made by the service, and returned
+as `X-Request-Id`. That splits a slow request three ways: each call's `latency_ms` is
+the provider's time, `service-total` is the whole request at the service, and
+`client-total`, which the generated client sends in batches, is the whole request as the
+app saw it.
 
 ## Working here
 

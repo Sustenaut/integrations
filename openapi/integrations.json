@@ -311,6 +311,52 @@
         ],
         "title": "Stale",
         "type": "object"
+      },
+      "Timing": {
+        "properties": {
+          "request_id": {
+            "pattern": "^[\\w-]{1,64}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "total_ms": {
+            "maximum": 3600000.0,
+            "minimum": 0.0,
+            "title": "Total Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "total_ms"
+        ],
+        "title": "Timing",
+        "type": "object"
+      },
+      "Timings": {
+        "properties": {
+          "repo": {
+            "description": "owner/name",
+            "pattern": "^[\\w.-]+/[\\w.-]+$",
+            "title": "Repo",
+            "type": "string"
+          },
+          "timings": {
+            "description": "How long each request took the app, as it saw it.",
+            "items": {
+              "$ref": "#/components/schemas/Timing"
+            },
+            "maxItems": 200,
+            "title": "Timings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repo",
+          "timings"
+        ],
+        "title": "Timings",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -706,6 +752,120 @@
           }
         ],
         "summary": "Snapshot",
+        "tags": [
+          "github.edit-pr"
+        ]
+      }
+    },
+    "/v1/github/edit-pr/timings": {
+      "post": {
+        "description": "How long requests took the app. It carries only ids and numbers, and needs no\ntoken, so a browser can send it as a page closes.",
+        "operationId": "reportTimings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Timings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reporttimings",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Report Timings",
         "tags": [
           "github.edit-pr"
         ]

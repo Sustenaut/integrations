@@ -67,6 +67,7 @@ def test_a_proposal_is_one_commit_and_a_pull_request_as_the_person():
     assert sent(transport, "POST", f"{AT}/pulls") == {"title": "T", "head": "edit/one", "base": "main", "body": "B"}
     assert {r.plugin for r in sink.records} == {"github.edit-pr"}
     assert {r.request_id for r in sink.records} == {"from-the-app"}
+    assert {r.operation for r in sink.records} == {"open-pr", "service-total"}
 
 
 def test_parent_base_and_message_are_the_callers():
@@ -303,7 +304,8 @@ def test_a_snapshot_is_the_newest_commit_its_paths_and_whether_the_token_may_wri
     assert response.json() == {"branch": "main", "commit": "tip", "can_push": True,
                                "paths": ["a.txt", "dir/b.txt"], "truncated": False}
     assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in transport.sent)
-    assert {(r.plugin, r.operation, r.request_id) for r in sink.records} == {("github.edit-pr", "read", "from-the-app")}
+    assert {(r.plugin, r.operation, r.request_id) for r in sink.records} == {
+        ("github.edit-pr", "read", "from-the-app"), ("github.edit-pr", "service-total", "from-the-app")}
 
 
 def test_a_snapshot_says_when_the_token_may_not_write_and_when_github_left_paths_out():
@@ -327,7 +329,7 @@ def test_files_come_in_one_call_with_null_for_one_that_isnt_there():
                            headers=AUTH)
     assert response.json() == {"files": {"a.txt": "text of a", "dir/b\u00e4.txt": "text of b\u00e4", "gone.txt": None}}
     assert all(r.headers["Accept"] == "application/vnd.github.raw+json" for r in transport.sent)
-    assert len(sink.records) == 3
+    assert len([r for r in sink.records if r.operation == "read"]) == 3
 
 
 def test_a_file_github_refuses_refuses_the_call():
@@ -381,6 +383,75 @@ def test_cors_lets_the_named_sites_read():
     allowed = client.options(SNAPSHOT, headers={"Origin": ORIGIN, "Access-Control-Request-Method": "GET",
                                                 "Access-Control-Request-Headers": "authorization"})
     assert allowed.headers["access-control-allow-origin"] == ORIGIN
+
+
+def test_every_call_of_one_request_shares_its_id_and_the_answer_says_it():
+    client, _, sink = service()
+    response = post(client)
+    made = response.headers["x-request-id"]
+    assert {r.request_id for r in sink.records} == {made}
+    client, _, sink = service(repository())
+    response = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
+    assert {r.request_id for r in sink.records} == {response.headers["x-request-id"]}
+
+
+def test_an_apps_own_id_is_kept_unless_it_isnt_one():
+    client, _, sink = service()
+    assert post(client, **{"X-Request-Id": "from-the-app"}).headers["x-request-id"] == "from-the-app"
+    assert {r.request_id for r in sink.records} == {"from-the-app"}
+    client, _, sink = service()
+    made = post(client, **{"X-Request-Id": "not one\tat all"}).headers["x-request-id"]
+    assert made != "not one\tat all" and {r.request_id for r in sink.records} == {made}
+
+
+def test_a_request_records_its_whole_time_as_well_as_its_calls():
+    client, _, sink = service()
+    post(client)
+    totals = [r for r in sink.records if r.operation == "service-total"]
+    assert len(totals) == 1 and totals[0].route == "none" and totals[0].status == 200 and totals[0].outcome == "ok"
+    assert totals[0].repo == "o/r" and totals[0].latency_ms >= 0
+
+
+@pytest.mark.parametrize(("answers", "status", "outcome"), [
+    (github(**{f"POST {AT}/git/refs": {"status": 422, "json": {"message": "exists"}}}), 422, "refused"),
+    (github(**{f"GET {AT}": {"error": "no answer"}}), 503, "unavailable"),
+])
+def test_a_failed_request_records_how_it_ended(answers, status, outcome):
+    client, _, sink = service(answers)
+    post(client)
+    total = next(r for r in sink.records if r.operation == "service-total")
+    assert (total.status, total.outcome) == (status, outcome)
+
+
+TIMINGS = "/v1/github/edit-pr/timings"
+
+
+def test_an_apps_timings_become_records_with_no_token_needed():
+    client, _, sink = service()
+    response = client.post(TIMINGS, json={"repo": "o/r", "timings": [{"request_id": "a-1", "total_ms": 120}, {"request_id": "b-2", "total_ms": 80}]})
+    assert response.status_code == 202 and response.json() == {"accepted": 2}
+    assert [(r.operation, r.request_id, r.latency_ms, r.repo) for r in sink.records] == [
+        ("client-total", "a-1", 120, "o/r"), ("client-total", "b-2", 80, "o/r")]
+
+
+@pytest.mark.parametrize("body", [
+    {"repo": "o/r", "timings": [{"request_id": "bad id!", "total_ms": 1}]},
+    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": -1}]},
+    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": 3_600_001}]},
+    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": 1}] * 201},
+])
+def test_timings_are_only_ids_and_sensible_numbers(body):
+    client, _, sink = service()
+    assert client.post(TIMINGS, json=body).status_code == 422
+    assert not sink.records
+
+
+def test_timings_serve_only_the_repositories_named_and_are_rate_limited():
+    client, _, sink = service()
+    assert client.post(TIMINGS, json={"repo": "other/repo", "timings": []}).status_code == 403
+    client, _, _ = service(edit_pr_reads_per_minute=1)
+    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 202
+    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 429
 
 
 def test_the_committed_spec_is_what_the_service_gives():
