@@ -121,6 +121,8 @@ class Scanner:
         except StorageDown as e:
             status["storage_ok"] = False
             problems.append(str(e))
+        except Exception as e:  # noqa: BLE001 - a report that can't be made must not stop the next project
+            problems.append(f"no report: {type(e).__name__}: {e}")
         self.report({**status, "dataset": dataset, "problems": "; ".join(problems) or None})
 
     def _work(self, dataset: str, status: dict, problems: list[str]) -> None:
