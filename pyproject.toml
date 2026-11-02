@@ -18,7 +18,9 @@ dependencies = []
 # Signs a GitHub App's JWT.
 github-app = ["cryptography"]
 # The running service.
-service = ["fastapi", "uvicorn"]
+service = ["fastapi", "uvicorn", "fastavro"]
+# Sends call records to a project's buffer in storage: integrations.storage_sink.
+storage-sink = ["fastavro"]
 # The ingest pod.
 ingest = ["fastapi", "uvicorn", "fastavro", "cryptography"]
 

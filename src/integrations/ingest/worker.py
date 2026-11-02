@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .avrofile import decode, encode
+from ..avrofile import decode, encode
 from .bigquery import BigQueryLoader, JobBudget, Outcome
 from .overflow import PENDING, REJECTED, Overflow, OverflowUnavailable
 from .spool import Batch, Spool

@@ -31,7 +31,8 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     jobs = JobBudget()
     worker = Worker(spool, loader, overflow, alert=lambda text: print(f"ALERT: {text}", flush=True), jobs=jobs)
     inbox = Inbox(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(), os.environ["INGEST_STORAGE_URL"])
-    scanner = Scanner(inbox, loader, jobs, report=lambda status: print(json.dumps(status), flush=True))
+    scanner = Scanner(inbox, loader, jobs, report=lambda status: print(json.dumps(status), flush=True),
+                      sender=os.environ.get("HOSTNAME", "ingest"))
     buffers = sorted(set(datasets.values()))
 
     def run() -> None:

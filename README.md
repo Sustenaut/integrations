@@ -247,8 +247,13 @@ this pod or BigQuery is down. Each cycle merges what is waiting into one load jo
 deletes the files once it has loaded. A record in `batches/` names the files first, so a
 pod that stops partway sends the same job again, which BigQuery won't load twice. A
 rejected batch is split until only the bad files are left, and those move to `rejected/`.
-Each cycle prints one `ingest-status` record of facts for each project: what is waiting
-and how old it is, what was rejected, and the load jobs used today.
+
+Every sender writes a file every two minutes, even with no calls in it, and the file's
+metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and
+storage failures. Those load into a `status` table next to `calls`, so a quiet service can
+be told from one that has stopped. The pod reports too, with a file of its own for each
+project each cycle: what is waiting and how old it is, what was rejected, and the load jobs
+used today. All of this is facts, and it holds no thresholds or alerts.
 
 A request's calls share one id, given by the app or made by the service, and returned
 as `X-Request-Id`. That splits a slow request three ways: each call's `latency_ms` is
