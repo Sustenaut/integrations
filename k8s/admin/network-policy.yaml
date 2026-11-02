@@ -1,0 +1,20 @@
+# Applied by push-ingest-key.sh over the admin key: the deploy identity may not manage
+# network policies. Only the service's pods may send records to the ingest pod, which
+# takes them without a token because of this.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingest-only-from-the-service
+  namespace: integrations
+spec:
+  podSelector:
+    matchLabels:
+      app: integrations-ingest
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: integrations
+      ports:
+        - port: 8080

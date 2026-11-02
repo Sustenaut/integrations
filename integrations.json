@@ -26,6 +26,7 @@
       "paths": [
         ".github/workflows/deploy.yml",
         "k8s/app.yaml",
+        "k8s/ingest.yaml",
         "k8s/kustomization.yaml"
       ],
       "mode": "required"
@@ -115,5 +116,8 @@
       "name": "SUSTENAUT_DEPLOY_SSH_KEY",
       "reason": "An SSH key to our own server"
     }
+  ],
+  "own_hosts": [
+    "sustenaut.eu"
   ]
 }

@@ -255,6 +255,16 @@ def test_the_address_alone_leads_to_the_docs():
     assert response.status_code == 307 and response.headers["location"] == "/docs/"
 
 
+def test_a_projects_calls_are_recorded_as_that_projects():
+    client, _, sink = service()
+    post(client)
+    assert {r.repo for r in sink.records} == {"o/r"}
+    client, _, sink = service(repository())
+    client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
+    client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
+    assert {r.repo for r in sink.records} == {"o/r"}
+
+
 def test_healthz_needs_nothing():
     client, _, _ = service()
     assert client.get("/healthz").json() == {"status": "ok"}
@@ -376,3 +386,11 @@ def test_cors_lets_the_named_sites_read():
 def test_the_committed_spec_is_what_the_service_gives():
     committed = (Path(__file__).parents[2] / "openapi" / "integrations.json").read_text()
     assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec > openapi/integrations.json"
+
+
+def test_records_go_to_ingest_only_when_a_deployment_names_it(monkeypatch):
+    monkeypatch.delenv("INTEGRATIONS_INGEST_URL", raising=False)
+    assert isinstance(main.sink(), calls.StdoutSink)
+    monkeypatch.setenv("INTEGRATIONS_INGEST_URL", "http://ingest:8080/")
+    made = main.sink()
+    assert isinstance(made, calls.HttpSink) and made.url == "http://ingest:8080/records"
