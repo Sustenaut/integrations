@@ -171,7 +171,8 @@ def test_records_survive_a_restart(world, tmp_path):
 
 def test_avro_is_the_same_bytes_for_the_same_records_and_keeps_every_field():
     rows = [record(1), record(2, status=None)]
-    assert encode(rows) == encode(rows)
+    first, again = encode(rows), encode([dict(r) for r in rows])
+    assert first == again
     assert decode(encode(rows)) == rows
 
 
