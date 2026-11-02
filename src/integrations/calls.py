@@ -56,6 +56,7 @@ class Response:
     status: int | None
     body: bytes = b""
     error: str | None = None
+    etag: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -94,7 +95,7 @@ class Network:
                                           method=request.method)
         try:
             with urllib.request.urlopen(outgoing, timeout=timeout) as answer:  # noqa: S310 - https only
-                return Response(answer.status, answer.read())
+                return Response(answer.status, answer.read(), etag=answer.headers.get("ETag"))
         except urllib.error.HTTPError as e:
             return Response(e.code, e.read())
         except (urllib.error.URLError, TimeoutError, OSError) as e:
