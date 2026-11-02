@@ -145,6 +145,18 @@ def test_the_default_sink_keeps_nothing_and_the_file_sink_appends(tmp_path):
     jsonschema.validate(json.loads(lines[0]), RECORD_SCHEMA)
 
 
+def test_the_network_transport_says_who_it_is_as_cloudflare_refuses_urllibs_name(monkeypatch):
+    seen = []
+
+    def answers(outgoing, timeout):
+        seen.append(outgoing.get_header("User-agent"))
+        return Answer()
+
+    monkeypatch.setattr("urllib.request.urlopen", answers)
+    Network().send(Request("GET", "https://api.example/x"), 1)
+    assert seen == [f"integrations/{__version__}"]
+
+
 def test_the_network_transport_sends_only_over_https():
     answer = Network().send(Request("GET", "http://api.example/x"), 1)
     assert answer.error == "not https" and answer.status is None
