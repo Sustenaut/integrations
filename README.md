@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.8.0/integrations-0.8.0-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.9.0/integrations-0.9.0-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,7 +192,7 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.8.0/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.9.0/clients/js/github-edit-pr.js";
 
 const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
 const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
@@ -213,6 +213,26 @@ and the DNS record for `integrations.sustenaut.eu`.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
+
+## The call log
+
+`integrations.ingest` is the pod that gets call records into BigQuery. It isn't
+deployed yet, and nothing sends to it.
+
+Records arrive in batches and go on disk before they're acknowledged. Every two
+minutes each dataset's records become an Avro file and one BigQuery load job, so a
+table uses at most 720 of its 1,500 jobs a day. A job's id comes from its content,
+so a file can't load twice.
+
+| When BigQuery... | The file |
+|---|---|
+| has a problem that may pass | stays in the spool and is tried again. After an hour, or with a full spool, it moves to overflow, as `pending` |
+| rejects it | moves to overflow at once, as `rejected`, with an alert, and isn't tried again |
+| loads anything for that dataset | brings back up to 50 `pending` files, merged into one load |
+
+Each project has its own private overflow tenant in the storage service, named like
+its dataset. If storage is down too, the file
+stays in the spool. At the spool's hard cap new records are refused and counted.
 
 ## Working here
 

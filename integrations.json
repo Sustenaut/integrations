@@ -38,6 +38,20 @@
       "mode": "required"
     },
     {
+      "plugin": "google.bigquery",
+      "paths": [
+        "src/integrations/ingest/bigquery.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "google.cloud",
+      "paths": [
+        "src/integrations/ingest/google_token.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "letsencrypt.certs",
       "paths": [
         "k8s/ingress.yaml"

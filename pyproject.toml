@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "integrations"
-version = "0.8.0"
+version = "0.9.0"
 description = "The registry of every outside service our code calls, and the check that keeps it true."
 readme = "README.md"
 license = "Apache-2.0"
@@ -19,6 +19,8 @@ dependencies = []
 github-app = ["cryptography"]
 # The running service.
 service = ["fastapi", "uvicorn"]
+# The ingest pod.
+ingest = ["fastapi", "uvicorn", "fastavro", "cryptography"]
 
 [project.urls]
 Repository = "https://github.com/Sustenaut/integrations"

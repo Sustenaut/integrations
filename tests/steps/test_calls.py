@@ -332,6 +332,7 @@ def test_the_fake_token_signs_nothing():
 
 class Answer:
     status = 200
+    headers = {"ETag": '"tag"'}
 
     def __enter__(self):
         return self
@@ -350,7 +351,7 @@ def test_the_network_transport_reads_an_answer_a_refusal_and_silence(monkeypatch
 
     request = Request("POST", "https://api.example/x", {}, b"out")
     monkeypatch.setattr("urllib.request.urlopen", answers)
-    assert Network().send(request, 7) == Response(200, b"body")
+    assert Network().send(request, 7) == Response(200, b"body", etag='"tag"')
 
     def refuses(outgoing, timeout):
         raise urllib.error.HTTPError(outgoing.full_url, 403, "no", {}, io.BytesIO(b"why"))
