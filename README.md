@@ -230,7 +230,8 @@ so a file can't load twice.
 | rejects it | moves to overflow at once, as `rejected`, with an alert, and isn't tried again |
 | loads anything for that dataset | brings back up to 50 `pending` files, merged into one load |
 
-Overflow is a private tenant of the storage service. If storage is down too, the file
+Each project has its own private overflow tenant in the storage service, named like
+its dataset. If storage is down too, the file
 stays in the spool. At the spool's hard cap new records are refused and counted.
 
 ## Working here

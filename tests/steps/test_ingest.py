@@ -18,12 +18,11 @@ from integrations.ingest.app import create_app
 from integrations.ingest.avrofile import decode, encode
 from integrations.ingest.bigquery import BigQueryLoader, Outcome
 from integrations.ingest.google_token import GoogleToken
-from integrations.ingest.overflow import PENDING, REJECTED, Overflow, OverflowUnavailable
+from integrations.ingest.overflow import PENDING, REJECTED, Overflow, OverflowUnavailable, tenant_of
 from integrations.ingest.spool import Spool
 from integrations.ingest.worker import JOBS_PER_TABLE_PER_DAY, Worker
 
 BASE = "https://storage.example"
-TENANT = "overflow"
 
 
 def record(n=1, **fields):
@@ -77,8 +76,8 @@ class FakeStorage:
     """The storage service's files and heads."""
 
     def __init__(self):
-        self.files: dict[str, bytes] = {}
-        self.heads: dict[str, str] = {}
+        self.files: dict[tuple[str, str], bytes] = {}
+        self.heads: dict[tuple[str, str], str] = {}
         self.down = False
         self.kept = []
 
@@ -86,31 +85,36 @@ class FakeStorage:
         if self.down:
             return Response(None, error="no answer")
         assert request.headers["Authorization"] == "Bearer pod-token"
-        path = request.url.removeprefix(f"{BASE}/{TENANT}/")
+        tenant, _, path = request.url.removeprefix(f"{BASE}/").partition("/")
         if request.method == "POST" and path == "files":
             content = re.search(rb'filename="[^"]+"\r\nContent-Type: [^\r]+\r\n\r\n(.*?)\r\n--', request.body, re.S).group(1)
             self.kept.append(b'name="kept"\r\n\r\ntrue' in request.body)
             file_id = hashlib.sha256(content).hexdigest()
-            self.files[file_id] = content
+            self.files[tenant, file_id] = content
             return Response(200, json.dumps({"id": file_id}).encode())
         if path.startswith("head/"):
-            name = path.removeprefix("head/")
+            name = tenant, path.removeprefix("head/")
+            current = self.heads.get(name)
             if request.method == "GET":
-                if name not in self.heads:
+                if current is None:
                     return Response(404, b"{}")
-                return Response(200, self.files[self.heads[name]], etag=f'"{self.heads[name]}"')
-            if request.headers.get("If-Match", self.heads.get(name)) != self.heads.get(name) and \
-                    request.headers.get("If-Match") != f'"{self.heads.get(name)}"':
+                return Response(200, self.files[tenant, current], etag=f'"{current}"')
+            if current is None:
+                moves = request.headers.get("If-None-Match") == "*"
+            else:
+                moves = request.headers.get("If-Match", "").strip('"') == current
+            if not moves:
                 return Response(412, b"{}")
             self.heads[name] = json.loads(request.body)["hash"]
             return Response(200, b"{}")
         if path.startswith("f/"):
-            return Response(200, self.files[path.split("/")[1]])
+            return Response(200, self.files[tenant, path.split("/")[1]])
         return Response(404, b"{}")
 
     def manifest(self, kind, dataset="ds"):
-        head = self.heads.get(f"{kind}-{dataset}")
-        return json.loads(self.files[head]) if head else []
+        tenant = tenant_of(dataset)
+        head = self.heads.get((tenant, kind))
+        return json.loads(self.files[tenant, head]) if head else []
 
 
 @pytest.fixture
@@ -125,7 +129,7 @@ def world(tmp_path, now):
     spool = Spool(tmp_path / "spool")
     alerts: list[str] = []
     worker = Worker(spool, BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                    Overflow(storage, lambda: "pod-token", BASE, TENANT), alerts.append, clock=lambda: now[0])
+                    Overflow(storage, lambda: "pod-token", BASE), alerts.append, clock=lambda: now[0])
     return worker, spool, bigquery, storage, alerts
 
 
@@ -323,7 +327,7 @@ def test_overflow_says_when_storage_refuses(status, problem):
         def send(self, request, timeout):
             return Response(status, error=None if status else "no answer")
 
-    overflow = Overflow(Refusing(), lambda: "t", BASE, TENANT)
+    overflow = Overflow(Refusing(), lambda: "t", BASE)
     with pytest.raises(OverflowUnavailable, match=problem):
         overflow.put(PENDING, "ds", b"x", "j")
 
@@ -338,17 +342,32 @@ def test_overflow_says_when_a_manifest_cant_be_read_moved_or_a_file_read():
 
     uploaded = Response(200, b'{"id": "abc"}')
     with pytest.raises(OverflowUnavailable, match="manifest: HTTP 500"):
-        Overflow(Script(uploaded, Response(500)), lambda: "t", BASE, TENANT).put(PENDING, "ds", b"x", "j")
+        Overflow(Script(uploaded, Response(500)), lambda: "t", BASE).put(PENDING, "ds", b"x", "j")
     with pytest.raises(OverflowUnavailable, match="manifest move: HTTP 412"):
-        Overflow(Script(uploaded, Response(404), uploaded, Response(412)), lambda: "t", BASE, TENANT).put(PENDING, "ds", b"x", "j")
+        Overflow(Script(uploaded, Response(404), uploaded, Response(412)), lambda: "t", BASE).put(PENDING, "ds", b"x", "j")
     from integrations.ingest.overflow import Entry
     with pytest.raises(OverflowUnavailable, match="read: HTTP 404"):
-        Overflow(Script(Response(404)), lambda: "t", BASE, TENANT).read(Entry("i", "n", "j"))
+        Overflow(Script(Response(404)), lambda: "t", BASE).read("ds", Entry("i", "n", "j"))
+
+
+def test_each_project_has_its_own_tenant_and_never_sees_anothers_files():
+    storage = FakeStorage()
+    overflow = Overflow(storage, lambda: "pod-token", BASE)
+    overflow.put(PENDING, "calls_visit_ee", b"theirs", "j1")
+    overflow.put(PENDING, "calls_business_plan", b"others", "j2")
+    assert {tenant for tenant, _ in storage.files} == {"calls-visit-ee", "calls-business-plan"}
+    theirs = overflow.pending("calls_visit_ee")
+    assert [e.job_id for e in theirs] == ["j1"]
+    assert overflow.read("calls_visit_ee", theirs[0]) == b"theirs"
+
+
+def test_a_tenant_is_named_like_its_dataset():
+    assert tenant_of("calls_opportunity_site") == "calls-opportunity-site"
 
 
 def test_the_same_file_put_twice_is_on_the_manifest_once():
     storage = FakeStorage()
-    overflow = Overflow(storage, lambda: "pod-token", BASE, TENANT)
+    overflow = Overflow(storage, lambda: "pod-token", BASE)
     overflow.put(PENDING, "ds", b"x", "j")
     overflow.put(PENDING, "ds", b"x", "j")
     assert len(overflow.pending("ds")) == 1

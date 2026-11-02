@@ -91,7 +91,7 @@ class Worker:
             entries = self.overflow.pending(dataset)[:MAX_REPLAY_FILES]
             if not entries or not self._may_load(dataset):
                 return
-            records = [r for entry in entries for r in decode(self.overflow.read(entry))]
+            records = [r for entry in entries for r in decode(self.overflow.read(dataset, entry))]
             digest = hashlib.sha256("".join(e.job_id for e in entries).encode()).hexdigest()
             if self._load(dataset, encode(records), job_id("replay", digest)).outcome is Outcome.LOADED:
                 self.overflow.forget(PENDING, dataset, entries)

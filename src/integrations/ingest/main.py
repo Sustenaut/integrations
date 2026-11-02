@@ -24,7 +24,7 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])
     overflow = Overflow(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(),
-                        os.environ["INGEST_STORAGE_URL"], os.environ["INGEST_OVERFLOW_TENANT"])
+                        os.environ["INGEST_STORAGE_URL"])
     loader = BigQueryLoader(caller, GoogleToken(caller, key), key["project_id"])
     worker = Worker(spool, loader, overflow, alert=lambda text: print(f"ALERT: {text}", flush=True))
     threading.Thread(target=worker.run, daemon=True).start()
