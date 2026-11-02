@@ -117,6 +117,16 @@ def test_a_body_that_cant_be_read_is_left_to_the_client():
     assert sink.records[0].outcome == "ok"
 
 
+def test_a_note_is_a_record_of_time_that_wasnt_a_call():
+    made, sink, transport, _ = caller()
+    made.note(PLUGIN, "service-total", request_id="r", latency_ms=9, status=200, outcome="ok")
+    record = sink.records[0]
+    assert (record.operation, record.latency_ms, record.route, record.bytes_in) == ("service-total", 9, "none", 0)
+    assert not transport.sent
+    with pytest.raises(ValueError, match="not a registered operation"):
+        made.note(PLUGIN, "nope", request_id="r", latency_ms=1, status=None, outcome="ok")
+
+
 def test_a_refusal_is_not_retried():
     made, _, transport, _ = caller({f"GET {URL}": {"status": 403, "json": {}}})
     made.call(PLUGIN, "check", Request("GET", URL))

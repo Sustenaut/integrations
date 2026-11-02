@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "integrations"
-version = "0.10.1"
+version = "0.11.0"
 description = "The registry of every outside service our code calls, and the check that keeps it true."
 readme = "README.md"
 license = "Apache-2.0"

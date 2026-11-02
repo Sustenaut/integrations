@@ -17,6 +17,16 @@
       "name": "read",
       "class": "H",
       "route": "routed"
+    },
+    {
+      "name": "service-total",
+      "class": "H",
+      "route": "none"
+    },
+    {
+      "name": "client-total",
+      "class": "H",
+      "route": "none"
     }
   ],
   "setup": [

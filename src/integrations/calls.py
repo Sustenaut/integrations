@@ -342,6 +342,18 @@ class Caller:
             raise Unavailable(plugin, operation, response.error or f"HTTP {response.status}")
         return response
 
+    def note(self, plugin: str, operation: str, *, request_id: str, latency_ms: int, status: int | None,
+             outcome: str) -> None:
+        """A record of time that wasn't a call to a provider: how long a request took
+        the service, or the app that made it."""
+        registered = self.classes.get((plugin, operation))
+        if registered is None:
+            raise ValueError(f"{plugin} {operation} is not a registered operation")
+        self._keep(CallRecord(
+            at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), repo=self.repo, app=self.app, plugin=plugin,
+            operation=operation, request_id=request_id, latency_ms=latency_ms, status=status, outcome=outcome,
+            retries=0, bytes_in=0, bytes_out=0, mode=self.mode(plugin), route=registered["route"]))
+
     @staticmethod
     def _says_no(response: Response, refused: Callable[[Response], bool] | None) -> bool:
         """A body that can't be read isn't a refusal here: the client deals with it."""
