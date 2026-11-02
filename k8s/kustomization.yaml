@@ -7,6 +7,7 @@ namespace: integrations
 resources:
   - service-accounts.yaml
   - app.yaml
+  - ingest.yaml
   - ingress.yaml
 images:
   - name: ghcr.io/sustenaut/sustenaut-integrations

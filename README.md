@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.9.0/integrations-0.9.0-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.10.0/integrations-0.10.0-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,7 +192,7 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.9.0/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.10.0/clients/js/github-edit-pr.js";
 
 const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
 const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
@@ -211,13 +211,20 @@ builds the image and applies `k8s/` on each merge to main. A new server needs
 `sustenaut-app integrations` once, the deploy secrets and variables on this repository,
 and the DNS record for `integrations.sustenaut.eu`.
 
+Before the first deploy with the ingest pod, a person puts the writer's key in the
+namespace, from a `shared-infra` checkout beside this one:
+`./with-secrets ../integrations/k8s/admin/push-ingest-key.sh`. It also needs the variable
+`INGEST_DATASETS` on this repository: JSON from each repository to its dataset.
+
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
 
 ## The call log
 
-`integrations.ingest` is the pod that gets call records into BigQuery. It isn't
-deployed yet, and nothing sends to it.
+`integrations.ingest` is the pod that gets call records into BigQuery. The service
+sends it its records in batches, through `HttpSink`, each marked with the project it
+was on behalf of. The pod has no ingress, and a network policy lets only the service
+reach it.
 
 Records arrive in batches and go on disk before they're acknowledged. Every two
 minutes each dataset's records become an Avro file and one BigQuery load job, so a

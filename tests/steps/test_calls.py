@@ -15,7 +15,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from integrations import __version__, registry
-from integrations.calls import (Caller, Check, JsonlSink, MemorySink, Network, Recording, Refused, Replay, Request,
+from integrations.calls import _post_json as calls_post
+from integrations.calls import (Caller, Check, HttpSink, JsonlSink, MemorySink, Network, Recording, Refused, Replay, Request,
                                 Response, Unavailable, health, read_modes)
 from integrations.clients.github_app_token import AppToken, FakeAppToken
 from integrations.clients.github_edit_pr import Change, Conflict, EditPullRequests, FakeEditPullRequests, next_branch
@@ -364,3 +365,81 @@ def test_the_network_transport_reads_an_answer_a_refusal_and_silence(monkeypatch
 
     monkeypatch.setattr("urllib.request.urlopen", silent)
     assert Network().send(request, 7) == Response(None, error="no answer: down")
+
+
+def http_sink(answers=None, **kw):
+    sent = []
+
+    def post(url, body):
+        sent.append((url, json.loads(body)["records"]))
+        return answers.pop(0) if answers else True
+
+    return HttpSink("http://ingest/records", post=post, start=False, **kw), sent
+
+
+def a_record(n):
+    made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
+    made.call(PLUGIN, "open-pr", Request("GET", URL), request_id=f"r{n}")
+    return sink.records[0]
+
+
+def test_records_go_in_batches_not_one_request_each():
+    sink, sent = http_sink(batch=2)
+    for n in range(5):
+        sink.write(a_record(n))
+    assert not sent
+    sink.flush()
+    assert [len(records) for _, records in sent] == [2, 2, 1]
+    assert sent[0][0] == "http://ingest/records"
+    assert sent[0][1][0]["request_id"] == "r0"
+
+
+def test_a_full_batch_asks_to_be_sent_soon():
+    sink, _ = http_sink(batch=2)
+    sink.write(a_record(1))
+    assert not sink.due.is_set()
+    sink.write(a_record(2))
+    assert sink.due.is_set()
+
+
+def test_a_batch_that_isnt_taken_waits_in_order():
+    sink, sent = http_sink(answers=[False, True])
+    sink.write(a_record(1))
+    sink.write(a_record(2))
+    sink.flush()
+    assert len(sink.waiting) == 2
+    sink.flush()
+    assert [r["request_id"] for r in sent[1][1]] == ["r1", "r2"]
+    assert not sink.waiting
+
+
+def test_past_the_limit_the_oldest_are_dropped_and_counted():
+    sink, sent = http_sink(limit=2)
+    for n in range(3):
+        sink.write(a_record(n))
+    assert sink.dropped == 1
+    sink.flush()
+    assert [r["request_id"] for r in sent[0][1]] == ["r1", "r2"]
+
+
+def test_flushing_with_nothing_waiting_sends_nothing():
+    sink, sent = http_sink()
+    sink.flush()
+    assert not sent
+
+
+def test_the_default_post_says_whether_it_was_taken(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: Answer())
+    assert calls_post("http://ingest/records", b"{}")
+
+    def silent(request, timeout):
+        raise urllib.error.URLError("down")
+
+    monkeypatch.setattr("urllib.request.urlopen", silent)
+    assert not calls_post("http://ingest/records", b"{}")
+
+
+def test_a_caller_for_a_project_records_that_project():
+    made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
+    made.for_repo("o/theirs").call(PLUGIN, "open-pr", Request("GET", URL))
+    assert sink.records[0].repo == "o/theirs" and made.repo == "a-repo"

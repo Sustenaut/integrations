@@ -3,7 +3,7 @@
 # reachable over the tailnet only, so the job joins it first.
 #
 # What a deployment serves is in repository variables, so nothing here names a
-# consumer: INTEGRATIONS_EDIT_PR_REPOS and INTEGRATIONS_ORIGINS. Without
+# consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS and INGEST_DATASETS. Without
 # SUSTENAUT_SERVER the image is built and pushed, and nothing is deployed.
 name: deploy
 
@@ -39,6 +39,7 @@ jobs:
           curl -fs localhost:8080/docs/ | grep -q 'Integrations service'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8080/v1/github/edit-pr/proposals)" != 200
           docker rm -f app
+          docker run --rm "${IMAGE}:${GITHUB_SHA}" python -c 'import fastavro, cryptography, integrations.ingest.main'
 
       - name: Push the image
         env:
@@ -53,10 +54,12 @@ jobs:
         env:
           REPOS: ${{ vars.INTEGRATIONS_EDIT_PR_REPOS }}
           ORIGINS: ${{ vars.INTEGRATIONS_ORIGINS }}
+          DATASETS: ${{ vars.INGEST_DATASETS }}
         run: |
           kustomize edit set image "${IMAGE}=${IMAGE}:${GITHUB_SHA}"
           kustomize edit add configmap settings \
             --from-literal="INTEGRATIONS_EDIT_PR_REPOS=$REPOS" --from-literal="INTEGRATIONS_ORIGINS=$ORIGINS"
+          kustomize edit add configmap ingest-settings --from-literal="INGEST_DATASETS=$DATASETS"
           kustomize build . > "${RUNNER_TEMP}/integrations.yaml"
           grep -q "${IMAGE}:${GITHUB_SHA}" "${RUNNER_TEMP}/integrations.yaml"
 

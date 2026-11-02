@@ -161,7 +161,7 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
         """Open a pull request with one commit, as the person whose token this is."""
         served(proposal.repo, edit_pr_limit)
         token = credentials.credentials
-        proposer = OneCommitProposer(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER))
+        proposer = OneCommitProposer(caller.for_repo(proposal.repo), lambda: token, request.headers.get(REQUEST_ID_HEADER))
         with githubs_answer():
             return proposer.propose(repo=proposal.repo, branch=proposal.branch, title=proposal.title,
                                     changes=proposal.changes, body=proposal.body, base=proposal.base,
@@ -177,7 +177,8 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
         served(repo, edit_pr_read_limit)
         token = credentials.credentials
         with githubs_answer():
-            return RepositoryReader(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER)).snapshot(repo, branch)
+            reader = RepositoryReader(caller.for_repo(repo), lambda: token, request.headers.get(REQUEST_ID_HEADER))
+            return reader.snapshot(repo, branch)
 
     @app.post("/v1/github/edit-pr/files", tags=["github.edit-pr"], operation_id="readFiles", response_model=Files,
               responses=problems)
@@ -186,7 +187,7 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
         """The text of many files at one commit, in one call."""
         served(asked.repo, edit_pr_read_limit)
         token = credentials.credentials
-        reader = RepositoryReader(caller, lambda: token, request.headers.get(REQUEST_ID_HEADER))
+        reader = RepositoryReader(caller.for_repo(asked.repo), lambda: token, request.headers.get(REQUEST_ID_HEADER))
         with githubs_answer():
             return {"files": reader.files(asked.repo, asked.commit, asked.paths)}
 

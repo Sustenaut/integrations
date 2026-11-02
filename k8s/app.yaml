@@ -38,6 +38,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          env:
+            - name: INTEGRATIONS_INGEST_URL
+              value: http://ingest:8080
           envFrom:
             - configMapRef:
                 name: settings
