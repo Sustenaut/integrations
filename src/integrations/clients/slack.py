@@ -23,7 +23,7 @@ def _call(caller: Caller, plugin: str, operation: str, token: str, method: str, 
           **params: object) -> dict:
     response = caller.call(plugin, operation, Request(
         "POST", f"{API}/{method}", {"Authorization": f"Bearer {token}"}, urlencode(params).encode(),
-        repeatable=repeatable))
+        repeatable=repeatable), refused=lambda r: not r.json().get("ok"))
     if not response.ok:
         raise Refused(plugin, operation, f"{method}: HTTP {response.status}")
     out = response.json()

@@ -39,7 +39,7 @@ def test_slacks_refusal_in_a_200_is_a_refusal():
     made, sink, _ = caller({f"POST {API}/chat.postMessage": {"status": 200, "json": {"ok": False, "error": "no_channel"}}})
     with pytest.raises(Refused, match="no_channel"):
         SlackPost(made, lambda: "bot").post("C1", "hello")
-    assert sink.records[0].outcome == "ok"  # Slack answered; what it said is the client's to read
+    assert sink.records[0].outcome == "refused"
 
 
 def test_an_http_refusal_is_a_refusal():

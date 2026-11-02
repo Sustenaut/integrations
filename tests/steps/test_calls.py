@@ -105,6 +105,17 @@ def test_a_call_not_safe_to_repeat_is_not_retried_unless_it_says_so():
     assert len(transport.sent) == 4
 
 
+def test_a_body_that_cant_be_read_is_left_to_the_client():
+    class Plain:
+        def send(self, request, timeout):
+            return Response(200, b"<html>")
+
+    sink = MemorySink()
+    made = Caller("a-repo", sink=sink, transport=Plain())
+    made.call(PLUGIN, "open-pr", Request("GET", URL), refused=lambda r: bool(r.json()))
+    assert sink.records[0].outcome == "ok"
+
+
 def test_a_refusal_is_not_retried():
     made, _, transport, _ = caller({f"GET {URL}": {"status": 403, "json": {}}})
     made.call(PLUGIN, "check", Request("GET", URL))

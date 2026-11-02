@@ -232,10 +232,12 @@ class Caller:
     def mode(self, plugin: str) -> str:
         return self.modes.get(plugin, "required")
 
-    def call(self, plugin: str, operation: str, request: Request, *, request_id: str | None = None) -> Response:
+    def call(self, plugin: str, operation: str, request: Request, *, request_id: str | None = None,
+             refused: Callable[[Response], bool] | None = None) -> Response:
         """Make the call and write its record. A provider's refusal comes back
         as its response, for the client to read. Raises `Unavailable` when
-        there is no answer, or only a failure, after every try."""
+        there is no answer, or only a failure, after every try. `refused` is for
+        a provider that says no in a successful response, so the record says so."""
         registered = self.classes.get((plugin, operation))
         if registered is None:
             raise ValueError(f"{plugin} {operation} is not a registered operation")
@@ -253,12 +255,21 @@ class Caller:
         self._keep(CallRecord(
             at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), repo=self.repo, app=self.app, plugin=plugin,
             operation=operation, request_id=request_id or self.new_id(), latency_ms=latency, status=response.status,
-            outcome="unavailable" if failed else "ok" if response.ok else "refused", retries=retries,
+            outcome="unavailable" if failed else "ok" if response.ok and not self._says_no(response, refused)
+            else "refused", retries=retries,
             bytes_in=len(response.body), bytes_out=len(request.body or b""), mode=self.mode(plugin),
             route=registered["route"]))
         if failed:
             raise Unavailable(plugin, operation, response.error or f"HTTP {response.status}")
         return response
+
+    @staticmethod
+    def _says_no(response: Response, refused: Callable[[Response], bool] | None) -> bool:
+        """A body that can't be read isn't a refusal here: the client deals with it."""
+        try:
+            return refused is not None and refused(response)
+        except ValueError:
+            return False
 
     @staticmethod
     def _worth_retrying(response: Response) -> bool:

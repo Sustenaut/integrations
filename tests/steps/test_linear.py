@@ -33,9 +33,10 @@ def test_operation_says_who_is_waiting():
 
 
 def test_errors_beside_a_200_and_in_a_400_are_refusals_with_linears_reason():
-    linear, _, _ = client({"status": 200, "json": {"errors": [{"message": "no such field"}]}})
+    linear, sink, _ = client({"status": 200, "json": {"errors": [{"message": "no such field"}]}})
     with pytest.raises(Refused, match="no such field"):
         linear.query("{ a }")
+    assert sink.records[0].outcome == "refused"
     linear, _, _ = client({"status": 400, "json": {"errors": [{"message": "bad"}, {"message": "worse"}]}})
     with pytest.raises(Refused, match="bad; worse"):
         linear.query("{ a }")
