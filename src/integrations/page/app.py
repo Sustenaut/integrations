@@ -6,7 +6,7 @@ from __future__ import annotations
 from html import escape
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import registry
 from ..calls import IntegrationError
@@ -43,7 +43,8 @@ def _steps_table(steps: list[Step]) -> str:
             f"{rows}</table>")
 
 
-def create_app(log: CallLog) -> FastAPI:
+def create_app(log: CallLog, base: str = "") -> FastAPI:
+    """`base` is the path the page is served under, which the proxy in front keeps."""
     app = FastAPI(title="Call log", docs_url=None, redoc_url=None, openapi_url=None)
     targets = registry.classes()
 
@@ -51,7 +52,12 @@ def create_app(log: CallLog) -> FastAPI:
     def healthz() -> dict:
         return {"status": "ok"}
 
-    @app.get("/", response_class=HTMLResponse)
+    if base:
+        @app.get(base, include_in_schema=False)
+        def to_the_page() -> RedirectResponse:
+            return RedirectResponse(f"{base}/")
+
+    @app.get(f"{base}/", response_class=HTMLResponse)
     def summary() -> HTMLResponse:
         try:
             rows = log.summary()
@@ -69,11 +75,11 @@ def create_app(log: CallLog) -> FastAPI:
                          f"<td class=n>{r.p50:,}</td><td class=n>{r.p95:,}</td><td{mark}>{rate:.1f}%</td></tr>")
         table = ("<table><tr><th>Dataset<th>Plugin<th>Operation<th>Class<th>Target p95<th class=n>Calls"
                  f"<th class=n>p50 ms<th class=n>p95 ms<th class=n>Not ok</tr>{''.join(cells)}</table>") if cells else "<p>No calls yet.</p>"
-        form = ('<form action="/trace"><label>Request id <input name="id" required pattern="[A-Za-z0-9_-]{1,64}"></label> '
+        form = (f'<form action="{escape(base)}/trace"><label>Request id <input name="id" required pattern="[A-Za-z0-9_-]{1,64}"></label> '
                 "<button>Show</button></form>")
         return _page(f"Calls, last {DAYS} days", table + form)
 
-    @app.get("/trace", response_class=HTMLResponse)
+    @app.get(f"{base}/trace", response_class=HTMLResponse)
     def trace(id: str = Query(pattern=ID)) -> HTMLResponse:  # noqa: A002 - the form's field
         try:
             steps = log.trace(id)

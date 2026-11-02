@@ -1,5 +1,6 @@
 # integrations.sustenaut.eu through the server's shared Traefik, with a Let's
-# Encrypt certificate.
+# Encrypt certificate. /logging, the call log's page, goes through the sign-in proxy.
+# Everything else is the service's public API, with no sign-in in front of it.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,6 +15,13 @@ spec:
     - host: integrations.sustenaut.eu
       http:
         paths:
+          - path: /logging
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:

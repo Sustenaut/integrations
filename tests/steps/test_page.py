@@ -29,11 +29,11 @@ class FakeBigQuery:
         return Response(self.status, bq_rows(*self.rows))
 
 
-def page(*rows, status=200):
+def page(*rows, status=200, base=""):
     fake = FakeBigQuery(*rows, status=status)
     log = CallLog(Caller("integrations", "page", transport=fake, sleep=lambda _: None), lambda: "t", "proj",
                   ["calls_one", "calls_two"])
-    return TestClient(create_app(log), raise_server_exceptions=False), fake
+    return TestClient(create_app(log, base), raise_server_exceptions=False, follow_redirects=False), fake
 
 
 def step(operation, ms, status=200):
@@ -115,3 +115,12 @@ def test_health_needs_no_query():
     client, fake = page()
     assert client.get("/healthz").json() == {"status": "ok"} and not fake.asked
     assert client.get("/docs").status_code == 404
+
+
+def test_under_a_base_path_its_links_and_routes_are_there():
+    client, _ = page(base="/logging")
+    assert client.get("/logging").headers["location"] == "/logging/"
+    assert 'action="/logging/trace"' in client.get("/logging/").text
+    assert "take a few minutes" in client.get("/logging/trace", params={"id": "a"}).text
+    assert client.get("/").status_code == 404 and client.get("/trace", params={"id": "a"}).status_code == 404
+    assert client.get("/healthz").status_code == 200
