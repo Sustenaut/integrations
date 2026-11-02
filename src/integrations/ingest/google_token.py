@@ -19,6 +19,8 @@ MARGIN = 300
 
 
 class GoogleToken:
+    """Callable: gives a token good for now."""
+
     def __init__(self, caller: Caller, key: dict, clock: Callable[[], float] = time.time):
         self.caller, self.key, self.clock = caller, key, clock
         self._token: tuple[str, float] = ("", 0.0)
