@@ -7,8 +7,11 @@ at any point, the next one finds the record and sends the same job again, which
 BigQuery won't load twice, then finishes deleting.
 
 A batch BigQuery rejects is split in two until only the bad files are left, which move
-to rejected/ for a person. Each cycle reports facts as one status record, and what to
-make of them is for whoever reads it.
+to rejected/ for a person.
+
+Every file carries its sender's report for the cycle, and those go to the status table as
+one more job. This pod reports the same way, with a file of its own for each project: facts
+only, and what to make of them is for whoever reads them.
 """
 
 from __future__ import annotations
@@ -20,9 +23,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
+from .. import __version__
+from ..avrofile import decode, encode, encode_status, file_name, file_status, timestamp
 from ..calls import Request, Response, Transport
-from .avrofile import decode, encode
-from .bigquery import BigQueryLoader, JobBudget, LoadResult, Outcome
+from .bigquery import STATUS_TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome
 from .overflow import tenant_of
 from .worker import job_id
 
@@ -90,35 +94,49 @@ class Scanner:
     jobs: JobBudget
     report: Callable[[dict], None]
     clock: Callable[[], float] = time.time
+    sender: str = "ingest"
 
     def tick(self, datasets: list[str]) -> None:
         for dataset in datasets:
             self._scan(dataset)
 
     def _scan(self, dataset: str) -> None:
-        status = {"kind": "ingest-status", "at": int(self.clock()), "dataset": dataset, "storage_ok": True,
-                  "loaded_files": 0, "rejected_now": 0, "problems": []}
+        started = self.clock()
+        status = {"kind": "ingest", "sender": self.sender, "version": __version__, "storage_ok": True,
+                  "loaded_files": 0, "rejected_now": 0}
+        problems: list[str] = []
         try:
-            self._work(dataset, status)
+            self._work(dataset, status, problems)
         except StorageDown as e:
             status["storage_ok"] = False
-            status["problems"].append(str(e))
+            problems.append(str(e))
         except Exception as e:  # noqa: BLE001 - one project's bad day must not stop the rest
-            status["problems"].append(f"{type(e).__name__}: {e}")
-        status["jobs_today"] = self.jobs.used(dataset)
-        self.report(status)
+            problems.append(f"{type(e).__name__}: {e}")
+        ended = self.clock()
+        status.update(at=timestamp(ended), cycle_start=timestamp(started), cycle_end=timestamp(ended),
+                      jobs_today=self.jobs.used(dataset), status_jobs_today=self.jobs.used(dataset, STATUS_TABLE))
+        try:
+            data = encode([], {**status, "problems": "; ".join(problems) or None})
+            self.inbox.put(dataset, file_name(ended, self.sender, data), data)
+        except StorageDown as e:
+            status["storage_ok"] = False
+            problems.append(str(e))
+        except Exception as e:  # noqa: BLE001 - a report that can't be made must not stop the next project
+            problems.append(f"no report: {type(e).__name__}: {e}")
+        self.report({**status, "dataset": dataset, "problems": "; ".join(problems) or None})
 
-    def _work(self, dataset: str, status: dict) -> None:
+    def _work(self, dataset: str, status: dict, problems: list[str]) -> None:
         finished = True
         for record in self.inbox.list(dataset, BATCHES)[0]:
-            finished = self._resume(dataset, record.name, status) and finished
+            finished = self._resume(dataset, record.name, status, problems) and finished
         waiting, more = self.inbox.list(dataset, INBOX)
         done: set[str] = set()
         if finished and waiting:
             files = self._choose(waiting)
             record = f"{BATCHES}{_batch_job(files, 0)}.json"
-            self.inbox.put(dataset, record, json.dumps({"files": files, "attempt": 0}).encode())
-            self._run(dataset, record, files, 0, done, status)
+            held = {"files": files, "attempt": 0, "status_attempt": 0, "status_done": False}
+            self.inbox.put(dataset, record, json.dumps(held).encode())
+            self._run(dataset, record, held, done, status, problems)
         left = [f for f in waiting if f.name not in done]
         rejected, rejected_more = self.inbox.list(dataset, REJECTED)
         status.update(inbox_files=len(left), inbox_bytes=sum(f.size for f in left), inbox_more=more,
@@ -138,18 +156,19 @@ class Scanner:
             size += f.size
         return files
 
-    def _resume(self, dataset: str, record: str, status: dict) -> bool:
+    def _resume(self, dataset: str, record: str, status: dict, problems: list[str]) -> bool:
         data = self.inbox.read(dataset, record)
         if data is None:
             return True
-        held = json.loads(data)
-        return self._run(dataset, record, held["files"], held["attempt"], set(), status)
+        return self._run(dataset, record, json.loads(data), set(), status, problems)
 
-    def _run(self, dataset: str, record: str, files: list[str], attempt: int, gone: set[str], status: dict) -> bool:
+    def _run(self, dataset: str, record: str, held: dict, gone: set[str], status: dict, problems: list[str]) -> bool:
         """Settles the record's files, adding to `gone` those no longer in the inbox. The
         record goes only when all of them have, and True says so."""
+        files, attempt = held["files"], held["attempt"]
         rows: dict[str, list[dict]] = {}
         contents: dict[str, bytes] = {}
+        reports: list[dict] = []
         for name in files:
             data = self.inbox.read(dataset, name)
             if data is None:
@@ -159,21 +178,58 @@ class Scanner:
                 rows[name] = decode(data)
                 contents[name] = data
             except Exception as e:  # noqa: BLE001 - fastavro has many ways to say a file is bad
-                self._reject(dataset, name, data, f"can't be read: {type(e).__name__}", gone, status)
+                self._reject(dataset, name, data, f"can't be read: {type(e).__name__}", gone, status, problems)
+                continue
+            self._read_report(name, data, reports, problems)
+        if not self._load_reports(dataset, record, held, reports, problems):
+            return False
         # All the record's files, even those gone: a job's id has to stay the same for a
         # try after a crash to be the same job.
-        result = self._settle(dataset, files, rows, contents, attempt, gone, status)
+        result = self._settle(dataset, files, rows, contents, attempt, gone, status, problems)
         if result.outcome is Outcome.RETRY:
-            status["problems"].append(f"waiting to load: {result.detail}")
+            problems.append(f"waiting to load: {result.detail}")
             if result.ended:
                 # That job ended in failure, and its id can't be used again.
                 left = [name for name in files if name not in gone]
-                self.inbox.put(dataset, record, json.dumps({"files": left, "attempt": attempt + 1}).encode())
+                self.inbox.put(dataset, record, json.dumps({**held, "files": left, "attempt": attempt + 1}).encode())
             return False
         self.inbox.delete(dataset, record)
         return True
 
-    def _settle(self, dataset, files, rows, contents, attempt, gone, status) -> LoadResult:
+    @staticmethod
+    def _read_report(name: str, data: bytes, reports: list[dict], problems: list[str]) -> None:
+        """A report that isn't one is only a lost report: the file's calls still load."""
+        try:
+            report = file_status(data)
+            if report:
+                encode_status([report])
+                reports.append(report)
+        except Exception as e:  # noqa: BLE001 - it came from the sender, in whatever state
+            problems.append(f"bad report in {name}: {type(e).__name__}")
+
+    def _load_reports(self, dataset: str, record: str, held: dict, reports: list[dict], problems: list[str]) -> bool:
+        """False when the batch has to wait. A record notes when its reports have loaded, so
+        a new job for its calls can't load them twice."""
+        if not reports or held["status_done"]:
+            return True
+        if not self.jobs.may_load(dataset, STATUS_TABLE):
+            problems.append("waiting to load reports: the day's load jobs are used")
+            return False
+        self.jobs.spend(dataset, STATUS_TABLE)
+        digest = hashlib.sha256(json.dumps([held["status_attempt"], sorted(held["files"])]).encode()).hexdigest()
+        result = self.loader.load(dataset, encode_status(reports), job_id("status", digest), STATUS_TABLE)
+        if result.outcome is Outcome.RETRY:
+            problems.append(f"waiting to load reports: {result.detail}")
+            if result.ended:
+                held["status_attempt"] += 1
+                self.inbox.put(dataset, record, json.dumps(held).encode())
+            return False
+        if result.outcome is Outcome.REJECTED:
+            problems.append(f"reports rejected: {result.detail}")
+        held["status_done"] = True
+        return True
+
+    def _settle(self, dataset, files, rows, contents, attempt, gone, status, problems) -> LoadResult:
         records = [r for name in files for r in rows.get(name, [])]
         if not records:
             self._forget(dataset, files, gone)
@@ -193,22 +249,23 @@ class Scanner:
         if result.outcome is not Outcome.REJECTED:
             return result
         if len(files) == 1:
-            self._reject(dataset, files[0], contents[files[0]], result.detail, gone, status)
+            self._reject(dataset, files[0], contents[files[0]], result.detail, gone, status, problems)
             return LoadResult(Outcome.LOADED)
         middle = len(files) // 2
-        first = self._settle(dataset, files[:middle], rows, contents, attempt, gone, status)
+        first = self._settle(dataset, files[:middle], rows, contents, attempt, gone, status, problems)
         if first.outcome is Outcome.RETRY:
             return first
-        return self._settle(dataset, files[middle:], rows, contents, attempt, gone, status)
+        return self._settle(dataset, files[middle:], rows, contents, attempt, gone, status, problems)
 
     def _forget(self, dataset: str, files: list[str], gone: set[str]) -> None:
         for name in files:
             self.inbox.delete(dataset, name)
             gone.add(name)
 
-    def _reject(self, dataset: str, name: str, data: bytes, why: str, gone: set[str], status: dict) -> None:
+    def _reject(self, dataset: str, name: str, data: bytes, why: str, gone: set[str], status: dict,
+                problems: list[str]) -> None:
         self.inbox.put(dataset, REJECTED + name.removeprefix("inbox/"), data)
         self.inbox.delete(dataset, name)
         gone.add(name)
         status["rejected_now"] += 1
-        status["problems"].append(f"rejected {name}: {why}")
+        problems.append(f"rejected {name}: {why}")

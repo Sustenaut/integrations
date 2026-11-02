@@ -58,7 +58,8 @@ jobs:
         run: |
           kustomize edit set image "${IMAGE}=${IMAGE}:${GITHUB_SHA}"
           kustomize edit add configmap settings \
-            --from-literal="INTEGRATIONS_EDIT_PR_REPOS=$REPOS" --from-literal="INTEGRATIONS_ORIGINS=$ORIGINS"
+            --from-literal="INTEGRATIONS_EDIT_PR_REPOS=$REPOS" --from-literal="INTEGRATIONS_ORIGINS=$ORIGINS" \
+            --from-literal="INGEST_DATASETS=$DATASETS"
           kustomize edit add configmap ingest-settings --from-literal="INGEST_DATASETS=$DATASETS"
           kustomize build . > "${RUNNER_TEMP}/integrations.yaml"
           grep -q "${IMAGE}:${GITHUB_SHA}" "${RUNNER_TEMP}/integrations.yaml"
