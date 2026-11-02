@@ -6,17 +6,14 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Callable
 
 from .avrofile import decode, encode
-from .bigquery import BigQueryLoader, Outcome
+from .bigquery import BigQueryLoader, JobBudget, Outcome
 from .overflow import PENDING, REJECTED, Overflow, OverflowUnavailable
 from .spool import Batch, Spool
 
 INTERVAL_SECONDS = 120
-# Under BigQuery's 1,500 a table a day, leaving room for a person's own loads.
-JOBS_PER_TABLE_PER_DAY = 1400
 MAX_REPLAY_FILES = 50
 
 
@@ -33,26 +30,21 @@ class Worker:
     overflow_after_seconds: float = 3600
     overflow_above_bytes: int = 100_000_000
     clock: Callable[[], float] = time.time
-    jobs_today: dict[tuple[str, str], int] = field(default_factory=dict)
+    jobs: JobBudget | None = None
     first_failed: dict[str, float] = field(default_factory=dict)
 
-    def _may_load(self, dataset: str) -> bool:
-        return self.jobs_today.get(self._key(dataset), 0) < JOBS_PER_TABLE_PER_DAY
-
-    def _key(self, dataset: str) -> tuple[str, str]:
-        day = datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%d")
-        return dataset, day
+    def __post_init__(self) -> None:
+        self.jobs = self.jobs or JobBudget(self.clock)
 
     def _load(self, dataset: str, data: bytes, job: str):
-        key = self._key(dataset)
-        self.jobs_today[key] = self.jobs_today.get(key, 0) + 1
+        self.jobs.spend(dataset)
         return self.loader.load(dataset, data, job)
 
     def tick(self) -> None:
         self.spool.close_open_files()
         loaded = set()
         for batch in self.spool.batches():
-            if self._may_load(batch.dataset) and self._handle(batch):
+            if self.jobs.may_load(batch.dataset) and self._handle(batch):
                 loaded.add(batch.dataset)
         for dataset in sorted(loaded):
             self._replay(dataset)
@@ -89,7 +81,7 @@ class Worker:
         spends one job of the day."""
         try:
             entries = self.overflow.pending(dataset)[:MAX_REPLAY_FILES]
-            if not entries or not self._may_load(dataset):
+            if not entries or not self.jobs.may_load(dataset):
                 return
             records = [r for entry in entries for r in decode(self.overflow.read(dataset, entry))]
             digest = hashlib.sha256("".join(e.job_id for e in entries).encode()).hexdigest()
@@ -97,8 +89,3 @@ class Worker:
                 self.overflow.forget(PENDING, dataset, entries)
         except OverflowUnavailable as e:
             self.alert(f"Could not replay {dataset}'s call log files yet: {e}")
-
-    def run(self, sleep: Callable[[float], None] = time.sleep) -> None:  # pragma: no cover - the pod's loop
-        while True:
-            sleep(INTERVAL_SECONDS)
-            self.tick()
