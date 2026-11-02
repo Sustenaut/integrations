@@ -16,11 +16,11 @@ from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest import main  # noqa: F401 - what uvicorn runs must import
 from integrations.ingest.app import create_app
 from integrations.ingest.avrofile import decode, encode
-from integrations.ingest.bigquery import BigQueryLoader, Outcome
+from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, BigQueryLoader, Outcome
 from integrations.ingest.google_token import GoogleToken
 from integrations.ingest.overflow import PENDING, REJECTED, Overflow, OverflowUnavailable, tenant_of
 from integrations.ingest.spool import Spool
-from integrations.ingest.worker import JOBS_PER_TABLE_PER_DAY, Worker
+from integrations.ingest.worker import Worker
 
 BASE = "https://storage.example"
 
@@ -307,7 +307,8 @@ def test_a_replay_that_cant_reach_storage_alerts_and_waits(world):
 
 def test_the_days_job_limit_holds_batches_back_until_tomorrow(world, now):
     worker, spool, bigquery, _, _ = world
-    worker.jobs_today[worker._key("ds")] = JOBS_PER_TABLE_PER_DAY
+    for _ in range(JOBS_PER_TABLE_PER_DAY):
+        worker.jobs.spend("ds")
     spool.append("ds", [record(1)])
     worker.tick()
     assert bigquery.posts == 0 and len(batches(spool)) == 1

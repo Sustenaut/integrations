@@ -241,6 +241,15 @@ Each project has its own private overflow tenant in the storage service, named l
 its dataset. If storage is down too, the file
 stays in the spool. At the spool's hard cap new records are refused and counted.
 
+The pod also scans each project's buffer in storage (`inbox/calls/`), which is where
+services are moving to: they write Avro files there themselves, so nothing is lost while
+this pod or BigQuery is down. Each cycle merges what is waiting into one load job and
+deletes the files once it has loaded. A record in `batches/` names the files first, so a
+pod that stops partway sends the same job again, which BigQuery won't load twice. A
+rejected batch is split until only the bad files are left, and those move to `rejected/`.
+Each cycle prints one `ingest-status` record of facts for each project: what is waiting
+and how old it is, what was rejected, and the load jobs used today.
+
 A request's calls share one id, given by the app or made by the service, and returned
 as `X-Request-Id`. That splits a slow request three ways: each call's `latency_ms` is
 the provider's time, `service-total` is the whole request at the service, and
