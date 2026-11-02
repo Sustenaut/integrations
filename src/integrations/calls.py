@@ -245,11 +245,18 @@ class HttpSink:
 
 
 def _post_json(url: str, body: bytes) -> bool:
-    """To a service inside the cluster, so unlike `Network` this allows plain http."""
+    """To a service inside the cluster, so unlike `Network` this allows plain http.
+    Whether the batch is done with: False is worth trying again."""
     request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=10) as answer:  # noqa: S310 - a url the deployment names
             return 200 <= answer.status < 300
+    except urllib.error.HTTPError as e:
+        # Sending a batch the far end refuses again would only block the ones after it.
+        if e.code < 500:
+            print(f"integrations: {url} refused a batch of call records: HTTP {e.code}", file=sys.stderr)
+            return True
+        return False
     except (urllib.error.URLError, TimeoutError, OSError):
         return False
 

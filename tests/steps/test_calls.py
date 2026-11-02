@@ -438,6 +438,16 @@ def test_the_default_post_says_whether_it_was_taken(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", silent)
     assert not calls_post("http://ingest/records", b"{}")
 
+    def answering(code):
+        def answer(request, timeout):
+            raise urllib.error.HTTPError(request.full_url, code, "no", {}, io.BytesIO(b""))
+        return answer
+
+    monkeypatch.setattr("urllib.request.urlopen", answering(503))
+    assert not calls_post("http://ingest/records", b"{}")
+    monkeypatch.setattr("urllib.request.urlopen", answering(403))
+    assert calls_post("http://ingest/records", b"{}"), "a refused batch mustn't block the ones after it"
+
 
 def test_a_caller_for_a_project_records_that_project():
     made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
