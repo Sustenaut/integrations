@@ -216,11 +216,6 @@ namespace, from a `shared-infra` checkout beside this one:
 `./with-secrets ../integrations/k8s/admin/push-ingest-key.sh`. It also needs the variable
 `INGEST_DATASETS` on this repository: JSON from each repository to its dataset.
 
-The page's first deploy needs, from a `shared-infra` checkout beside this one and in this
-order, `k8s/admin/register-logging-client.sh` and
-`./with-secrets ../integrations/k8s/admin/push-page-secrets.sh`, and the variable
-`PAGE_DATASETS`: a JSON list of datasets.
-
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
 
@@ -265,12 +260,6 @@ as `X-Request-Id`. That splits a slow request three ways: each call's `latency_m
 the provider's time, `service-total` is the whole request at the service, and
 `client-total`, which the generated client sends in batches, is the whole request as the
 app saw it.
-
-`integrations.page` shows the log at `/logging`: each plugin's calls, p50, p95 and errors
-over the last 7 days beside its class's target, and any request id's time split apart.
-It's plain HTML from a server, in its own pod, reading with a key that can only read.
-Only `/logging` is behind the team sign-in, for people holding the `integrations` role,
-which is given on auth's access page. The service's API stays public.
 
 ## Working here
 

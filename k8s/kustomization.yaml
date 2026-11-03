@@ -8,7 +8,6 @@ resources:
   - service-accounts.yaml
   - app.yaml
   - ingest.yaml
-  - page.yaml
   - ingress.yaml
 images:
   - name: ghcr.io/sustenaut/sustenaut-integrations

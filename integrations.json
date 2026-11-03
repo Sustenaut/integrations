@@ -27,8 +27,7 @@
         ".github/workflows/deploy.yml",
         "k8s/app.yaml",
         "k8s/ingest.yaml",
-        "k8s/kustomization.yaml",
-        "k8s/page.yaml"
+        "k8s/kustomization.yaml"
       ],
       "mode": "required"
     },

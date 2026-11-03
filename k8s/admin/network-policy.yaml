@@ -18,22 +18,3 @@ spec:
               app: integrations
       ports:
         - port: 8080
----
-# Whoever reaches the page has passed sign-in, so only the proxy's pods may.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: page-only-from-proxy
-  namespace: integrations
-spec:
-  podSelector:
-    matchLabels:
-      app: integrations-page
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app: oauth2-proxy
-      ports:
-        - port: 8080
