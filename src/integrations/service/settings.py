@@ -18,6 +18,7 @@ class Settings:
     allowed_origins: frozenset[str] = frozenset()
     edit_pr_per_minute: int = 30
     edit_pr_reads_per_minute: int = 120
+    edit_pr_timings_per_minute: int = 60
     max_body_bytes: int = 5_000_000
     docs_dir: str | None = None
 
@@ -26,5 +27,6 @@ class Settings:
         return cls(edit_pr_repos=_list("INTEGRATIONS_EDIT_PR_REPOS"), allowed_origins=_list("INTEGRATIONS_ORIGINS"),
                    edit_pr_per_minute=int(os.environ.get("INTEGRATIONS_EDIT_PR_PER_MINUTE", "30")),
                    edit_pr_reads_per_minute=int(os.environ.get("INTEGRATIONS_EDIT_PR_READS_PER_MINUTE", "120")),
+                   edit_pr_timings_per_minute=int(os.environ.get("INTEGRATIONS_EDIT_PR_TIMINGS_PER_MINUTE", "60")),
                    max_body_bytes=int(os.environ.get("INTEGRATIONS_MAX_BODY_BYTES", "5000000")),
                    docs_dir=os.environ.get("INTEGRATIONS_DOCS_DIR"))
