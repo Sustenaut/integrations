@@ -13,15 +13,12 @@ that is safe to repeat, or that says it is.
 
 from __future__ import annotations
 
-import atexit
 import json
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
-from collections import deque
 from copy import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -195,72 +192,6 @@ class MemorySink:
 
     def write(self, record: CallRecord) -> None:
         self.records.append(record)
-
-
-class HttpSink:
-    """Sends records in batches, by time or by count, so one call is never one more
-    request. Writing a record never waits on the network and never fails: when the
-    far end is down, records wait in memory up to a limit, and past it the oldest
-    are dropped and counted. Only what has been sent is safe from a restart."""
-
-    def __init__(self, url: str, *, every_seconds: float = 10, batch: int = 500, limit: int = 10_000,
-                 post: Callable[[str, bytes], bool] | None = None, start: bool = True):
-        self.url, self.every_seconds, self.batch, self.limit = url, every_seconds, batch, limit
-        self.post = post or _post_json
-        self.waiting: deque[dict] = deque()
-        self.dropped = 0
-        self.lock = threading.Lock()
-        self.due = threading.Event()
-        if start:  # pragma: no cover - the process's own thread
-            threading.Thread(target=self._run, daemon=True).start()
-            atexit.register(self.flush)
-
-    def write(self, record: CallRecord) -> None:
-        with self.lock:
-            if len(self.waiting) >= self.limit:
-                self.waiting.popleft()
-                self.dropped += 1
-            self.waiting.append(asdict(record))
-            if len(self.waiting) >= self.batch:
-                self.due.set()
-
-    def flush(self) -> None:
-        """Sends what is waiting. A batch the far end doesn't take goes back, in order."""
-        while True:
-            with self.lock:
-                batch = [self.waiting.popleft() for _ in range(min(self.batch, len(self.waiting)))]
-            if not batch:
-                return
-            if not self.post(self.url, json.dumps({"records": batch}).encode()):
-                with self.lock:
-                    self.waiting.extendleft(reversed(batch))
-                    while len(self.waiting) > self.limit:
-                        self.waiting.popleft()
-                        self.dropped += 1
-                return
-
-    def _run(self) -> None:  # pragma: no cover - the process's own thread
-        while True:
-            self.due.wait(self.every_seconds)
-            self.due.clear()
-            self.flush()
-
-
-def _post_json(url: str, body: bytes) -> bool:
-    """To a service inside the cluster, so unlike `Network` this allows plain http.
-    Whether the batch is done with: False is worth trying again."""
-    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as answer:  # noqa: S310 - a url the deployment names
-            return 200 <= answer.status < 300
-    except urllib.error.HTTPError as e:
-        # Sending a batch the far end refuses again would only block the ones after it.
-        if e.code < 500:
-            print(f"integrations: {url} refused a batch of call records: HTTP {e.code}", file=sys.stderr)
-            return True
-        return False
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
 
 
 class StdoutSink:

@@ -1,28 +1,7 @@
-# The ingest pod: call records on disk, then into BigQuery every two minutes. One
+# The ingest pod: each project's buffer in storage, into BigQuery every two minutes. One
 # replica, as one writer per table keeps a table within BigQuery's daily load jobs; to
-# scale, more pods split by dataset. No ingress, and admin/network-policy.yaml lets only
-# the service reach it. Its key is the Secret admin/push-ingest-key.sh puts in.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ingest-spool
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 2Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ingest
-spec:
-  selector:
-    app: integrations-ingest
-  ports:
-    - name: http
-      port: 8080
----
+# scale, more pods split by dataset. Nothing sends to it, so it has no Service; its
+# only route is /healthz. Its key is the Secret admin/push-ingest-key.sh puts in.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,8 +34,6 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            - name: INGEST_SPOOL_DIR
-              value: /spool
             - name: INGEST_KEY_FILE
               value: /keys/key.json
             - name: INGEST_STORAGE_URL
@@ -83,8 +60,6 @@ spec:
             limits:
               memory: 384Mi
           volumeMounts:
-            - name: spool
-              mountPath: /spool
             - name: key
               mountPath: /keys
               readOnly: true
@@ -92,9 +67,6 @@ spec:
               mountPath: /var/run/secrets/storage.sustenaut.eu
               readOnly: true
       volumes:
-        - name: spool
-          persistentVolumeClaim:
-            claimName: ingest-spool
         - name: key
           secret:
             secretName: ingest-bigquery-key

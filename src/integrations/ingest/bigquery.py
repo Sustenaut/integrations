@@ -22,6 +22,10 @@ TRANSIENT = {"backendError", "internalError", "rateLimitExceeded", "quotaExceede
 JOBS_PER_TABLE_PER_DAY = 1400
 
 
+def job_id(prefix: str, digest: str) -> str:
+    return f"{prefix}_{digest[:48]}"
+
+
 class Outcome(Enum):
     LOADED = "loaded"
     REJECTED = "rejected"
