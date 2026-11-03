@@ -39,8 +39,10 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            - name: INTEGRATIONS_INGEST_URL
-              value: http://ingest:8080
+            - name: INTEGRATIONS_STORAGE_URL
+              value: https://storage.sustenaut.eu
+            - name: INTEGRATIONS_STORAGE_TOKEN_FILE
+              value: /var/run/secrets/storage.sustenaut.eu/token
           envFrom:
             - configMapRef:
                 name: settings
@@ -60,3 +62,16 @@ spec:
               memory: 96Mi
             limits:
               memory: 256Mi
+          volumeMounts:
+            - name: storage-token
+              mountPath: /var/run/secrets/storage.sustenaut.eu
+              readOnly: true
+      volumes:
+        # Only for the call log's buffers in the storage service, as this pod's own identity.
+        - name: storage-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: storage.sustenaut.eu
+                  path: token
+                  expirationSeconds: 3600

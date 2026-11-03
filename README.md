@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.11.1/integrations-0.11.1-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.12.1/integrations-0.12.1-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,7 +192,7 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.11.1/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.12.1/clients/js/github-edit-pr.js";
 
 const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
 const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
@@ -216,6 +216,11 @@ Before the first deploy with the ingest pod, a person puts the writer's key in t
 namespace, from a `shared-infra` checkout beside this one:
 `./with-secrets ../integrations/k8s/admin/push-ingest-key.sh`. It also needs the variable
 `INGEST_DATASETS` on this repository: JSON from each repository to its dataset.
+
+The page's first deploy needs, from a `shared-infra` checkout beside this one and in this
+order, `k8s/admin/register-logging-client.sh` and
+`./with-secrets ../integrations/k8s/admin/push-page-secrets.sh`, and the variable
+`PAGE_DATASETS`: a JSON list of datasets.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
@@ -242,11 +247,31 @@ Each project has its own private overflow tenant in the storage service, named l
 its dataset. If storage is down too, the file
 stays in the spool. At the spool's hard cap new records are refused and counted.
 
+The pod also scans each project's buffer in storage (`inbox/calls/`), which is where
+services are moving to: they write Avro files there themselves, so nothing is lost while
+this pod or BigQuery is down. Each cycle merges what is waiting into one load job and
+deletes the files once it has loaded. A record in `batches/` names the files first, so a
+pod that stops partway sends the same job again, which BigQuery won't load twice. A
+rejected batch is split until only the bad files are left, and those move to `rejected/`.
+
+Every sender writes a file every two minutes, even with no calls in it, and the file's
+metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and
+storage failures. Those load into a `status` table next to `calls`, so a quiet service can
+be told from one that has stopped. The pod reports too, with a file of its own for each
+project each cycle: what is waiting and how old it is, what was rejected, and the load jobs
+used today. All of this is facts, and it holds no thresholds or alerts.
+
 A request's calls share one id, given by the app or made by the service, and returned
 as `X-Request-Id`. That splits a slow request three ways: each call's `latency_ms` is
 the provider's time, `service-total` is the whole request at the service, and
 `client-total`, which the generated client sends in batches, is the whole request as the
 app saw it.
+
+`integrations.page` shows the log at `/logging`: each plugin's calls, p50, p95 and errors
+over the last 7 days beside its class's target, and any request id's time split apart.
+It's plain HTML from a server, in its own pod, reading with a key that can only read.
+Only `/logging` is behind the team sign-in, for people holding the `integrations` role,
+which is given on auth's access page. The service's API stays public.
 
 ## Working here
 

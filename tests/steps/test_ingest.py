@@ -15,12 +15,12 @@ from fastapi.testclient import TestClient
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest import main  # noqa: F401 - what uvicorn runs must import
 from integrations.ingest.app import create_app
-from integrations.ingest.avrofile import decode, encode
-from integrations.ingest.bigquery import BigQueryLoader, Outcome
+from integrations.avrofile import decode, encode
+from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, BigQueryLoader, Outcome
 from integrations.ingest.google_token import GoogleToken
 from integrations.ingest.overflow import PENDING, REJECTED, Overflow, OverflowUnavailable, tenant_of
 from integrations.ingest.spool import Spool
-from integrations.ingest.worker import JOBS_PER_TABLE_PER_DAY, Worker
+from integrations.ingest.worker import Worker
 
 BASE = "https://storage.example"
 
@@ -307,7 +307,8 @@ def test_a_replay_that_cant_reach_storage_alerts_and_waits(world):
 
 def test_the_days_job_limit_holds_batches_back_until_tomorrow(world, now):
     worker, spool, bigquery, _, _ = world
-    worker.jobs_today[worker._key("ds")] = JOBS_PER_TABLE_PER_DAY
+    for _ in range(JOBS_PER_TABLE_PER_DAY):
+        worker.jobs.spend("ds")
     spool.append("ds", [record(1)])
     worker.tick()
     assert bigquery.posts == 0 and len(batches(spool)) == 1
@@ -420,7 +421,7 @@ def test_ingest_has_no_public_docs(tmp_path):
 def test_the_record_fields_are_the_schemas():
     schema = json.loads((Path(__file__).parents[2] / "src/integrations/schemas/call-record.schema.json").read_text())
     from integrations.ingest.app import Record
-    from integrations.ingest.avrofile import SCHEMA
+    from integrations.avrofile import SCHEMA
     assert set(schema["required"]) == set(Record.model_fields) == {f["name"] for f in SCHEMA["fields"]}
 
 

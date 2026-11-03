@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable
 
@@ -14,8 +15,11 @@ from ..calls import Caller, Request, Unavailable
 PLUGIN = "google.bigquery"
 API = "https://bigquery.googleapis.com"
 TABLE = "calls"
+STATUS_TABLE = "status"
 # BigQuery's own words for a problem another try may get past.
 TRANSIENT = {"backendError", "internalError", "rateLimitExceeded", "quotaExceeded", "jobBackendError", "timeout"}
+# Under BigQuery's 1,500 a table a day, leaving room for a person's own loads.
+JOBS_PER_TABLE_PER_DAY = 1400
 
 
 class Outcome(Enum):
@@ -28,6 +32,28 @@ class Outcome(Enum):
 class LoadResult:
     outcome: Outcome
     detail: str = ""
+    # The job finished without loading, so another try needs another job id.
+    ended: bool = False
+
+
+@dataclass
+class JobBudget:
+    """A table's load jobs today, shared by everything in the pod that loads."""
+
+    clock: Callable[[], float] = time.time
+    spent: dict[tuple[str, str, str], int] = field(default_factory=dict)
+
+    def _key(self, dataset: str, table: str) -> tuple[str, str, str]:
+        return dataset, table, datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%d")
+
+    def used(self, dataset: str, table: str = TABLE) -> int:
+        return self.spent.get(self._key(dataset, table), 0)
+
+    def may_load(self, dataset: str, table: str = TABLE) -> bool:
+        return self.used(dataset, table) < JOBS_PER_TABLE_PER_DAY
+
+    def spend(self, dataset: str, table: str = TABLE) -> None:
+        self.spent[self._key(dataset, table)] = self.used(dataset, table) + 1
 
 
 class BigQueryLoader:
@@ -38,16 +64,16 @@ class BigQueryLoader:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token()}"}
 
-    def load(self, dataset: str, data: bytes, job_id: str) -> LoadResult:
+    def load(self, dataset: str, data: bytes, job_id: str, table: str = TABLE) -> LoadResult:
         try:
-            return self._load(dataset, data, job_id)
+            return self._load(dataset, data, job_id, table)
         except Unavailable as e:
             return LoadResult(Outcome.RETRY, e.detail)
 
-    def _load(self, dataset: str, data: bytes, job_id: str) -> LoadResult:
+    def _load(self, dataset: str, data: bytes, job_id: str, table: str) -> LoadResult:
         job = {"jobReference": {"projectId": self.project, "jobId": job_id},
                "configuration": {"load": {
-                   "destinationTable": {"projectId": self.project, "datasetId": dataset, "tableId": TABLE},
+                   "destinationTable": {"projectId": self.project, "datasetId": dataset, "tableId": table},
                    "sourceFormat": "AVRO", "useAvroLogicalTypes": True, "writeDisposition": "WRITE_APPEND",
                    "createDisposition": "CREATE_NEVER"}}}
         boundary = f"integrations{job_id}"
@@ -77,6 +103,6 @@ class BigQueryLoader:
                 if not error:
                     return LoadResult(Outcome.LOADED)
                 outcome = Outcome.RETRY if error.get("reason") in TRANSIENT else Outcome.REJECTED
-                return LoadResult(outcome, error.get("reason", "unknown"))
+                return LoadResult(outcome, error.get("reason", "unknown"), ended=True)
             self.sleep(2)
         return LoadResult(Outcome.RETRY, "the job did not finish in time")
