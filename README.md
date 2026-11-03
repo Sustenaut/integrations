@@ -221,32 +221,17 @@ To add a use case: add its route, regenerate the spec, and add it to `USE_CASES`
 
 ## The call log
 
-`integrations.ingest` is the pod that gets call records into BigQuery. The service
-sends it its records in batches, through `HttpSink`, each marked with the project it
-was on behalf of. The pod has no ingress, and a network policy lets only the service
-reach it.
+`integrations.ingest` is the pod that gets call records into BigQuery. Services don't
+send it anything: each writes its records, through `integrations.storage_sink.StorageSink`
+(the `storage-sink` extra), as an Avro file in its project's buffer in the storage service
+(`inbox/calls/`), so nothing is lost while this pod or BigQuery is down. Each project has
+its own private tenant, named like its dataset.
 
-Records arrive in batches and go on disk before they're acknowledged. Every two
-minutes each dataset's records become an Avro file and one BigQuery load job, so a
-table uses at most 720 of its 1,500 jobs a day. A job's id comes from its content,
-so a file can't load twice.
-
-| When BigQuery... | The file |
-|---|---|
-| has a problem that may pass | stays in the spool and is tried again. After an hour, or with a full spool, it moves to overflow, as `pending` |
-| rejects it | moves to overflow at once, as `rejected`, with an alert, and isn't tried again |
-| loads anything for that dataset | brings back up to 50 `pending` files, merged into one load |
-
-Each project has its own private overflow tenant in the storage service, named like
-its dataset. If storage is down too, the file
-stays in the spool. At the spool's hard cap new records are refused and counted.
-
-The pod also scans each project's buffer in storage (`inbox/calls/`), which is where
-services are moving to: they write Avro files there themselves, so nothing is lost while
-this pod or BigQuery is down. Each cycle merges what is waiting into one load job and
-deletes the files once it has loaded. A record in `batches/` names the files first, so a
-pod that stops partway sends the same job again, which BigQuery won't load twice. A
-rejected batch is split until only the bad files are left, and those move to `rejected/`.
+Every two minutes the pod merges what is waiting into one load job and deletes the files
+once it has loaded, so a table uses at most 720 of its 1,500 jobs a day. A record in
+`batches/` names the files first, so a pod that stops partway sends the same job again,
+which BigQuery won't load twice. A rejected batch is split until only the bad files are
+left, and those move to `rejected/`.
 
 Every sender writes a file every two minutes, even with no calls in it, and the file's
 metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and

@@ -459,9 +459,19 @@ def test_the_committed_spec_is_what_the_service_gives():
     assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec > openapi/integrations.json"
 
 
-def test_records_go_to_ingest_only_when_a_deployment_names_it(monkeypatch):
-    monkeypatch.delenv("INTEGRATIONS_INGEST_URL", raising=False)
+def test_records_go_to_storage_only_when_a_deployment_names_it(monkeypatch, tmp_path):
+    monkeypatch.delenv("INTEGRATIONS_STORAGE_URL", raising=False)
     assert isinstance(main.sink(), calls.StdoutSink)
-    monkeypatch.setenv("INTEGRATIONS_INGEST_URL", "http://ingest:8080/")
+    token = tmp_path / "token"
+    token.write_text("pod-token\n")
+    monkeypatch.setenv("INTEGRATIONS_STORAGE_URL", "https://storage.example/")
+    monkeypatch.setenv("INTEGRATIONS_STORAGE_TOKEN_FILE", str(token))
+    monkeypatch.setenv("INGEST_DATASETS", '{"o/r": "calls_r"}')
+    monkeypatch.setenv("HOSTNAME", "app-1")
+    import integrations.storage_sink as storage_sink
+    monkeypatch.setattr(storage_sink.threading, "Thread", lambda **kw: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(storage_sink.atexit, "register", lambda f: None)
     made = main.sink()
-    assert isinstance(made, calls.HttpSink) and made.url == "http://ingest:8080/records"
+    assert isinstance(made, storage_sink.StorageSink)
+    assert made.base == "https://storage.example" and made.sender == "app-1" and made.token() == "pod-token"
+    assert made.datasets == {"o/r": "calls_r"}

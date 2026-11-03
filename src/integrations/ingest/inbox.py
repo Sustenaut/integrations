@@ -26,10 +26,9 @@ from typing import Callable
 from .. import __version__
 from ..avrofile import decode, encode, encode_status, file_name, file_status, timestamp
 from ..calls import Request, Response, Transport
-from .bigquery import STATUS_TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome
-from .overflow import tenant_of
-from .worker import job_id
+from .bigquery import STATUS_TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
 
+INTERVAL_SECONDS = 120
 INBOX = "inbox/calls/"
 BATCHES = "batches/"
 REJECTED = "rejected/"
@@ -38,6 +37,11 @@ MAX_BATCH_FILES = 500
 # Merged in memory, in a pod with 384 MiB, and these files are compressed.
 MAX_BATCH_BYTES = 32_000_000
 TIMEOUT = 60
+
+
+def tenant_of(dataset: str) -> str:
+    """Each project's own tenant, named like its dataset: calls_visit_ee is calls-visit-ee."""
+    return dataset.replace("_", "-")
 
 
 class StorageDown(Exception):
