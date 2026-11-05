@@ -172,3 +172,48 @@ def test_from_a_call_to_the_tables(world):
     assert [r["request_id"] for r in bigquery.rows] == ["r1"]
     assert [(r["kind"], r["sender"], r["calls"]) for r in bigquery.status_rows] == [("sender", "app-1_x", 1)]
     assert buffer.inbox() == []
+
+
+def test_with_flush_on_write_a_request_that_finds_the_file_overdue_writes_it():
+    buffer = FakeBuffer()
+    now = [START]
+    sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
+                       clock=lambda: now[0], start=False, flush_on_write=True)
+    sink.write(call(1))
+    assert files(buffer) == []
+    now[0] += 119
+    sink.write(call(2))
+    assert files(buffer) == []
+    now[0] += 1
+    sink.write(call(3))
+    name, = files(buffer)
+    assert [r["request_id"] for r in decode(buffer.files[name])] == ["r1", "r2", "r3"]
+    assert file_status(buffer.files[name])["cycle_start"] == "2027-01-15T08:00:00Z"
+
+
+def test_without_it_writing_never_waits_on_storage(world):
+    sink, buffer, now = world
+    now[0] += 600
+    sink.write(call(1))
+    assert files(buffer) == []
+
+
+def test_a_write_doesnt_flush_while_another_flush_is_under_way():
+    buffer = FakeBuffer()
+    now = [START + 200]
+    sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
+                       clock=lambda: now[0], start=False, flush_on_write=True)
+    sink.started = START
+    sink.flushing.acquire()
+    sink.write(call(1))
+    assert files(buffer) == [] and len(sink.waiting["ds"]) == 1
+    sink.flushing.release()
+    sink.write(call(2))
+    assert len(files(buffer)) == 1
+
+
+def test_a_write_storage_didnt_take_is_said_in_the_log(world, capsys):
+    sink, buffer, _ = world
+    buffer.down_for = {"PUT"}
+    sink.flush()
+    assert "storage didn't take inbox/calls/" in capsys.readouterr().err

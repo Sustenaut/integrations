@@ -169,7 +169,7 @@ integrations slack post --channel "$USER_ID" --text "the nightly finished"
 Install it from a release's wheel, pinned by URL and hash:
 
 ```
-integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.12.1/integrations-0.12.1-py3-none-any.whl
+integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.12.2/integrations-0.12.2-py3-none-any.whl
 ```
 
 ### Releasing
@@ -192,7 +192,7 @@ spec come the JavaScript clients, the docs and a mock.
 A browser loads a client from jsDelivr at a release's tag, with its hash:
 
 ```js
-import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.12.1/clients/js/github-edit-pr.js";
+import { propose, readFiles, snapshot } from "https://cdn.jsdelivr.net/gh/Sustenaut/integrations@v0.12.2/clients/js/github-edit-pr.js";
 
 const { commit, paths, can_push } = await snapshot({ baseUrl, token, repo });
 const { files } = await readFiles({ baseUrl, token, repo, commit, paths });
