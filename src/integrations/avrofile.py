@@ -51,8 +51,8 @@ STATUS_SCHEMA = fastavro.parse_schema({
         *[_optional(name, "long") for name in (
             "calls", "drops", "buffer_size", "storage_failures", "loaded_files", "rejected_now", "inbox_files",
             "inbox_bytes", "inbox_oldest_seconds", "rejected_files", "rejected_oldest_seconds", "jobs_today",
-            "status_jobs_today")],
-        *[_optional(name, "boolean") for name in ("storage_ok", "inbox_more", "rejected_more")],
+            "status_jobs_today", "page_count", "page_ms_low", "page_ms_median", "page_ms_high")],
+        *[_optional(name, "boolean") for name in ("storage_ok", "inbox_more", "rejected_more", "cold_start")],
         _optional("problems", "string"),
     ]})
 
