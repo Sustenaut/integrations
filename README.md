@@ -174,8 +174,13 @@ integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/do
 
 ### Releasing
 
-Change `version` in `pyproject.toml` and `__version__` together. When that reaches
-`main`, `wheel.yml` tags it, makes the release and attaches the wheel.
+With [pubrel](https://github.com/Sustenaut/pubrel), like the other Sustenaut packages.
+A pull request that changes `src/` or `pyproject.toml` records what it changes
+(`pubrel add fixed "…"`, or `internal` for no release), and CI checks it. To release,
+run `pubrel prepare` on an up-to-date main in a checkout holding the release key
+(`corpus/.publet`, gitignored): it sets `version` in `pyproject.toml` (`__version__` reads
+it), signs the release and opens its pull request. Merging that tags `vX.Y.Z` and makes
+the release, and `wheel.yml` then attaches `integrations-X.Y.Z-py3-none-any.whl`.
 
 ## The service
 

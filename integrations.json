@@ -10,6 +10,8 @@
     {
       "plugin": "github.app-token",
       "paths": [
+        ".github/workflows/main.yml",
+        ".github/workflows/pr.yml",
         "src/integrations/clients/github_app_token.py"
       ],
       "mode": "required"
