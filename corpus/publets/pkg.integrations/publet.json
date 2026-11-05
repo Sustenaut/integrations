@@ -1,0 +1,103 @@
+{
+  "claims": {
+    "identity": {
+      "class": "archival",
+      "content": "integrations 0.12.3 is released as v0.12.3 from commit fb5c75f39c8cd555a673f6575191cb73df3c373d.",
+      "data": {
+        "columns": [
+          {
+            "name": "name"
+          },
+          {
+            "name": "version"
+          },
+          {
+            "name": "check"
+          },
+          {
+            "name": "expect"
+          },
+          {
+            "name": "tag"
+          },
+          {
+            "name": "commit"
+          }
+        ],
+        "rows": [
+          [
+            "integrations",
+            "0.12.3",
+            "",
+            "",
+            "v0.12.3",
+            "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+          ]
+        ]
+      },
+      "scope": "the published release v0.12.3 of integrations",
+      "sources": [
+        {
+          "ref": "integrations",
+          "revision": "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+        }
+      ]
+    },
+    "release": {
+      "class": "archival",
+      "content": "integrations 0.12.3 was released on 2026-11-05 from commit fb5c75f39c8cd555a673f6575191cb73df3c373d with these changes.",
+      "data": {
+        "columns": [
+          {
+            "name": "category"
+          },
+          {
+            "name": "change"
+          }
+        ],
+        "rows": [
+          [
+            "internal",
+            "Releases are cut with pubrel: release.json, the corpus and its release key, and pubrel's release workflow, in place of wheel.yml tagging pyproject.toml's version"
+          ],
+          [
+            "fixed",
+            "A sink's refused write now says storage's reason, and why it had no token, in the process's log"
+          ]
+        ]
+      },
+      "depends": [
+        "#identity"
+      ],
+      "scope": "the published release v0.12.3 of integrations",
+      "sources": [
+        {
+          "ref": "integrations",
+          "revision": "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+        }
+      ]
+    }
+  },
+  "created": "2026-11-05T00:00:00Z",
+  "sections": [
+    {
+      "heading": "Identity",
+      "items": [
+        {
+          "ref": "#identity"
+        }
+      ]
+    },
+    {
+      "heading": "Release",
+      "items": [
+        {
+          "ref": "#release"
+        }
+      ]
+    }
+  ],
+  "slug": "pkg.integrations",
+  "tag": "PKG-INTEGR-11-2026",
+  "title": "integrations"
+}
