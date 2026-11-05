@@ -1,0 +1,16 @@
+{
+  "name": "integrations",
+  "package": "pkg.integrations",
+  "tag": "PKG-INTEGR-11-2026",
+  "corpus": "corpus",
+  "manifest": {
+    "kind": "pyproject",
+    "path": "pyproject.toml"
+  },
+  "code": [
+    "src/",
+    "pyproject.toml"
+  ],
+  "install": "pip install https://github.com/Sustenaut/integrations/releases/download/{tag}/integrations-{version}-py3-none-any.whl",
+  "key": "pub:sha2-256:srsdpdvxotuqshmlmmio73gcwcg7ynjbnub64lujp3z5kkqeuyca"
+}

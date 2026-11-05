@@ -1,0 +1,4 @@
+{
+  "category": "internal",
+  "change": "Releases are cut with pubrel: release.json, the corpus and its release key, and pubrel's release workflow, in place of wheel.yml tagging pyproject.toml's version"
+}

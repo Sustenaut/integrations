@@ -45,3 +45,14 @@ jobs:
           echo "$RESULTS"
           echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
         env: { RESULTS: '${{ toJSON(needs) }}' }
+
+  # pubrel's release workflow: on a pull request, a code change records
+  # what it changes and a release is the bump its changes require; on
+  # main, a published version is tagged and released.
+  release:
+    needs: passed
+    uses: Sustenaut/pubrel/.github/workflows/release.yml@5395ddd816d9530b649b92ed0b8b3cfdfe87d7dc # v0.6.1
+    with: {"pubrel-version": "v0.6.1"}
+    secrets: { RELEASE_APP_ID: '${{ secrets.RELEASE_APP_ID }}', RELEASE_APP_KEY: '${{ secrets.RELEASE_APP_KEY }}' }
+    permissions:
+      contents: write

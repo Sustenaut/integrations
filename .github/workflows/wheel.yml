@@ -1,32 +1,44 @@
-# Releases the version in pyproject.toml when it reaches main: the tag, the
-# release and its wheel, once. A version already released does nothing.
+# Attaches the wheel to a release pubrel made. pubrel's release workflow, in
+# main, tags the version pyproject.toml holds and creates its GitHub release
+# once it is published; when main's run finishes, this builds that tag's
+# wheel and uploads it as integrations-X.Y.Z-py3-none-any.whl, the name
+# consumers pin by URL and hash. A release that already has its wheel, or a
+# version not yet released, does nothing. Run it by hand to attach a
+# release's wheel again.
 name: wheel
 
 on:
-  push: { branches: [main] }
+  workflow_run:
+    workflows: [main]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   wheel:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with: { persist-credentials: false }
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.14' }
-      - name: Release the version if it is new
+      - name: Attach the wheel to the release, if it has none
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "v$version is already released"
-            exit 0
-          fi
+          wheel="integrations-$version-py3-none-any.whl"
+          gh release view "v$version" >/dev/null 2>&1 || { echo "v$version is not released"; exit 0; }
+          gh release view "v$version" --json assets --jq '.assets[].name' | grep -qx "$wheel" && { echo "$wheel already attached"; exit 0; }
+          git fetch --quiet --depth 1 origin tag "v$version"
+          git checkout --quiet "v$version"
           python -m pip wheel --quiet --no-deps . -w dist
-          gh release create "v$version" "dist/integrations-$version-py3-none-any.whl" --target "$SHA" --title "integrations $version" --generate-notes
+          gh release upload "v$version" "dist/$wheel"
