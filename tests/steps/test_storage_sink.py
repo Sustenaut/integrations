@@ -46,7 +46,8 @@ def test_an_idle_cycle_still_writes_a_report(world):
     assert file_status(buffer.files[name]) == {
         "kind": "sender", "sender": "app-1_x", "version": __version__, "at": "2027-01-15T08:02:00Z",
         "cycle_start": "2027-01-15T08:00:00Z", "cycle_end": "2027-01-15T08:02:00Z", "calls": 0, "drops": 0,
-        "buffer_size": 0, "storage_failures": 0}
+        "buffer_size": 0, "storage_failures": 0, "page_count": 0, "page_ms_low": None, "page_ms_median": None,
+        "page_ms_high": None, "cold_start": True}
 
 
 def test_a_cycles_calls_are_one_file(world):
@@ -237,3 +238,51 @@ def test_a_refusal_without_a_reason_still_says_its_status(world, capsys):
     buffer.send = lambda request, timeout: Response(500, b"not json")
     sink.flush()
     assert "HTTP 500\n" in capsys.readouterr().err
+
+
+def test_page_times_become_the_windows_low_median_and_high(world):
+    sink, buffer, now = world
+    for ms in (120.4, 80, 3400, 95.6, 101):
+        sink.page(ms)
+    now[0] += 120
+    sink.flush()
+    report = file_status(buffer.files[files(buffer)[0]])
+    assert (report["page_count"], report["page_ms_low"], report["page_ms_median"], report["page_ms_high"]) == (5, 80, 101, 3400)
+
+
+def test_only_the_first_window_is_a_cold_start_and_a_quiet_one_has_no_times(world):
+    sink, buffer, now = world
+    sink.page(50)
+    now[0] += 120
+    sink.flush()
+    now[0] += 120
+    sink.flush()
+    first, second = (file_status(buffer.files[n]) for n in files(buffer))
+    assert first["cold_start"] is True and second["cold_start"] is False
+    assert second["page_count"] == 0 and second["page_ms_median"] is None
+
+
+def test_past_the_limit_page_times_are_still_counted(world, monkeypatch):
+    import integrations.storage_sink as storage_sink
+    monkeypatch.setattr(storage_sink, "PAGE_LIMIT", 3)
+    sink, buffer, _ = world
+    for ms in (10, 20, 30, 40, 50):
+        sink.page(ms)
+    sink.flush()
+    report = file_status(buffer.files[files(buffer)[0]])
+    assert report["page_count"] == 5 and report["page_ms_high"] == 30
+
+
+def test_page_times_reach_the_status_table(world):
+    sink, buffer, now = world
+    bigquery = PickyBigQuery()
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE),
+                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(lambda: now[0]), lambda _: None, lambda: now[0])
+    sink.page(250)
+    now[0] += 120
+    sink.flush()
+    scanner.tick(["ds"])
+    row, = [r for r in bigquery.status_rows if r["kind"] == "sender"]
+    assert (row["page_count"], row["page_ms_median"], row["cold_start"]) == (1, 250, True)
