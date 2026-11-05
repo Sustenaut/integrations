@@ -3,15 +3,21 @@ minutes, even with no calls in it, whose metadata is the sender's report. So a q
 service can be told from one that has stopped, and this process keeps working while
 the ingest pod or BigQuery is down.
 
-Writing a record never waits on the network and never fails. Records wait in memory up
-to a limit, and past it the oldest are dropped and counted. A file storage didn't take
-is sent again as it was, under the same name, so a lost answer can't double its calls.
-Only what storage has taken is safe from a restart.
+Writing a record never fails. Records wait in memory up to a limit, and past it the
+oldest are dropped and counted. A file storage didn't take is sent again as it was,
+under the same name, so a lost answer can't double its calls. Only what storage has
+taken is safe from a restart.
+
+A process that only has CPU while it answers a request, such as a Cloud Run service with
+CPU throttled between requests, never runs the background thread on time. Made with
+``flush_on_write``, the sink also writes its files from the request that finds them
+overdue, so that request waits on storage, once every two minutes at most.
 """
 
 from __future__ import annotations
 
 import atexit
+import sys
 import threading
 import time
 from collections import deque
@@ -29,10 +35,10 @@ TIMEOUT = 60
 class StorageSink:
     def __init__(self, datasets: dict[str, str], *, transport: Transport, token: Callable[[], str], base_url: str,
                  sender: str, every_seconds: float = EVERY_SECONDS, limit: int = 10_000,
-                 clock: Callable[[], float] = time.time, start: bool = True):
+                 clock: Callable[[], float] = time.time, start: bool = True, flush_on_write: bool = False):
         self.datasets, self.transport, self.token = datasets, transport, token
         self.base, self.sender, self.every_seconds, self.limit = base_url.rstrip("/"), sender, every_seconds, limit
-        self.clock = clock
+        self.clock, self.flush_on_write = clock, flush_on_write
         names = sorted(set(datasets.values()))
         self.waiting: dict[str, deque[dict]] = {name: deque() for name in names}
         self.held: dict[str, tuple[str, bytes]] = {}
@@ -41,6 +47,7 @@ class StorageSink:
         self.peak = dict.fromkeys(names, 0)
         self.started = clock()
         self.lock = threading.Lock()
+        self.flushing = threading.Lock()  # one flush at a time, whoever starts it
         if start:  # pragma: no cover - the process's own thread
             threading.Thread(target=self._run, daemon=True).start()
             atexit.register(self.flush)
@@ -59,9 +66,20 @@ class StorageSink:
                 self.dropped[dataset] += 1
             waiting.append(asdict(record))
             self.peak[dataset] = max(self.peak[dataset], len(waiting))
+            due = self.flush_on_write and self.clock() - self.started >= self.every_seconds
+        # Outside the lock, and only if no other flush is under way.
+        if due and self.flushing.acquire(blocking=False):
+            try:
+                self._flush_all()
+            finally:
+                self.flushing.release()
 
     def flush(self) -> None:
         """One file per project, whatever has happened since the last."""
+        with self.flushing:
+            self._flush_all()
+
+    def _flush_all(self) -> None:
         started, ended = self.started, self.clock()
         self.started = ended
         for dataset in self.waiting:
@@ -96,6 +114,9 @@ class StorageSink:
         if not answer.ok:
             with self.lock:
                 self.failures[dataset] += 1
+            # Counted in the next report, and said here too, for the process's own log.
+            print(f"integrations: storage didn't take {name} for {tenant}: {answer.error or f'HTTP {answer.status}'}",
+                  file=sys.stderr, flush=True)
         return answer.ok
 
     def _run(self) -> None:  # pragma: no cover - the process's own thread
