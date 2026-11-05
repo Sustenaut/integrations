@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "A sink's report can carry its app's page times for the window, low, median and high, and whether the process started in it"
+}
