@@ -17,6 +17,7 @@ overdue, so that request waits on storage, once every two minutes at most.
 from __future__ import annotations
 
 import atexit
+import json
 import sys
 import threading
 import time
@@ -106,20 +107,29 @@ class StorageSink:
     def _put(self, dataset: str, name: str, data: bytes) -> bool:
         tenant = dataset.replace("_", "-")
         try:
-            token = self.token()
-        except OSError:
-            token = ""
+            token, no_token = self.token(), ""
+        except OSError as e:
+            token, no_token = "", f"; no token to send: {e}"
         answer = self.transport.send(Request("PUT", f"{self.base}/{tenant}/{name}", {"Authorization": f"Bearer {token}"},
                                              data), TIMEOUT)
         if not answer.ok:
             with self.lock:
                 self.failures[dataset] += 1
-            # Counted in the next report, and said here too, for the process's own log.
-            print(f"integrations: storage didn't take {name} for {tenant}: {answer.error or f'HTTP {answer.status}'}",
-                  file=sys.stderr, flush=True)
+            # Counted in the next report, and said here too, for the process's own log, with
+            # storage's own reason: it says why a token was refused, never what was in it.
+            why = answer.error or f"HTTP {answer.status} {_reason(answer.body)}".rstrip()
+            print(f"integrations: storage didn't take {name} for {tenant}: {why}{no_token}", file=sys.stderr, flush=True)
         return answer.ok
 
     def _run(self) -> None:  # pragma: no cover - the process's own thread
         while True:
             time.sleep(self.every_seconds)
             self.flush()
+
+
+def _reason(body: bytes) -> str:
+    """Storage's {"error": ...}, kept short."""
+    try:
+        return str(json.loads(body)["error"])[:200]
+    except (ValueError, KeyError, TypeError):
+        return ""

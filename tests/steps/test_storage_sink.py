@@ -217,3 +217,23 @@ def test_a_write_storage_didnt_take_is_said_in_the_log(world, capsys):
     buffer.down_for = {"PUT"}
     sink.flush()
     assert "storage didn't take inbox/calls/" in capsys.readouterr().err
+
+
+def test_a_refusal_says_storages_reason_and_a_missing_token_says_why(world, capsys):
+    sink, buffer, _ = world
+    buffer.send = lambda request, timeout: Response(401, b'{"error": "refused: a token for another audience"}')
+
+    def no_token():
+        raise OSError("metadata server: timed out")
+
+    sink.token = no_token
+    sink.flush()
+    err = capsys.readouterr().err
+    assert "HTTP 401 refused: a token for another audience" in err and "no token to send: metadata server: timed out" in err
+
+
+def test_a_refusal_without_a_reason_still_says_its_status(world, capsys):
+    sink, buffer, _ = world
+    buffer.send = lambda request, timeout: Response(500, b"not json")
+    sink.flush()
+    assert "HTTP 500\n" in capsys.readouterr().err

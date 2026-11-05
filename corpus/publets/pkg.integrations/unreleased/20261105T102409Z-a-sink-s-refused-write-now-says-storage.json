@@ -1,0 +1,4 @@
+{
+  "category": "fixed",
+  "change": "A sink's refused write now says storage's reason, and why it had no token, in the process's log"
+}
