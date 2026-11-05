@@ -8,6 +8,10 @@ oldest are dropped and counted. A file storage didn't take is sent again as it w
 under the same name, so a lost answer can't double its calls. Only what storage has
 taken is safe from a restart.
 
+A web app can also say how long it took to answer each request, with ``page``. Its
+report then gives the window's count and its quickest, median and slowest answer, for the
+whole app, and ``cold_start`` says the process started in that window.
+
 A process that only has CPU while it answers a request, such as a Cloud Run service with
 CPU throttled between requests, never runs the background thread on time. Made with
 ``flush_on_write``, the sink also writes its files from the request that finds them
@@ -18,6 +22,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import statistics
 import sys
 import threading
 import time
@@ -30,6 +35,8 @@ from .avrofile import encode, file_name, timestamp
 from .calls import CallRecord, Request, Transport
 
 EVERY_SECONDS = 120
+# The page times a window keeps for its median; past this it goes on counting.
+PAGE_LIMIT = 10_000
 TIMEOUT = 60
 
 
@@ -46,6 +53,9 @@ class StorageSink:
         self.dropped = dict.fromkeys(names, 0)
         self.failures = dict.fromkeys(names, 0)
         self.peak = dict.fromkeys(names, 0)
+        self.pages: list[float] = []
+        self.page_count = 0
+        self.cold = True  # until the first report goes out
         self.started = clock()
         self.lock = threading.Lock()
         self.flushing = threading.Lock()  # one flush at a time, whoever starts it
@@ -75,6 +85,24 @@ class StorageSink:
             finally:
                 self.flushing.release()
 
+    def page(self, ms: float) -> None:
+        """How long the app took to answer one request, in milliseconds."""
+        with self.lock:
+            self.page_count += 1
+            if len(self.pages) < PAGE_LIMIT:
+                self.pages.append(ms)
+
+    def _page_report(self) -> dict:
+        """The window's page times, for every project's report, and then forgotten."""
+        with self.lock:
+            pages, count, cold = self.pages, self.page_count, self.cold
+            self.pages, self.page_count, self.cold = [], 0, False
+        if not pages:
+            return {"page_count": count, "page_ms_low": None, "page_ms_median": None, "page_ms_high": None,
+                    "cold_start": cold}
+        return {"page_count": count, "page_ms_low": round(min(pages)), "page_ms_median": round(statistics.median(pages)),
+                "page_ms_high": round(max(pages)), "cold_start": cold}
+
     def flush(self) -> None:
         """One file per project, whatever has happened since the last."""
         with self.flushing:
@@ -83,10 +111,11 @@ class StorageSink:
     def _flush_all(self) -> None:
         started, ended = self.started, self.clock()
         self.started = ended
+        pages = self._page_report()
         for dataset in self.waiting:
-            self._flush(dataset, started, ended)
+            self._flush(dataset, started, ended, pages)
 
-    def _flush(self, dataset: str, started: float, ended: float) -> None:
+    def _flush(self, dataset: str, started: float, ended: float, pages: dict) -> None:
         if dataset in self.held:
             if not self._put(dataset, *self.held[dataset]):
                 return
@@ -97,7 +126,7 @@ class StorageSink:
             status = {"kind": "sender", "sender": self.sender, "version": __version__, "at": timestamp(ended),
                       "cycle_start": timestamp(started), "cycle_end": timestamp(ended), "calls": len(batch),
                       "drops": self.dropped[dataset], "buffer_size": self.peak[dataset],
-                      "storage_failures": self.failures[dataset]}
+                      "storage_failures": self.failures[dataset], **pages}
             self.dropped[dataset] = self.failures[dataset] = self.peak[dataset] = 0
         data = encode(batch, status)
         name = file_name(ended, self.sender, data)
