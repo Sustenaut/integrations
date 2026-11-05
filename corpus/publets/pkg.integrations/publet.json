@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.12.3 is released as v0.12.3 from commit fb5c75f39c8cd555a673f6575191cb73df3c373d.",
+      "content": "integrations 0.12.4 is released as v0.12.4 from commit 5ffeaa386615802b6c10c8036f04214ca06fadbd.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.12.3",
+            "0.12.4",
             "",
             "",
-            "v0.12.3",
-            "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+            "v0.12.4",
+            "5ffeaa386615802b6c10c8036f04214ca06fadbd"
           ]
         ]
       },
-      "scope": "the published release v0.12.3 of integrations",
+      "scope": "the published release v0.12.4 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+          "revision": "5ffeaa386615802b6c10c8036f04214ca06fadbd"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.12.3 was released on 2026-11-05 from commit fb5c75f39c8cd555a673f6575191cb73df3c373d with these changes.",
+      "content": "integrations 0.12.4 was released on 2026-11-05 from commit 5ffeaa386615802b6c10c8036f04214ca06fadbd with these changes.",
       "data": {
         "columns": [
           {
@@ -57,23 +57,19 @@
         ],
         "rows": [
           [
-            "internal",
-            "Releases are cut with pubrel: release.json, the corpus and its release key, and pubrel's release workflow, in place of wheel.yml tagging pyproject.toml's version"
-          ],
-          [
-            "fixed",
-            "A sink's refused write now says storage's reason, and why it had no token, in the process's log"
+            "added",
+            "A sink's report can carry its app's page times for the window, low, median and high, and whether the process started in it"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.12.3 of integrations",
+      "scope": "the published release v0.12.4 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "fb5c75f39c8cd555a673f6575191cb73df3c373d"
+          "revision": "5ffeaa386615802b6c10c8036f04214ca06fadbd"
         }
       ]
     }
