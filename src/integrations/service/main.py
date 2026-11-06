@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from ..calls import Network, StdoutSink
+from ..calls import Check, Network, StdoutSink
 from .app import create_app
 
 
@@ -20,4 +20,16 @@ def sink():
     return StdoutSink()
 
 
-app = create_app(sink=sink())
+def checks() -> list[Check]:
+    """Whether the call log's buffer can be reached: the token the kubelet projects."""
+    path = os.environ.get("INTEGRATIONS_STORAGE_TOKEN_FILE")
+    if not os.environ.get("INTEGRATIONS_STORAGE_URL") or not path:
+        return []
+    try:
+        ok = bool(Path(path).read_text(encoding="utf-8").strip())
+    except OSError:
+        ok = False
+    return [Check("storage.buffer", ok, "" if ok else f"{path} can't be read")]
+
+
+app = create_app(sink=sink(), checks=checks)

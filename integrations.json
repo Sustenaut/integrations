@@ -90,13 +90,6 @@
         ".github/workflows/main.yml"
       ],
       "mode": "required"
-    },
-    {
-      "plugin": "tailscale.tailnet",
-      "paths": [
-        ".github/workflows/deploy.yml"
-      ],
-      "mode": "required"
     }
   ],
   "exclude": [

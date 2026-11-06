@@ -270,7 +270,29 @@ def test_a_projects_calls_are_recorded_as_that_projects():
 
 def test_healthz_needs_nothing():
     client, _, _ = service()
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/healthz").json() == {"status": "ok", "unhealthy": [], "alerts": []}
+    assert client.get("/livez").json() == {"status": "ok"}
+
+
+def test_a_buffer_it_cannot_reach_only_alerts():
+    from integrations.calls import Check
+    failing = lambda: [Check("storage.buffer", False, "no token")]  # noqa: E731
+    client = TestClient(create_app(Settings(), sink=MemorySink(), checks=failing))
+    answer = client.get("/healthz")
+    assert answer.status_code == 200
+    assert answer.json() == {"status": "ok", "unhealthy": [], "alerts": ["storage.buffer"]}
+
+
+def test_the_service_checks_its_storage_token(tmp_path, monkeypatch):
+    from integrations.service import main
+    token = tmp_path / "token"
+    monkeypatch.setenv("INTEGRATIONS_STORAGE_URL", "https://storage.example")
+    monkeypatch.setenv("INTEGRATIONS_STORAGE_TOKEN_FILE", str(token))
+    assert [c.ok for c in main.checks()] == [False]
+    token.write_text("t\n")
+    assert [c.ok for c in main.checks()] == [True]
+    monkeypatch.delenv("INTEGRATIONS_STORAGE_URL")
+    assert main.checks() == []
 
 
 def test_the_built_docs_are_served_and_the_interactive_ones_are_off(tmp_path):

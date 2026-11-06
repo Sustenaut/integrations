@@ -99,9 +99,20 @@ def test_a_lost_answer_finds_the_job_already_there():
 
 def test_ingest_answers_health_and_has_no_public_docs():
     http = TestClient(create_app())
-    assert http.get("/healthz").json() == {"status": "ok"}
+    assert http.get("/healthz").json() == {"status": "ok", "unhealthy": []}
+    assert http.get("/livez").json() == {"status": "ok"}
     assert http.get("/docs").status_code == 404 and http.get("/openapi.json").status_code == 404
     assert http.post("/records", json={}).status_code in (404, 405)
+
+
+def test_a_scanner_that_stops_makes_the_pod_unready_but_not_dead():
+    from integrations.ingest.main import scanning
+    from integrations.ingest.inbox import INTERVAL_SECONDS
+    assert scanning(3 * INTERVAL_SECONDS - 1).ok and not scanning(3 * INTERVAL_SECONDS).ok
+    http = TestClient(create_app(lambda: [scanning(3 * INTERVAL_SECONDS)]))
+    answer = http.get("/healthz")
+    assert answer.status_code == 503 and answer.json() == {"status": "unhealthy", "unhealthy": ["ingest.scanner"]}
+    assert http.get("/livez").status_code == 200
 
 
 def test_the_record_fields_are_the_schemas():

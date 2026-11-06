@@ -26,12 +26,7 @@ spec:
         app: integrations
     spec:
       serviceAccountName: app
-      automountServiceAccountToken: false
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        seccompProfile:
-          type: RuntimeDefault
+      # Its hardening and probes come from pubkit's app component (kustomization.yaml).
       containers:
         - name: app
           image: ghcr.io/sustenaut/sustenaut-integrations
@@ -46,16 +41,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: settings
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            periodSeconds: 10
           resources:
             requests:
               cpu: 25m
@@ -74,4 +59,4 @@ spec:
               - serviceAccountToken:
                   audience: storage.sustenaut.eu
                   path: token
-                  expirationSeconds: 3600
+                  expirationSeconds: 600
