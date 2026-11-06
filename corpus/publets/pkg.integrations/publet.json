@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.14.0 is released as v0.14.0 from commit 7e3a4604deaf459d4c22800a14efb27147917141.",
+      "content": "integrations 0.14.1 is released as v0.14.1 from commit 548e61b426ad17b59b20d8621b521489a1931b7d.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.14.0",
+            "0.14.1",
             "",
             "",
-            "v0.14.0",
-            "7e3a4604deaf459d4c22800a14efb27147917141"
+            "v0.14.1",
+            "548e61b426ad17b59b20d8621b521489a1931b7d"
           ]
         ]
       },
-      "scope": "the published release v0.14.0 of integrations",
+      "scope": "the published release v0.14.1 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "7e3a4604deaf459d4c22800a14efb27147917141"
+          "revision": "548e61b426ad17b59b20d8621b521489a1931b7d"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.14.0 was released on 2026-11-06 from commit 7e3a4604deaf459d4c22800a14efb27147917141 with these changes.",
+      "content": "integrations 0.14.1 was released on 2026-11-06 from commit 548e61b426ad17b59b20d8621b521489a1931b7d with these changes.",
       "data": {
         "columns": [
           {
@@ -58,38 +58,30 @@
         "rows": [
           [
             "added",
-            "A registry operation may name its own timeout and tries, in place of its class's"
+            "The service and the ingest pod answer /livez while the process is up; /healthz is integrations.calls.health over their checks: the ingest pod is unready, with 503, once its scanner goes three intervals without finishing a pass, and the service lists a storage buffer it can't reach as an alert only, since a call needs nothing it holds"
           ],
           [
             "added",
-            "Storage clients, clients/js/storage.js and integrations.clients.storage, generated from Sustenaut/storage's openapi.json as vendored and pinned in openapi/storage.json, as plugin storage.api"
-          ],
-          [
-            "changed",
-            "StorageSink sends its files through the storage client, as storage.api's sink operation: tried once, for up to a minute, and not recorded, as before"
+            "The ingest pod loads observability's signals, when INGEST_SIGNALS names their tenant and dataset, from that tenant's inbox/signals/ into the dataset's signals table"
           ],
           [
             "added",
-            "Unavailable carries the last response, and a Replay answer may give its ETag"
+            "The cloudflare.workers plugin, for Workers deploys"
           ],
           [
             "added",
-            "A retry waits a random time up to 2**n s (full jitter) or what a 429's or 503's Retry-After says, up to the class's timeout, and a call never runs past its timeout times its tries, in calls.py and caller.js"
-          ],
-          [
-            "changed",
-            "A sink's timer sends its first file a random part of a cycle in, so pods started together don't send at once"
+            "workers/call-log, a Durable Object per Cloudflare sender that keeps its call records durably and writes its file every two minutes, even an idle one, with caller.js's CallLogSink to send it records"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.14.0 of integrations",
+      "scope": "the published release v0.14.1 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "7e3a4604deaf459d4c22800a14efb27147917141"
+          "revision": "548e61b426ad17b59b20d8621b521489a1931b7d"
         }
       ]
     }

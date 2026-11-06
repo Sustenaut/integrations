@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "workers/call-log, a Durable Object per Cloudflare sender that keeps its call records durably and writes its file every two minutes, even an idle one, with caller.js's CallLogSink to send it records"
-}
