@@ -103,7 +103,7 @@ class Storage:
     def get_head(self, name: str, **options: Any) -> tuple[bytes, str | None]:
         """The file a head points at, and its hash (its ETag)."""
         body, response = self._call("getHead", "read", path={"name": name}, **options)
-        return body, re.sub(r'^W/|"', "", response.etag) if response.etag else None
+        return body, response.etag.removeprefix("W/").replace('"', "") if response.etag else None
 
     def move_head(self, name: str, hash: str, *, if_match: str | None = None, **options: Any) -> dict:  # noqa: A002
         """Moves the head to a stored file's hash, if it still points at `if_match`; without

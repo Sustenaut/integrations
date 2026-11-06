@@ -123,3 +123,10 @@ def test_errors_say_storages_reason_and_are_the_callers_kinds():
     assert isinstance(error, StorageError) and str(error) == "storage.api read: HTTP 404 not found"
     assert str(StorageError("write", 500, "")) == "storage.api write: HTTP 500"
     assert client.reason(None) == "" and client.reason(client.Response(500, b"<html>")) == ""
+
+
+def test_a_weak_etag_still_gives_the_hash():
+    vector = {"client": {"tenant": "deals", "token": "t"},
+              "responses": {f"GET {BASE}/deals/head/board": {"status": 200, "text": "{}", "headers": {"ETag": 'W/"abc"'}}}}
+    storage, _, _, _ = made(vector)
+    assert storage.get_head("board") == (b"{}", "abc")
