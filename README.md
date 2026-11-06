@@ -156,7 +156,11 @@ data. It goes to the `Caller`'s sink, which keeps nothing by default;
 
 An operation's class sets its timeout and tries. A call is tried again only when
 nothing answered or the provider asked for it (429, 502, 503, 504), and only if it
-is safe to repeat. A provider's refusal comes back to the client. No answer, or a
+is safe to repeat. Between tries it waits a random time up to 2**n seconds (full
+jitter, so callers that failed together don't retry together), or what a 429's or
+503's `Retry-After` says (seconds or a date), up to the class's timeout. A call never
+runs past its class's timeout times its tries, waits included: a try that wouldn't
+fit isn't started, and the last one gets only the time left. A provider's refusal comes back to the client. No answer, or a
 failure, raises `Unavailable`, whatever the mode: a failure is never swallowed.
 
 ### From JavaScript

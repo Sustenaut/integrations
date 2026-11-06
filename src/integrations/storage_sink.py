@@ -16,11 +16,15 @@ A process that only has CPU while it answers a request, such as a Cloud Run serv
 CPU throttled between requests, never runs the background thread on time. Made with
 ``flush_on_write``, the sink also writes its files from the request that finds them
 overdue, so that request waits on storage, once every two minutes at most.
+
+The background thread's first file comes a random part of a cycle in, so pods that
+started together don't all send at the same moment.
 """
 
 from __future__ import annotations
 
 import atexit
+import random
 import statistics
 import sys
 import threading
@@ -162,7 +166,13 @@ class StorageSink:
         return False
 
     def _run(self) -> None:  # pragma: no cover - the process's own thread
+        time.sleep(first_wait(self.every_seconds))
         while True:
-            time.sleep(self.every_seconds)
             self.flush()
+            time.sleep(self.every_seconds)
 
+
+def first_wait(every_seconds: float, random: Callable[[], float] = random.random) -> float:
+    """The thread's first file comes a random part of a cycle in, so pods started together
+    don't all send at once; after that, one every cycle."""
+    return random() * every_seconds
