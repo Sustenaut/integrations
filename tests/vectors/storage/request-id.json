@@ -1,0 +1,50 @@
+{
+  "description": "The app's request id and User-Agent go with the call and into its record",
+  "client": {
+    "tenant": "deals",
+    "token": "t",
+    "request_id": "r-1",
+    "user_agent": "app/1"
+  },
+  "call": "get_file",
+  "args": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "offer.pdf"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf": {
+      "status": 200,
+      "text": "x"
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf",
+        "headers": {
+          "X-Request-Id": "r-1",
+          "User-Agent": "app/1",
+          "Authorization": "Bearer t"
+        }
+      }
+    ],
+    "result": {
+      "text": "x"
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed",
+        "request_id": "r-1"
+      }
+    ]
+  }
+}

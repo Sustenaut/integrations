@@ -1,0 +1,64 @@
+{
+  "description": "Where a head has pointed",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "head_log",
+  "args": [
+    "board"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/head/board/log": {
+      "status": 200,
+      "json": {
+        "name": "board",
+        "log": [
+          {
+            "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "time": "2026-11-06T08:00:00.000Z",
+            "principal": "p"
+          },
+          {
+            "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "time": "2026-11-05T08:00:00.000Z",
+            "principal": "p"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/head/board/log"
+      }
+    ],
+    "result": [
+      {
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "time": "2026-11-06T08:00:00.000Z",
+        "principal": "p"
+      },
+      {
+        "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "time": "2026-11-05T08:00:00.000Z",
+        "principal": "p"
+      }
+    ],
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

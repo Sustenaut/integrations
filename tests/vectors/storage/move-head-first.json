@@ -1,0 +1,57 @@
+{
+  "description": "A head's first move says If-None-Match: *",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "move_head",
+  "args": [
+    "board",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "kwargs": {},
+  "responses": {
+    "PUT https://storage.example/deals/head/board": {
+      "status": 200,
+      "json": {
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "key": "deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/board.json",
+        "time": "2026-11-06T08:00:00.000Z",
+        "principal": "k8s:x/app"
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "PUT",
+        "url": "https://storage.example/deals/head/board",
+        "headers": {
+          "If-None-Match": "*",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ],
+    "result": {
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/board.json",
+      "time": "2026-11-06T08:00:00.000Z",
+      "principal": "k8s:x/app"
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "write",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

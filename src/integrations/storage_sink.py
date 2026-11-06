@@ -21,7 +21,6 @@ overdue, so that request waits on storage, once every two minutes at most.
 from __future__ import annotations
 
 import atexit
-import json
 import statistics
 import sys
 import threading
@@ -32,12 +31,12 @@ from typing import Callable
 
 from . import __version__
 from .avrofile import encode, file_name, timestamp
-from .calls import CallRecord, Request, Transport
+from .calls import CallRecord, Caller, Transport
+from .clients.storage import Storage, StorageError, StorageUnavailable
 
 EVERY_SECONDS = 120
 # The page times a window keeps for its median; past this it goes on counting.
 PAGE_LIMIT = 10_000
-TIMEOUT = 60
 
 
 class StorageSink:
@@ -45,6 +44,8 @@ class StorageSink:
                  sender: str, every_seconds: float = EVERY_SECONDS, limit: int = 10_000,
                  clock: Callable[[], float] = time.time, start: bool = True, flush_on_write: bool = False):
         self.datasets, self.transport, self.token = datasets, transport, token
+        # Its own calls to storage are the call log's plumbing, so nothing records them.
+        self.caller = Caller("integrations", f"storage-sink:{sender}", transport=transport)
         self.base, self.sender, self.every_seconds, self.limit = base_url.rstrip("/"), sender, every_seconds, limit
         self.clock, self.flush_on_write = clock, flush_on_write
         names = sorted(set(datasets.values()))
@@ -134,31 +135,34 @@ class StorageSink:
             self.held[dataset] = name, data
 
     def _put(self, dataset: str, name: str, data: bytes) -> bool:
+        """One file, through the storage client, as storage.api's sink operation: tried once,
+        for up to a minute, and not itself recorded (its caller keeps nothing)."""
+        no_token = ""
+
+        def token() -> str:
+            nonlocal no_token
+            try:
+                return self.token()
+            except OSError as e:
+                no_token = f"; no token to send: {e}"
+                return ""
+
         tenant = dataset.replace("_", "-")
+        storage = Storage(self.caller, tenant, base_url=self.base, token=token)
         try:
-            token, no_token = self.token(), ""
-        except OSError as e:
-            token, no_token = "", f"; no token to send: {e}"
-        answer = self.transport.send(Request("PUT", f"{self.base}/{tenant}/{name}", {"Authorization": f"Bearer {token}"},
-                                             data), TIMEOUT)
-        if not answer.ok:
-            with self.lock:
-                self.failures[dataset] += 1
+            storage.put_buffer(name, data, as_operation="sink")
+            return True
+        except (StorageError, StorageUnavailable) as e:
             # Counted in the next report, and said here too, for the process's own log, with
             # storage's own reason: it says why a token was refused, never what was in it.
-            why = answer.error or f"HTTP {answer.status} {_reason(answer.body)}".rstrip()
-            print(f"integrations: storage didn't take {name} for {tenant}: {why}{no_token}", file=sys.stderr, flush=True)
-        return answer.ok
+            why = f"HTTP {e.status} {e.error}".rstrip() if e.status is not None else e.detail
+        with self.lock:
+            self.failures[dataset] += 1
+        print(f"integrations: storage didn't take {name} for {tenant}: {why}{no_token}", file=sys.stderr, flush=True)
+        return False
 
     def _run(self) -> None:  # pragma: no cover - the process's own thread
         while True:
             time.sleep(self.every_seconds)
             self.flush()
 
-
-def _reason(body: bytes) -> str:
-    """Storage's {"error": ...}, kept short."""
-    try:
-        return str(json.loads(body)["error"])[:200]
-    except (ValueError, KeyError, TypeError):
-        return ""

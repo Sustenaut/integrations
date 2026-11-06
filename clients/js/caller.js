@@ -9,7 +9,8 @@ export const POLICIES = Object.freeze({
   "M": {"timeout":30,"tries":1},
 });
 
-// Each plugin's operations: its class, and how its calls reach the call log.
+// Each plugin's operations: its class, how its calls reach the call log, and its own
+// timeout and tries where its class's don't fit.
 export const OPERATIONS = Object.freeze({
   "anthropic.api": {"draft":{"class":"M","route":"none"}},
   "bitwarden.secrets": {"setup":{"class":"M","route":"none"},"read":{"class":"E","route":"reported"}},
@@ -47,6 +48,7 @@ export const OPERATIONS = Object.freeze({
   "slack.post": {"post":{"class":"E","route":"routed"},"check":{"class":"S","route":"routed"}},
   "sonarcloud.read": {"read":{"class":"S","route":"routed"}},
   "sonarcloud.scan": {"scan":{"class":"E","route":"reported"}},
+  "storage.api": {"read":{"class":"H","route":"routed"},"write":{"class":"H","route":"routed"},"buffer":{"class":"S","route":"routed"},"sink":{"class":"S","route":"none","timeout":60,"tries":1}},
   "tailscale.tailnet": {"setup":{"class":"M","route":"none"},"join":{"class":"E","route":"reported"}},
   "terraform.cloudflare": {"apply":{"class":"E","route":"reported"}},
   "terraform.desec": {"apply":{"class":"E","route":"reported"}},
@@ -84,8 +86,14 @@ export class IntegrationError extends Error {
   }
 }
 
-// The provider did not answer, or failed: another try may work.
-export class Unavailable extends IntegrationError {}
+// The provider did not answer, or failed: another try may work. answer is the last
+// Answer, if there was one, for a client that reads a failure's body.
+export class Unavailable extends IntegrationError {
+  constructor(plugin, operation, detail, answer = null) {
+    super(plugin, operation, detail);
+    this.answer = answer;
+  }
+}
 
 // The provider answered no: trying again will not change that.
 export class Refused extends IntegrationError {}
@@ -156,7 +164,8 @@ export class Caller {
   // answer, so the record says so.
   async call(plugin, operation, { method, url, headers = {}, body = null, repeatable = false }, { requestId, refused } = {}) {
     const registered = registeredOperation(plugin, operation);
-    const policy = POLICIES[registered.class];
+    // The class's timeout and tries, or the operation's own where it names them.
+    const policy = { ...POLICIES[registered.class], ...registered };
     const request = { method, url, headers, body };
     const tries = repeatable || IDEMPOTENT.has(method) ? policy.tries : 1;
     const started = this.clock();
@@ -176,7 +185,7 @@ export class Caller {
       request_id: requestId ?? this.newId(), latency_ms: latency, status: answer.status, outcome, retries,
       bytes_in: answer.body.length, bytes_out: byteLength(body),
     }));
-    if (failed) throw new Unavailable(plugin, operation, answer.error ?? `HTTP ${answer.status}`);
+    if (failed) throw new Unavailable(plugin, operation, answer.error ?? `HTTP ${answer.status}`, answer.status === null ? null : answer);
     return answer;
   }
 
@@ -257,7 +266,8 @@ const NULL_BODY = new Set([101, 204, 205, 304]); // a Response with one of these
 // Recorded answers by "METHOD url", in calls.py's Replay format, as a fetch: for tests,
 // and the shared vectors in tests/vectors/. A list answers in turn, its last one for
 // good; one not recorded has no answer. A "json" answer's body is written as Python's
-// json.dumps writes it, so both languages count the same bytes_in.
+// json.dumps writes it, so both languages count the same bytes_in. An answer's
+// "headers" are its headers, such as an ETag.
 export class Replay {
   sent = [];
 
@@ -273,7 +283,7 @@ export class Replay {
     if (!found) throw new TypeError("not recorded");
     if ("error" in found) throw new TypeError(found.error);
     const text = "text" in found ? found.text : pythonJson(found.json ?? null);
-    return new Response(NULL_BODY.has(found.status) ? null : text, { status: found.status });
+    return new Response(NULL_BODY.has(found.status) ? null : text, { status: found.status, headers: found.headers });
   };
 }
 

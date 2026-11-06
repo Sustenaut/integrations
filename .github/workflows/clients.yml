@@ -1,5 +1,6 @@
 # The JavaScript clients and the docs: each client is what the committed spec gives
-# (caller.js: what classes.json, the plugins and clients/js/src/caller.js give),
+# (caller.js: what classes.json, the plugins and clients/js/src/caller.js give; storage.js
+# and clients/storage_routes.py: what the vendored openapi/storage.json gives),
 # passes its tests, and agrees with a mock of the spec, and the docs build.
 name: clients
 
@@ -23,10 +24,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: '22' }
       - run: npm ci --no-audit --no-fund
-      - name: The clients are what the spec and the registry give
+      # generate stops when openapi/storage.json isn't the file its lock pins; the
+      # storage clients' routes, here and in Python, are then what that spec gives.
+      - name: The clients are what the specs and the registry give
         run: |
           npm run --silent generate
-          git diff --exit-code -- .
+          git diff --exit-code -- . ../../src/integrations/clients/storage_routes.py
       - run: npm test
       - name: The clients agree with a mock of the spec
         run: |

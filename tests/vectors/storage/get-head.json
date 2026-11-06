@@ -1,0 +1,47 @@
+{
+  "description": "A head's file and its hash, from its ETag",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "get_head",
+  "args": [
+    "board"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/head/board": {
+      "status": 200,
+      "text": "{}",
+      "headers": {
+        "ETag": "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/head/board"
+      }
+    ],
+    "result": {
+      "body": {
+        "text": "{}"
+      },
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

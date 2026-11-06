@@ -1,0 +1,1615 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "storage.sustenaut.eu",
+    "version": "1",
+    "description": "Photos and files for the sites that use it, in an R2 bucket. Each site is a tenant (tenants.json) with its own part of the bucket; src/storage.js's header says what each tenant setting allows. An error is always {\"error\": \"...\"}. The JavaScript and Python clients are generated from this file in Sustenaut/integrations.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://storage.sustenaut.eu"
+    }
+  ],
+  "paths": {
+    "/{tenant}/p/{id}/{size}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/photoId"
+        },
+        {
+          "$ref": "#/components/parameters/size"
+        }
+      ],
+      "get": {
+        "operationId": "getPhoto",
+        "summary": "A photo, at one width and format",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photo, cached for good (a private tenant's never)",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/jpeg"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/webp"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headPhoto",
+        "summary": "Whether the photo is stored",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/upload": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        }
+      ],
+      "post": {
+        "operationId": "uploadPhoto",
+        "summary": "Store one photo's sizes, made in the editor",
+        "security": [
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "description": "One field per size, named <width>.<jpg|webp>, at most 1600 wide and 3 MB each; at least one JPEG, and a WebP for every JPEG width if any",
+                "propertyNames": {
+                  "pattern": "^\\d+\\.(jpg|webp)$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "contentMediaType": "application/octet-stream"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The photo's description, which the site keeps in its content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Photo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/f/{id}/{name}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/fileId"
+        },
+        {
+          "$ref": "#/components/parameters/fileName"
+        }
+      ],
+      "get": {
+        "operationId": "getFile",
+        "summary": "A stored file",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, with its type; cached for good unless the tenant is private and the type isn't in its public_types",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/octet-stream"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headFile",
+        "summary": "Whether the file is stored",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/files": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        }
+      ],
+      "post": {
+        "operationId": "uploadFile",
+        "summary": "Store one file, named by its content",
+        "security": [
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "contentMediaType": "application/octet-stream",
+                    "description": "Of a type the tenant takes, checked by extension and first bytes"
+                  },
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+                    "description": "The file's name; the upload's own name when not given"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What it is, for a person; longer is cut"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "What it is about, such as a card's id, for a listing to find; longer is cut"
+                  },
+                  "kept": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "Never cleaned: a document that went out. Once kept, always kept"
+                  },
+                  "for": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Whom an app or service uploads for; ignored from a person's token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Where it is stored, and what was kept with it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "415": {
+            "$ref": "#/components/responses/415"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/head/{name}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/headName"
+        }
+      ],
+      "get": {
+        "operationId": "getHead",
+        "summary": "The file a named head points at",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, never cached",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/octet-stream"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headHead",
+        "summary": "The hash a named head points at, as its ETag",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It points somewhere",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "put": {
+        "operationId": "moveHead",
+        "summary": "Move the head to a stored file, if it hasn't moved since",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The hash it points at now (quoted, bare or weak)"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "const": "*"
+            },
+            "description": "For its first move"
+          }
+        ],
+        "security": [
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "hash"
+                ],
+                "properties": {
+                  "hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Where it points now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeadRecord"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The object's etag; for a head, its file's hash"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/head/{name}/log": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/headName"
+        }
+      ],
+      "get": {
+        "operationId": "getHeadLog",
+        "summary": "Where the head points, then where it pointed, newest first",
+        "security": [
+          {},
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeadLog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/{tenant}/inbox/{path}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/bufferPath"
+        }
+      ],
+      "put": {
+        "operationId": "putInbox",
+        "summary": "Store a file in inbox/, replacing one of the same name",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/avro": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/avro"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BufferFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getInbox",
+        "summary": "A file in inbox/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, never cached",
+            "content": {
+              "application/avro": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/avro"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headInbox",
+        "summary": "Whether a file is in inbox/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It is"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteInbox",
+        "summary": "Delete a file from inbox/, for a principal on the delete list",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted, or never there"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      }
+    },
+    "/{tenant}/rejected/{path}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/bufferPath"
+        }
+      ],
+      "put": {
+        "operationId": "putRejected",
+        "summary": "Store a file in rejected/, replacing one of the same name",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/avro": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/avro"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BufferFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getRejected",
+        "summary": "A file in rejected/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, never cached",
+            "content": {
+              "application/avro": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/avro"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headRejected",
+        "summary": "Whether a file is in rejected/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It is"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteRejected",
+        "summary": "Delete a file from rejected/, for a principal on the delete list",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted, or never there"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      }
+    },
+    "/{tenant}/batches/{name}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        },
+        {
+          "$ref": "#/components/parameters/batchName"
+        }
+      ],
+      "put": {
+        "operationId": "putBatches",
+        "summary": "Store a file in batches/, replacing one of the same name",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BufferFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getBatches",
+        "summary": "A file in batches/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/json"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headBatches",
+        "summary": "Whether a file is in batches/",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It is"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteBatches",
+        "summary": "Delete a file from batches/, for a principal on the delete list",
+        "security": [
+          {
+            "oidc": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted, or never there"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      }
+    },
+    "/{tenant}/list": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/tenant"
+        }
+      ],
+      "get": {
+        "operationId": "list",
+        "summary": "A page of a private tenant's files, or of its buffer's folders, in name order",
+        "description": "A public tenant is never listed. Listing takes a reader: a principal on the read or write list, or with \"editors\" a GitHub token that may push to the repository.",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "f/ for the tenant's files (a tenant with \"files\"), then part or all of an id, then / and the start of a name; or inbox/, batches/ or rejected/ and folders under it (a tenant with \"inbox\")",
+            "examples": {
+              "files": {
+                "value": "f/"
+              },
+              "buffer": {
+                "value": "inbox/calls/"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The last page's cursor"
+          }
+        ],
+        "security": [
+          {
+            "oidc": []
+          },
+          {
+            "github": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page, and the cursor for the next, or null at the end",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/_clean": {
+      "post": {
+        "operationId": "clean",
+        "summary": "Delete what each public tenant's site no longer uses, at most once in 20 hours",
+        "security": [
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "What was deleted and what was left alone, by tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanReport"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oidc": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "An OpenID Connect token for the audience storage.sustenaut.eu: a GitHub Actions job's, a k3s pod's service-account token, or a Google service account's identity token (src/jwt.js). Its principal must be on the tenant's read, write or delete list"
+      },
+      "github": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A GitHub token that may push to the tenant's repository: a person's, or a GitHub App installation's (ghs_...). Taken by public tenants, and by private ones with \"editors\": true"
+      }
+    },
+    "parameters": {
+      "tenant": {
+        "name": "tenant",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "description": "A tenant in tenants.json",
+        "example": "opportunity"
+      },
+      "photoId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "description": "The start of the largest JPEG's SHA-256",
+        "example": "0123456789abcdef"
+      },
+      "size": {
+        "name": "size",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\\d+\\.(jpg|webp)$"
+        },
+        "description": "<width>.<jpg|webp>",
+        "example": "960.webp"
+      },
+      "fileId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "description": "The file's SHA-256",
+        "example": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "fileName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+        },
+        "example": "report.pdf"
+      },
+      "headName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "example": "board"
+      },
+      "bufferPath": {
+        "name": "path",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}/){0,5}[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.avro$"
+        },
+        "description": "Up to five folders and an Avro file's name. Its slashes are sent as they are, not escaped",
+        "x-slashes": true,
+        "example": "calls/2026-11-06/080200-web-0123456789abcdef.avro"
+      },
+      "batchName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\\.json$"
+        },
+        "example": "job-1.json"
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "The request is wrong: the error says how",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "No token, or one this tenant doesn't take",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "The token's principal may not do this",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "No such tenant, route or stored object",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "412": {
+        "description": "The head has moved since, or has never moved and If-None-Match: * wasn't sent",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "413": {
+        "description": "Too big for the tenant",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "415": {
+        "description": "A file type the tenant doesn't take",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "429": {
+        "description": "Cleaned recently",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "GitHub didn't answer in time, or can't be reached: try again",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Why, for a person"
+          }
+        }
+      },
+      "Photo": {
+        "type": "object",
+        "required": [
+          "id",
+          "width",
+          "height",
+          "widths",
+          "formats"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "widths": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "webp",
+                "jpg"
+              ]
+            }
+          }
+        }
+      },
+      "StoredFile": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "type",
+          "size",
+          "label",
+          "subject",
+          "kept"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Its path here: /<tenant>/f/<id>/<name>"
+          },
+          "type": {
+            "type": "string",
+            "description": "Its Content-Type"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "kept": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HeadRecord": {
+        "type": "object",
+        "required": [
+          "hash",
+          "key",
+          "time",
+          "principal"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "key": {
+            "type": "string",
+            "description": "The stored file's key"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "principal": {
+            "type": "string"
+          }
+        }
+      },
+      "HeadLog": {
+        "type": "object",
+        "required": [
+          "name",
+          "log"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "hash",
+                "time",
+                "principal"
+              ],
+              "properties": {
+                "hash": {
+                  "type": "string"
+                },
+                "time": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "principal": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "BufferFile": {
+        "type": "object",
+        "required": [
+          "name",
+          "size"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its place in the tenant, such as inbox/calls/..."
+          },
+          "size": {
+            "type": "integer"
+          }
+        }
+      },
+      "ListedFile": {
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "url",
+          "size",
+          "uploaded",
+          "metadata"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "url": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "uploaded": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "What the upload said of the file; only what it said",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "kept": {
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              },
+              "by": {
+                "type": "string",
+                "description": "Who uploaded: a GitHub login, github-app, or an OpenID Connect principal"
+              },
+              "for": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ListedBufferFile": {
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "uploaded"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "uploaded": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Listing": {
+        "type": "object",
+        "required": [
+          "files",
+          "cursor"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ListedFile"
+                },
+                {
+                  "$ref": "#/components/schemas/ListedBufferFile"
+                }
+              ]
+            },
+            "description": "ListedFile for prefix f/, ListedBufferFile for a buffer's folders"
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CleanReport": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "deleted": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skipped": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
