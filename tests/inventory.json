@@ -35,5 +35,5 @@
     "Finto: subject terms": ["finto.terms"],
     "Anthropic API: drafts": ["anthropic.api"]
   },
-  "found_by_the_scan": ["github.repo-ops", "storage.api"]
+  "found_by_the_scan": ["github.repo-ops", "storage.api", "cloudflare.workers"]
 }

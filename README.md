@@ -218,6 +218,17 @@ and says when storage's main has a newer one. To move to it: vendor the file, up
 lock's `commit` and `sha256`, and run `npm run generate`. The JSON vectors in
 `tests/vectors/storage/` run on both clients.
 
+Code on Cloudflare (a Worker, a Pages Function) has no process that lives two
+minutes, so it sends its records to `workers/call-log`, a Durable Object per sender:
+`CallLogSink` keeps a request's records and `send()`s them in one call, which the request
+hands to `waitUntil`. The object keeps each record in its own durable storage at once, and
+on its alarm, every two minutes whether or not anything came, writes the sender's Avro file
+(records and report, as `StorageSink`'s) into its buffer tenant in storage's R2 bucket. So
+nothing waits in a Worker's memory, and a quiet sender still reports. `SENDERS` in its
+`wrangler.toml` is the fixed map from each sender to its dataset; an instance writes only
+its own tenant's `inbox/`. A Worker or Pages project binds it with a `durable_objects`
+binding naming `script_name = "call-log"`; `.github/workflows/call-log.yml` deploys it.
+
 There is no npm release: depend on a release's tag, as with pubpr.
 
 ```json

@@ -434,6 +434,40 @@ export class StorageSink {
   }
 }
 
+// Call records into the call-log Durable Object (workers/call-log), for a Worker or a
+// Pages Function, where nothing lives long enough to hold them two minutes: write() keeps
+// them for the request, and send() posts them to the sender's object in one call, which
+// the request hands to waitUntil. namespace is the binding, or a function giving the
+// request's. Sending never rejects: records it can't send are said in the log and let go.
+export class CallLogSink {
+  pending = [];
+
+  constructor({ sender, namespace }) {
+    if (!sender || !namespace) throw new TypeError("a CallLogSink needs a sender and a namespace");
+    Object.assign(this, { sender, namespace });
+  }
+
+  write(record) {
+    this.pending.push({ ...record });
+  }
+
+  async send() {
+    if (!this.pending.length) return;
+    const records = this.pending;
+    this.pending = [];
+    try {
+      const namespace = typeof this.namespace === "function" ? this.namespace() : this.namespace;
+      const instance = namespace.get(namespace.idFromName(this.sender));
+      const answer = await instance.fetch("https://call-log/records", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sender: this.sender, records }),
+      });
+      if (!answer.ok) throw new Error(`HTTP ${answer.status} ${reason(await answer.text().catch(() => ""))}`.trimEnd());
+    } catch (err) {
+      console.error(`integrations: the call log didn't take ${records.length} records from ${this.sender}: ${err?.message ?? err}`);
+    }
+  }
+}
+
 // Storage's {"error": ...}, kept short.
 function reason(body) {
   try {

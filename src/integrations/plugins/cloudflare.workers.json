@@ -1,0 +1,28 @@
+{
+  "id": "cloudflare.workers",
+  "provider": "Cloudflare",
+  "use": "Workers deploys, such as the call log's Durable Object",
+  "operations": [
+    {
+      "name": "deploy",
+      "class": "E",
+      "route": "reported"
+    }
+  ],
+  "setup": [
+    "Create an account API token with the Workers Editor role",
+    "Send the token to the repository"
+  ],
+  "detect": {
+    "commands": [
+      "wrangler"
+    ],
+    "env": [
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_WORKERS_GITHUB_TOKEN"
+    ],
+    "patterns": [
+      "\\bnew_sqlite_classes\\b|\\bnew_classes\\b"
+    ]
+  }
+}
