@@ -10,7 +10,7 @@
     }
   ],
   "setup": [
-    "Create a Workers-scoped API token (Workers Scripts: Edit, Account Settings: Read)",
+    "Create an account API token with the Workers Editor role",
     "Send the token to the repository"
   ],
   "detect": {
