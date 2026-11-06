@@ -1,0 +1,27 @@
+# call-log: the call log's buffer for code that runs on Cloudflare (src/call-log.js), one
+# Durable Object per sender, which keeps each record durably and every two minutes writes
+# the sender's Avro file into its buffer tenant in storage's R2 bucket. A Worker or Pages
+# project binds to it with a durable_objects binding naming script_name = "call-log".
+# Deployed by .github/workflows/call-log.yml.
+name = "call-log"
+main = "src/call-log.js"
+compatibility_date = "2026-10-01"
+account_id = "fbb18d9de3550ea518750a71f532e72d"
+workers_dev = false
+
+# Who may send, and the dataset each one's records go to (its tenant: "-" for "_"). An
+# instance writes only its sender's tenant's inbox/.
+[vars.SENDERS]
+storage = "calls_storage"
+
+[[durable_objects.bindings]]
+name = "CALL_LOG"
+class_name = "CallLog"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CallLog"]
+
+[[r2_buckets]]
+binding = "CALLS"
+bucket_name = "sustenaut-storage"

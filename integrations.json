@@ -8,6 +8,21 @@
       "mode": "required"
     },
     {
+      "plugin": "cloudflare.r2",
+      "paths": [
+        "workers/call-log/wrangler.toml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "cloudflare.workers",
+      "paths": [
+        ".github/workflows/call-log.yml",
+        "workers/call-log/wrangler.toml"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "github.app-token",
       "paths": [
         ".github/workflows/main.yml",
