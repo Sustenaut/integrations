@@ -44,15 +44,17 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     buffers = sorted(set(datasets.values()) | set(kinds))
 
     ticked = [time.monotonic()]
-
-    def run() -> None:
-        while True:
-            time.sleep(INTERVAL_SECONDS)
-            scanner.tick(buffers)
-            ticked[0] = time.monotonic()
-
-    threading.Thread(target=run, daemon=True).start()
+    threading.Thread(target=scan, args=(scanner, buffers, ticked), daemon=True).start()
     return create_app(lambda: [scanning(time.monotonic() - ticked[0])])
+
+
+def scan(scanner: Scanner, buffers: list[str], ticked: list[float], *, sleep=time.sleep, clock=time.monotonic) -> None:
+    """The scanner's loop: a pass straight away, then one every interval. Passing first
+    means a new pod reports at once, so a deploy leaves no gap longer than its restart."""
+    while True:
+        scanner.tick(buffers)
+        ticked[0] = clock()
+        sleep(INTERVAL_SECONDS)
 
 
 def scanning(since: float) -> Check:
