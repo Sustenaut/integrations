@@ -98,13 +98,6 @@
         "src/integrations/storage_sink.py"
       ],
       "mode": "required"
-    },
-    {
-      "plugin": "tailscale.tailnet",
-      "paths": [
-        ".github/workflows/deploy.yml"
-      ],
-      "mode": "required"
     }
   ],
   "exclude": [

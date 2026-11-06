@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..calls import Caller, IntegrationError, Sink, StdoutSink, Transport, Unavailable
+from ..calls import Caller, Check, IntegrationError, Sink, StdoutSink, Transport, Unavailable, health
 from ..clients.github_edit_pr import GitHubRefused, OneCommitProposer, RepositoryReader
 from .settings import Settings
 
@@ -118,8 +118,13 @@ class Problem(BaseModel):
     detail: str | list[dict]
 
 
+# A call goes to GitHub with the caller's own token, so nothing the service holds is
+# required to answer it: a sink that fails loses records, not calls. Its checks only alert.
+ADVISORY = {"storage.buffer": "advisory"}
+
+
 def create_app(settings: Settings | None = None, *, transport: Transport | None = None,
-               sink: Sink | None = None) -> FastAPI:
+               sink: Sink | None = None, checks: Callable[[], list[Check]] = list) -> FastAPI:
     settings = settings or Settings.from_env()
     # A token could only reach a page's URL by mistake, so the interactive docs,
     # which load scripts from a CDN, are off. The docs are built from the spec.
@@ -179,9 +184,16 @@ def create_app(settings: Settings | None = None, *, transport: Transport | None 
     def root() -> RedirectResponse:
         return RedirectResponse("/docs/")
 
-    @app.get("/healthz", include_in_schema=False)
-    def healthz() -> dict[str, str]:
+    @app.get("/livez", include_in_schema=False)
+    def livez() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz() -> JSONResponse:
+        h = health(checks(), ADVISORY)
+        return JSONResponse({"status": "ok" if h.healthy else "unhealthy",
+                             "unhealthy": [c.plugin for c in h.unhealthy], "alerts": [c.plugin for c in h.alerts]},
+                            status_code=200 if h.healthy else 503)
 
     @app.post("/v1/github/edit-pr/proposals", tags=["github.edit-pr"], operation_id="propose",
               response_model=Opened | NothingToChange | Stale, response_model_exclude_none=True,

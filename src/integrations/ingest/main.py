@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 
-from ..calls import Caller, Network, StdoutSink
+from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import GoogleToken
@@ -27,13 +27,22 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
                       sender=os.environ.get("HOSTNAME", "ingest"))
     buffers = sorted(set(datasets.values()))
 
+    ticked = [time.monotonic()]
+
     def run() -> None:
         while True:
             time.sleep(INTERVAL_SECONDS)
             scanner.tick(buffers)
+            ticked[0] = time.monotonic()
 
     threading.Thread(target=run, daemon=True).start()
-    return create_app()
+    return create_app(lambda: [scanning(time.monotonic() - ticked[0])])
+
+
+def scanning(since: float) -> Check:
+    """The scanner works while it finishes a pass every few intervals: a pass that
+    hangs, or a thread that died, stops the clock."""
+    return Check("ingest.scanner", since < 3 * INTERVAL_SECONDS, f"last pass {int(since)} s ago")
 
 
 app = build() if os.environ.get("INGEST_KEY_FILE") else None
