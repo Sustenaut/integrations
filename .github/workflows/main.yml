@@ -13,7 +13,7 @@ jobs:
   # it ran are skipped, and nothing here tests less than the queue did.
   tested:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-tested.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-tested.yml@c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
     with: {"workflow": ".github/workflows/pr.yml"}
     permissions:
       actions: read
@@ -23,25 +23,25 @@ jobs:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
 
   audit:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
 
   osv:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
 
   sonar:
     name: ci
     needs: [tested, functional]
     if: ${{ !failure() && !cancelled() }}
-    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
     permissions:
       actions: read
       contents: read

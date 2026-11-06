@@ -12,7 +12,7 @@ resources:
 # The app's hardening and probes, shared by every service (pubkit's README, "Deploying a
 # service to k3s"). The ingest pod keeps its own, in ingest.yaml.
 components:
-  - https://github.com/Sustenaut/pubkit//k8s/components/app?ref=1499dba4482c50463e54be1ded1d85d07151e00b # v0.30.0
+  - https://github.com/Sustenaut/pubkit//k8s/components/app?ref=c7785ba2f32bd5c5a78053e9bfeaa1f966ae36f1 # v0.30.0
 images:
   - name: ghcr.io/sustenaut/sustenaut-integrations
     newTag: unset
