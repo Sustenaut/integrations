@@ -119,6 +119,10 @@
     {
       "path": "tests/**",
       "reason": "scenarios about the signatures"
+    },
+    {
+      "path": "corpus/**",
+      "reason": "release records: changelog prose and the signed publets made from it"
     }
   ],
   "other_secrets": [
