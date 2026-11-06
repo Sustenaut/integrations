@@ -2,11 +2,12 @@
   "name": "@sustenaut/integrations",
   "version": "0.0.0",
   "private": true,
-  "description": "The JavaScript side of integrations: caller.js and the generated clients. Depend on a release tag, github:Sustenaut/integrations#vX.Y.Z; the tag is the version.",
+  "description": "The JavaScript side of integrations: caller.js and the generated clients, storage.js among them. Depend on a release tag, github:Sustenaut/integrations#vX.Y.Z; the tag is the version.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
     "./caller.js": "./clients/js/caller.js",
+    "./storage.js": "./clients/js/storage.js",
     "./github-edit-pr.js": "./clients/js/github-edit-pr.js"
   },
   "files": [

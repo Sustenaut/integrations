@@ -1,0 +1,121 @@
+{
+  "description": "Every page of the files, then only those with the subject",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "list_files",
+  "args": [],
+  "kwargs": {
+    "subject": "card-42"
+  },
+  "responses": {
+    "GET https://storage.example/deals/list?prefix=f%2F": {
+      "status": 200,
+      "json": {
+        "files": [
+          {
+            "name": "offer.pdf",
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "url": "/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf",
+            "size": 9,
+            "uploaded": "2026-11-01T00:00:00.000Z",
+            "metadata": {
+              "subject": "card-42",
+              "by": "x"
+            }
+          },
+          {
+            "name": "notes.pdf",
+            "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "url": "/deals/f/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/notes.pdf",
+            "size": 4,
+            "uploaded": "2026-11-01T00:00:00.000Z",
+            "metadata": {
+              "by": "x"
+            }
+          }
+        ],
+        "cursor": "2"
+      }
+    },
+    "GET https://storage.example/deals/list?prefix=f%2F&cursor=2": {
+      "status": 200,
+      "json": {
+        "files": [
+          {
+            "name": "terms.pdf",
+            "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "url": "/deals/f/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/terms.pdf",
+            "size": 9,
+            "uploaded": "2026-11-01T00:00:00.000Z",
+            "metadata": {
+              "subject": "card-42",
+              "by": "x"
+            }
+          }
+        ],
+        "cursor": null
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/list?prefix=f%2F",
+        "headers": {
+          "Authorization": "Bearer t"
+        }
+      },
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/list?prefix=f%2F&cursor=2"
+      }
+    ],
+    "result": [
+      {
+        "name": "offer.pdf",
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "url": "/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf",
+        "size": 9,
+        "uploaded": "2026-11-01T00:00:00.000Z",
+        "metadata": {
+          "subject": "card-42",
+          "by": "x"
+        }
+      },
+      {
+        "name": "terms.pdf",
+        "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "url": "/deals/f/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/terms.pdf",
+        "size": 9,
+        "uploaded": "2026-11-01T00:00:00.000Z",
+        "metadata": {
+          "subject": "card-42",
+          "by": "x"
+        }
+      }
+    ],
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      },
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

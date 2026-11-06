@@ -1,0 +1,51 @@
+{
+  "description": "A buffer's file goes to its folder, its slashes as they are",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "put_buffer",
+  "args": [
+    "inbox/calls/2026-11-06/080200-web-0123.avro",
+    {
+      "bytes": "Obj\u0001"
+    }
+  ],
+  "kwargs": {},
+  "responses": {
+    "PUT https://storage.example/deals/inbox/calls/2026-11-06/080200-web-0123.avro": {
+      "status": 200,
+      "json": {
+        "name": "inbox/calls/2026-11-06/080200-web-0123.avro",
+        "size": 4
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "PUT",
+        "url": "https://storage.example/deals/inbox/calls/2026-11-06/080200-web-0123.avro",
+        "headers": {
+          "Content-Type": "application/avro"
+        }
+      }
+    ],
+    "result": {
+      "name": "inbox/calls/2026-11-06/080200-web-0123.avro",
+      "size": 4
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "buffer",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

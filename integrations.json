@@ -92,6 +92,14 @@
       "mode": "required"
     },
     {
+      "plugin": "storage.api",
+      "paths": [
+        "src/integrations/clients/storage.py",
+        "src/integrations/storage_sink.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "tailscale.tailnet",
       "paths": [
         ".github/workflows/deploy.yml"

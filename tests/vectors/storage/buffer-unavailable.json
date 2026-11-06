@@ -1,0 +1,56 @@
+{
+  "description": "Buffer work is scheduled (S): tried three times, then StorageUnavailable with storage's reason",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "get_buffer",
+  "args": [
+    "inbox/calls/a.avro"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/inbox/calls/a.avro": {
+      "status": 503,
+      "json": {
+        "error": "GitHub didn't answer within 10 s; try again"
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/inbox/calls/a.avro"
+      },
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/inbox/calls/a.avro"
+      },
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/inbox/calls/a.avro"
+      }
+    ],
+    "result": null,
+    "raises": {
+      "type": "StorageUnavailable",
+      "status": 503,
+      "error": "GitHub didn't answer within 10 s; try again"
+    },
+    "sleeps": [
+      1,
+      2
+    ],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "buffer",
+        "status": 503,
+        "outcome": "unavailable",
+        "retries": 2,
+        "route": "routed"
+      }
+    ]
+  }
+}

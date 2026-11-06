@@ -188,6 +188,32 @@ that finds a file overdue sends it; give it the request's `waitUntil`
 Node, `start: true` also sends every two minutes. `MemorySink`, `NullSink` and `Replay`
 (a recorded fetch, for tests) are there too.
 
+`clients/js/storage.js` is the storage service's client on that `Caller`, and
+`integrations.clients.storage` the same in Python: one tenant's files (upload, get, and a
+list across every page, filtered by `subject`), named heads (get, move with `If-Match`,
+log) and buffers (put, get, delete, list). Each call is plugin `storage.api`: `read` and
+`write` for an app (class H), `buffer` for scheduled buffer work (S). It takes `baseUrl`,
+`tenant`, `token` or `tokenFile` (read for each request), `caller`, `requestId` (sent as
+`X-Request-Id`) and `userAgent`. Storage saying no is a `StorageError` (`NotFound` for a
+404) with its `status` and `error`; failing or not answering is `StorageUnavailable`.
+
+```js
+import { Storage } from "@sustenaut/integrations/storage.js";
+
+const storage = new Storage({ tenant: "my-tenant", tokenFile: "/var/run/secrets/storage/token", caller });
+const { id } = await storage.uploadFile(bytes, { name: "offer.pdf", subject: "card-42" });
+const files = await storage.listFiles({ subject: "card-42" });
+```
+
+Both are generated from Sustenaut/storage's `openapi.json`, vendored in
+`openapi/storage.json` at the commit `openapi/storage.lock.json` pins with its SHA-256.
+`npm run generate` stops when the file isn't that one, and the `clients` check fails when
+`storage.js` or `src/integrations/clients/storage_routes.py` differ from what it gives.
+`storage-spec.yml` checks, weekly or by hand, that the vendored file is the pinned commit's
+and says when storage's main has a newer one. To move to it: vendor the file, update the
+lock's `commit` and `sha256`, and run `npm run generate`. The JSON vectors in
+`tests/vectors/storage/` run on both clients.
+
 There is no npm release: depend on a release's tag, as with pubpr.
 
 ```json

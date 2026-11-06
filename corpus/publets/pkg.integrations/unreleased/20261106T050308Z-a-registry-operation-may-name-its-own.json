@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "A registry operation may name its own timeout and tries, in place of its class's"
+}

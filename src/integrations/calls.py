@@ -78,7 +78,12 @@ class IntegrationError(Exception):
 
 
 class Unavailable(IntegrationError):
-    """The provider did not answer, or failed: another try may work."""
+    """The provider did not answer, or failed: another try may work. `response` is
+    the last answer, if there was one, for a client that reads a failure's body."""
+
+    def __init__(self, plugin: str, operation: str, detail: str, response: Response | None = None):
+        super().__init__(plugin, operation, detail)
+        self.response = response
 
 
 class Refused(IntegrationError):
@@ -113,7 +118,8 @@ def recorded_key(request: Request) -> str:
 
 class Replay:
     """Recorded responses, by method and URL; one not recorded has no answer.
-    A list of responses answers in turn, for a call whose answer changes."""
+    A list of responses answers in turn, for a call whose answer changes. An answer's
+    "headers" may give its ETag."""
 
     def __init__(self, responses: dict[str, Any]):
         self.responses = responses
@@ -132,9 +138,10 @@ class Replay:
             return Response(None, error="not recorded")
         if "error" in found:
             return Response(None, error=found["error"])
+        etag = found.get("headers", {}).get("ETag")
         if "text" in found:
-            return Response(found["status"], found["text"].encode("utf-8"))
-        return Response(found["status"], json.dumps(found.get("json")).encode("utf-8"))
+            return Response(found["status"], found["text"].encode("utf-8"), etag=etag)
+        return Response(found["status"], json.dumps(found.get("json")).encode("utf-8"), etag=etag)
 
 
 class Recording:
@@ -224,6 +231,12 @@ def read_modes(root: Path) -> dict[str, str]:
     return modes
 
 
+def _policy(operation: dict) -> Policy:
+    """The operation's class's timeout and tries, or its own where it names them."""
+    policy = POLICIES[operation["class"]]
+    return Policy(operation.get("timeout", policy.timeout), operation.get("tries", policy.tries))
+
+
 class Caller:
     def __init__(self, repo: str, app: str = "", *, sink: Sink | None = None, transport: Transport | None = None,
                  modes: dict[str, str] | None = None, clock: Callable[[], float] = time.monotonic,
@@ -253,7 +266,7 @@ class Caller:
         registered = self.classes.get((plugin, operation))
         if registered is None:
             raise ValueError(f"{plugin} {operation} is not a registered operation")
-        policy = POLICIES[registered["class"]]
+        policy = _policy(registered)
         tries = policy.tries if request.repeatable or request.method in IDEMPOTENT else 1
         started = self.clock()
         response = self.transport.send(request, policy.timeout)
@@ -272,7 +285,8 @@ class Caller:
             bytes_in=len(response.body), bytes_out=len(request.body or b""), mode=self.mode(plugin),
             route=registered["route"]))
         if failed:
-            raise Unavailable(plugin, operation, response.error or f"HTTP {response.status}")
+            raise Unavailable(plugin, operation, response.error or f"HTTP {response.status}",
+                              response if response.status is not None else None)
         return response
 
     def note(self, plugin: str, operation: str, *, request_id: str, latency_ms: int, status: int | None,

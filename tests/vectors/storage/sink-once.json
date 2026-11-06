@@ -1,0 +1,47 @@
+{
+  "description": "The sink's own put is tried once and routed nowhere",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "put_buffer",
+  "args": [
+    "inbox/calls/b.avro",
+    {
+      "bytes": "Obj\u0001"
+    }
+  ],
+  "kwargs": {
+    "as_operation": "sink"
+  },
+  "responses": {
+    "PUT https://storage.example/deals/inbox/calls/b.avro": {
+      "error": "no answer"
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "PUT",
+        "url": "https://storage.example/deals/inbox/calls/b.avro"
+      }
+    ],
+    "result": null,
+    "raises": {
+      "type": "StorageUnavailable",
+      "status": null,
+      "error": ""
+    },
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "sink",
+        "status": null,
+        "outcome": "unavailable",
+        "retries": 0,
+        "route": "none"
+      }
+    ]
+  }
+}

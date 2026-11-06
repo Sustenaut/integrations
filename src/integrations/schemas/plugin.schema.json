@@ -19,7 +19,9 @@
         "properties": {
           "name": {"type": "string", "minLength": 1},
           "class": {"enum": ["H", "E", "S", "M"], "description": "classes.json gives its targets"},
-          "route": {"enum": ["routed", "reported", "none"], "description": "routed: through the service; reported: a vendor's own action makes the call and a record is posted; none: nothing to log"}
+          "route": {"enum": ["routed", "reported", "none"], "description": "routed: through the service; reported: a vendor's own action makes the call and a record is posted; none: nothing to log"},
+          "timeout": {"type": "number", "exclusiveMinimum": 0, "description": "Seconds, in place of its class's, for an operation the class doesn't fit"},
+          "tries": {"type": "integer", "minimum": 1, "description": "In place of its class's"}
         }
       }
     },

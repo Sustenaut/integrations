@@ -1,0 +1,34 @@
+# The storage clients are generated from Sustenaut/storage's openapi.json as vendored in
+# openapi/storage.json, at the commit openapi/storage.lock.json pins. This checks that the
+# vendored file is that commit's, byte for byte, and says when storage's main has a newer
+# spec, to vendor with its lock. It is the only check that fetches it, so the clients
+# check needs no network.
+name: storage-spec
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with: { persist-credentials: false }
+      - name: The vendored spec is the pinned commit's
+        run: |
+          repo=$(jq -r .repository openapi/storage.lock.json)
+          commit=$(jq -r .commit openapi/storage.lock.json)
+          path=$(jq -r .path openapi/storage.lock.json)
+          want=$(jq -r .sha256 openapi/storage.lock.json)
+          curl -fsSL "https://raw.githubusercontent.com/$repo/$commit/$path" -o pinned.json
+          echo "$want  pinned.json" | sha256sum -c -
+          echo "$want  openapi/storage.json" | sha256sum -c -
+          curl -fsSL "https://raw.githubusercontent.com/$repo/main/$path" -o main.json
+          if ! cmp -s main.json pinned.json; then
+            echo "::notice::$repo's main has a newer $path than $commit: vendor it into openapi/storage.json, update its lock, and run npm run generate in clients/js."
+          fi

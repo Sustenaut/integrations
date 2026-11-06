@@ -1,0 +1,42 @@
+{
+  "description": "A file's bytes",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "get_file",
+  "args": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "offer.pdf"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf": {
+      "status": 200,
+      "text": "%PDF-1.7\n"
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf"
+      }
+    ],
+    "result": {
+      "text": "%PDF-1.7\n"
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

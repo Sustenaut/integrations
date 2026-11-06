@@ -1,0 +1,51 @@
+{
+  "description": "A move from where it no longer points is a StorageError with status 412",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "move_head",
+  "args": [
+    "board",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "kwargs": {
+    "if_match": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "responses": {
+    "PUT https://storage.example/deals/head/board": {
+      "status": 412,
+      "json": {
+        "error": "board points at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "PUT",
+        "url": "https://storage.example/deals/head/board",
+        "headers": {
+          "If-Match": "\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\""
+        }
+      }
+    ],
+    "result": null,
+    "raises": {
+      "type": "StorageError",
+      "status": 412,
+      "error": "board points at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "write",
+        "status": 412,
+        "outcome": "refused",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

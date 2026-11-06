@@ -1,0 +1,39 @@
+{
+  "id": "storage.api",
+  "provider": "Storage service",
+  "use": "Files, named heads and buffers in a tenant of our storage service, through the generated storage client",
+  "operations": [
+    {
+      "name": "read",
+      "class": "H",
+      "route": "routed"
+    },
+    {
+      "name": "write",
+      "class": "H",
+      "route": "routed"
+    },
+    {
+      "name": "buffer",
+      "class": "S",
+      "route": "routed"
+    },
+    {
+      "name": "sink",
+      "class": "S",
+      "route": "none",
+      "timeout": 60,
+      "tries": 1
+    }
+  ],
+  "setup": [
+    "Add the repository's tenant to the storage service's tenants.json, with its readers and writers"
+  ],
+  "detect": {
+    "patterns": [
+      "\\bintegrations\\.clients\\.storage\\b",
+      "\\bclients\\.storage import\\b",
+      "integrations/storage\\.js\\b"
+    ]
+  }
+}
