@@ -1,4 +1,0 @@
-{
-  "category": "changed",
-  "change": "StorageSink sends its files through the storage client, as storage.api's sink operation: tried once, for up to a minute, and not recorded, as before"
-}
