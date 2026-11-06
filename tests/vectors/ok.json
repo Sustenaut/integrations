@@ -1,0 +1,41 @@
+{
+  "description": "A call that worked: one record, its sizes, no retries",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example/x",
+    "headers": {
+      "Authorization": "secret"
+    },
+    "body": "12345"
+  },
+  "responses": {
+    "POST https://api.example/x": {
+      "status": 201,
+      "json": {
+        "ok": true
+      }
+    }
+  },
+  "expect": {
+    "status": 201,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "repo": "a-repo",
+      "app": "web",
+      "plugin": "github.edit-pr",
+      "operation": "open-pr",
+      "request_id": "id-1",
+      "status": 201,
+      "outcome": "ok",
+      "retries": 0,
+      "bytes_in": 12,
+      "bytes_out": 5,
+      "mode": "required",
+      "route": "routed"
+    }
+  }
+}

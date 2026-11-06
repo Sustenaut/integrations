@@ -1,0 +1,25 @@
+{
+  "description": "429 is a failure, not a refusal",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 429,
+      "json": {}
+    }
+  },
+  "expect": {
+    "status": 429,
+    "raises": "Unavailable",
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "status": 429,
+      "outcome": "unavailable"
+    }
+  }
+}

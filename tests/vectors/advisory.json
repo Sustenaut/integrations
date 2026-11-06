@@ -1,0 +1,27 @@
+{
+  "description": "The repository's mode reaches the record",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 200,
+      "json": {}
+    }
+  },
+  "modes": {
+    "github.edit-pr": "advisory"
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "mode": "advisory"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "A call a person waits on (H) is tried once",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 503,
+      "json": {}
+    }
+  },
+  "expect": {
+    "status": 503,
+    "raises": "Unavailable",
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "status": 503,
+      "outcome": "unavailable",
+      "retries": 0
+    }
+  }
+}

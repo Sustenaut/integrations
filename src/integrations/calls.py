@@ -37,7 +37,9 @@ class Policy:
     tries: int
 
 
-POLICIES = {"H": Policy(10, 1), "E": Policy(60, 4), "S": Policy(30, 3), "M": Policy(30, 1)}
+# Each class's timeout (seconds) and tries, from classes.json, which clients/js/caller.js
+# is generated from too, so both languages call the same way.
+POLICIES = {name: Policy(c["timeout"], c["tries"]) for name, c in registry.classes().items()}
 
 
 @dataclass(frozen=True)

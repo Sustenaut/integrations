@@ -1,0 +1,27 @@
+{
+  "description": "The app's own request id goes into the record",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 200,
+      "json": {}
+    }
+  },
+  "request_id": "from-the-app",
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "request_id": "from-the-app",
+      "outcome": "ok",
+      "bytes_in": 2
+    }
+  }
+}

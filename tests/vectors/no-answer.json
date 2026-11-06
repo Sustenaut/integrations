@@ -1,0 +1,21 @@
+{
+  "description": "Nothing recorded is no answer: status null",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {},
+  "expect": {
+    "status": null,
+    "raises": "Unavailable",
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "status": null,
+      "outcome": "unavailable",
+      "bytes_in": 0
+    }
+  }
+}

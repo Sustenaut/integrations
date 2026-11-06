@@ -1,4 +1,5 @@
-# The JavaScript clients and the docs: each client is what the committed spec gives,
+# The JavaScript clients and the docs: each client is what the committed spec gives
+# (caller.js: what classes.json, the plugins and clients/js/src/caller.js give),
 # passes its tests, and agrees with a mock of the spec, and the docs build.
 name: clients
 
@@ -22,7 +23,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: '22' }
       - run: npm ci --no-audit --no-fund
-      - name: The clients are what the spec gives
+      - name: The clients are what the spec and the registry give
         run: |
           npm run --silent generate
           git diff --exit-code -- .

@@ -1,0 +1,29 @@
+{
+  "description": "A POST that says it is repeatable is retried",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example/x",
+    "repeatable": true
+  },
+  "responses": {
+    "POST https://api.example/x": {
+      "status": 503,
+      "json": {}
+    }
+  },
+  "expect": {
+    "status": 503,
+    "raises": "Unavailable",
+    "sent": 3,
+    "sleeps": [
+      1,
+      2
+    ],
+    "record": {
+      "outcome": "unavailable",
+      "retries": 2
+    }
+  }
+}

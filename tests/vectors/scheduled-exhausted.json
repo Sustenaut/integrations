@@ -1,0 +1,29 @@
+{
+  "description": "Three tries, then Unavailable with the last status",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 502,
+      "json": {}
+    }
+  },
+  "expect": {
+    "status": 502,
+    "raises": "Unavailable",
+    "sent": 3,
+    "sleeps": [
+      1,
+      2
+    ],
+    "record": {
+      "status": 502,
+      "outcome": "unavailable",
+      "retries": 2
+    }
+  }
+}
