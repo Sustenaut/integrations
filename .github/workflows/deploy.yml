@@ -3,7 +3,9 @@
 # "Deploying a service to k3s"), where the deploy key can only run sustenaut-deploy.
 #
 # What a deployment serves is in repository variables, so nothing here names a
-# consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS and INGEST_DATASETS. Without
+# consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS and INGEST_DATASETS, which
+# pubkit.json declares. Their values are kept in the owner's state repository: a change
+# there sets them with `pubkit variables --apply` and runs this workflow. Without
 # SUSTENAUT_SERVER the image is built and pushed, and nothing is deployed.
 name: deploy
 
