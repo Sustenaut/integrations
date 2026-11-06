@@ -41,7 +41,7 @@ jobs:
     name: ci
     needs: [tested, functional]
     if: ${{ !failure() && !cancelled() }}
-    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@2edf28ec3cc49866fe505d783ed811bcfb16f432 # v0.23.2
+    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@8a9855cbe28f633e2be1c99b5406ac62ef548592 # v0.27.0
     permissions:
       actions: read
       contents: read
