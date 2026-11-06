@@ -1,0 +1,44 @@
+{
+  "description": "Retry-After counts on 429 and 503 only, and only when it says a time",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": [
+      {
+        "status": 502,
+        "json": {},
+        "headers": {
+          "Retry-After": "9"
+        }
+      },
+      {
+        "status": 503,
+        "json": {},
+        "headers": {
+          "Retry-After": "soon"
+        }
+      },
+      {
+        "status": 200,
+        "json": {}
+      }
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 3,
+    "sleeps": [
+      1,
+      2
+    ],
+    "record": {
+      "outcome": "ok",
+      "retries": 2
+    }
+  }
+}

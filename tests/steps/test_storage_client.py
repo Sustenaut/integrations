@@ -35,7 +35,8 @@ def plain(result):
 def made(vector, **kw):
     sink, naps = MemorySink(), []
     replay = Replay(vector["responses"])
-    caller = Caller("a-repo", "web", sink=sink, transport=replay, sleep=naps.append, new_id=lambda: "id-1")
+    caller = Caller("a-repo", "web", sink=sink, transport=replay, sleep=naps.append, new_id=lambda: "id-1",
+                    random=lambda: 1.0)
     options = vector["client"]
     storage = Storage(caller, options["tenant"], base_url=BASE, token=options["token"],
                       request_id=options.get("request_id"), user_agent=options.get("user_agent"), **kw)

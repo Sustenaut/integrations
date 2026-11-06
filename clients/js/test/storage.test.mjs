@@ -22,7 +22,7 @@ function made(vector, options = {}) {
   const sink = new MemorySink();
   const naps = [];
   const replay = new Replay(vector.responses);
-  const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, sleep: async (s) => naps.push(s), newId: () => "id-1" });
+  const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, sleep: async (s) => naps.push(s), newId: () => "id-1", random: () => 1 });
   const { tenant, token, request_id: requestId, user_agent: userAgent } = vector.client;
   const storage = new Storage({ tenant, token, requestId, userAgent, baseUrl: BASE, caller, ...options });
   return { storage, sink, replay, naps };

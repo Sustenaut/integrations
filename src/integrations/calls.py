@@ -8,12 +8,16 @@ so its tests run on a `Replay` or a client's fake.
 
 The operation's class sets its timeout and how often it is tried, so a call a
 person is waiting on is not retried behind their back. A retry is only for a call
-that is safe to repeat, or that says it is.
+that is safe to repeat, or that says it is. It waits a random time up to 2**n
+seconds (full jitter, so callers that failed together don't retry together), or what
+the provider's Retry-After says, up to the class's timeout. A call never runs past its
+class's timeout times its tries, waits included.
 """
 
 from __future__ import annotations
 
 import json
+import random
 import sys
 import time
 import urllib.error
@@ -22,6 +26,7 @@ import uuid
 from copy import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -29,6 +34,8 @@ from . import __version__, registry
 
 IDEMPOTENT = {"GET", "HEAD", "PUT", "DELETE"}
 RETRY_STATUSES = {429, 502, 503, 504}
+# The statuses whose Retry-After says how long to wait.
+WAIT_STATUSES = {429, 503}
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,7 @@ class Response:
     body: bytes = b""
     error: str | None = None
     etag: str | None = None
+    retry_after: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -107,7 +115,7 @@ class Network:
             with urllib.request.urlopen(outgoing, timeout=timeout) as answer:  # noqa: S310 - https only
                 return Response(answer.status, answer.read(), etag=answer.headers.get("ETag"))
         except urllib.error.HTTPError as e:
-            return Response(e.code, e.read())
+            return Response(e.code, e.read(), retry_after=e.headers.get("Retry-After") if e.headers else None)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             return Response(None, error=f"no answer: {getattr(e, 'reason', e)}")
 
@@ -119,7 +127,7 @@ def recorded_key(request: Request) -> str:
 class Replay:
     """Recorded responses, by method and URL; one not recorded has no answer.
     A list of responses answers in turn, for a call whose answer changes. An answer's
-    "headers" may give its ETag."""
+    "headers" may give its ETag and Retry-After."""
 
     def __init__(self, responses: dict[str, Any]):
         self.responses = responses
@@ -138,10 +146,9 @@ class Replay:
             return Response(None, error="not recorded")
         if "error" in found:
             return Response(None, error=found["error"])
-        etag = found.get("headers", {}).get("ETag")
-        if "text" in found:
-            return Response(found["status"], found["text"].encode("utf-8"), etag=etag)
-        return Response(found["status"], json.dumps(found.get("json")).encode("utf-8"), etag=etag)
+        headers = found.get("headers", {})
+        body = found["text"].encode("utf-8") if "text" in found else json.dumps(found.get("json")).encode("utf-8")
+        return Response(found["status"], body, etag=headers.get("ETag"), retry_after=headers.get("Retry-After"))
 
 
 class Recording:
@@ -231,6 +238,18 @@ def read_modes(root: Path) -> dict[str, str]:
     return modes
 
 
+def _retry_after(value: str | None) -> float | None:
+    """Retry-After's seconds, from a number of them or an HTTP date; None if it says neither."""
+    if not value:
+        return None
+    if value.strip().isdigit():
+        return float(value)
+    try:
+        return max(0.0, parsedate_to_datetime(value).timestamp() - time.time())
+    except (TypeError, ValueError):
+        return None
+
+
 def _policy(operation: dict) -> Policy:
     """The operation's class's timeout and tries, or its own where it names them."""
     policy = POLICIES[operation["class"]]
@@ -240,12 +259,13 @@ def _policy(operation: dict) -> Policy:
 class Caller:
     def __init__(self, repo: str, app: str = "", *, sink: Sink | None = None, transport: Transport | None = None,
                  modes: dict[str, str] | None = None, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep, new_id: Callable[[], str] = lambda: uuid.uuid4().hex):
+                 sleep: Callable[[float], None] = time.sleep, new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+                 random: Callable[[], float] = random.random):
         self.repo, self.app = repo, app
         self.sink = sink or NullSink()
         self.transport = transport or Network()
         self.modes = modes or {}
-        self.clock, self.sleep, self.new_id = clock, sleep, new_id
+        self.clock, self.sleep, self.new_id, self.random = clock, sleep, new_id, random
         self.classes = {(p.id, o["name"]): o for p in registry.plugins().values() for o in p.operations}
 
     def for_repo(self, repo: str) -> Caller:
@@ -269,12 +289,17 @@ class Caller:
         policy = _policy(registered)
         tries = policy.tries if request.repeatable or request.method in IDEMPOTENT else 1
         started = self.clock()
+        deadline = started + policy.timeout * tries
         response = self.transport.send(request, policy.timeout)
         retries = 0
         while retries + 1 < tries and self._worth_retrying(response):
-            self.sleep(2 ** retries)
+            wait = self._wait(response, retries, policy.timeout)
+            left = deadline - self.clock() - wait
+            if left <= 0:
+                break
+            self.sleep(wait)
             retries += 1
-            response = self.transport.send(request, policy.timeout)
+            response = self.transport.send(request, min(policy.timeout, left))
         latency = int((self.clock() - started) * 1000)
         failed = response.status is None or response.status >= 500 or response.status == 429
         self._keep(CallRecord(
@@ -308,6 +333,12 @@ class Caller:
             return refused is not None and refused(response)
         except ValueError:
             return False
+
+    def _wait(self, response: Response, retries: int, timeout: float) -> float:
+        """Seconds before the next try: the provider's Retry-After, up to the timeout, else
+        a random time up to 2**retries."""
+        asked = _retry_after(response.retry_after) if response.status in WAIT_STATUSES else None
+        return min(asked, timeout) if asked is not None else self.random() * 2 ** retries
 
     @staticmethod
     def _worth_retrying(response: Response) -> bool:

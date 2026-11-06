@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 import io
 import json
 import urllib.error
@@ -29,7 +31,9 @@ def caller(responses=None, **kw):
     sink = MemorySink()
     transport = Replay(responses or {})
     naps = []
-    made = Caller("a-repo", "web", sink=sink, transport=transport, sleep=naps.append, new_id=lambda: "id-1", **kw)
+    # random 1.0, the top of the jitter's range, so the waits are 2**n.
+    made = Caller("a-repo", "web", sink=sink, transport=transport, sleep=naps.append, new_id=lambda: "id-1",
+                  **{"random": lambda: 1.0, **kw})
     return made, sink, transport, naps
 
 
@@ -392,3 +396,57 @@ def test_a_caller_for_a_project_records_that_project():
     made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
     made.for_repo("o/theirs").call(PLUGIN, "open-pr", Request("GET", URL))
     assert sink.records[0].repo == "o/theirs" and made.repo == "a-repo"
+
+
+def test_the_wait_is_random_up_to_2_to_the_n():
+    answers = [{"status": 503, "json": {}}] * 2 + [{"status": 200, "json": {}}]
+    made, _, _, naps = caller({f"GET {URL}": answers}, random=lambda: 0.25)
+    made.call(PLUGIN, "check", Request("GET", URL))
+    assert naps == [0.25, 0.5]
+
+
+def test_a_retry_after_date_is_waited_for_up_to_the_timeout():
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(hours=1), usegmt=True)
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(hours=1), usegmt=True)
+    for header, waited in ((future, 30), (past, 0.0)):
+        answers = [{"status": 503, "json": {}, "headers": {"Retry-After": header}}, {"status": 200, "json": {}}]
+        made, _, _, naps = caller({f"GET {URL}": answers})
+        made.call(PLUGIN, "check", Request("GET", URL))
+        assert naps == [waited]
+
+
+def test_a_call_never_runs_past_its_timeout_times_its_tries():
+    now = [0.0]
+    timeouts = []
+
+    class Silent:
+        """Nothing answers: each try takes all the time it is given."""
+
+        def send(self, request, timeout):
+            timeouts.append(timeout)
+            now[0] += timeout
+            return Response(None, error="no answer: timed out")
+
+    def nap(seconds):
+        now[0] += seconds
+
+    made = Caller("a-repo", transport=Silent(), clock=lambda: now[0], sleep=nap, random=lambda: 1.0)
+    with pytest.raises(Unavailable):
+        made.call("github.repo-ops", "call", Request("GET", URL))  # E: 60 s, four tries
+    assert timeouts == [60, 60, 60, 53] and now[0] == 240
+
+
+def test_no_try_starts_that_the_deadline_leaves_no_time_for():
+    now = [0.0]
+    sent = []
+
+    class Slow:
+        def send(self, request, timeout):
+            sent.append(timeout)
+            now[0] += 29.5
+            return Response(503, b"{}", retry_after="30")
+
+    made = Caller("a-repo", transport=Slow(), clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s))
+    with pytest.raises(Unavailable):
+        made.call(PLUGIN, "check", Request("GET", URL))  # S: 30 s, three tries, 90 s in all
+    assert sent == [30, 30]  # the third would start at 89 s, with no time left to wait 30

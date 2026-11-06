@@ -11,7 +11,7 @@ from integrations.avrofile import decode, file_status
 from integrations.calls import CallRecord, Caller, MemorySink, Response
 from integrations.ingest.bigquery import BigQueryLoader, JobBudget
 from integrations.ingest.inbox import Inbox, Scanner
-from integrations.storage_sink import StorageSink
+from integrations.storage_sink import StorageSink, first_wait
 
 from .test_inbox import FakeBuffer, PickyBigQuery
 from .test_ingest import BASE, record
@@ -286,3 +286,8 @@ def test_page_times_reach_the_status_table(world):
     scanner.tick(["ds"])
     row, = [r for r in bigquery.status_rows if r["kind"] == "sender"]
     assert (row["page_count"], row["page_ms_median"], row["cold_start"]) == (1, 250, True)
+
+
+def test_the_threads_first_file_comes_a_random_part_of_a_cycle_in():
+    assert first_wait(120, lambda: 0.25) == 30
+    assert 0 <= first_wait(120) < 120

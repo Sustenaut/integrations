@@ -31,7 +31,7 @@ def test_a_vector(path):
     sink, naps = MemorySink(), []
     transport = Replay(vector["responses"])
     made = Caller("a-repo", "web", sink=sink, transport=transport, modes=vector.get("modes"), sleep=naps.append,
-                  new_id=lambda: "id-1")
+                  new_id=lambda: "id-1", random=lambda: vector.get("random", 1.0))
     asked = vector["request"]
     body = asked.get("body")
     request = Request(asked["method"], asked["url"], asked.get("headers", {}),

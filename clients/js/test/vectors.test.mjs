@@ -15,7 +15,7 @@ for (const name of names) {
     const sink = new MemorySink();
     const naps = [];
     const replay = new Replay(vector.responses);
-    const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, modes: vector.modes, sleep: async (s) => naps.push(s), newId: () => "id-1" });
+    const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, modes: vector.modes, sleep: async (s) => naps.push(s), newId: () => "id-1", random: () => vector.random ?? 1 });
     let raised = null;
     let status;
     try {

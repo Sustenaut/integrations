@@ -210,16 +210,21 @@ test("by default, a Worker's way: flush from write, with no timer", async () => 
   assert.equal(buffer.files.size, 1);
 });
 
-test("in Node, start: true sends on a timer, and close() stops it and sends what is left", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+test("in Node, start: true sends on a timer, first a random part of a cycle in, and close() stops it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const buffer = storage();
-  const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, start: true, everySeconds: 120 });
+  const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, start: true, everySeconds: 120, random: () => 0.25 });
+  t.mock.timers.tick(29_999);
+  assert.equal(buffer.sent.length, 0);
+  t.mock.timers.tick(1);
+  await sink.flushing;
+  assert.equal(buffer.sent.length, 1, "30 s in: a quarter of the cycle");
   t.mock.timers.tick(120_000);
   await sink.flushing;
-  assert.equal(buffer.sent.length, 1);
+  assert.equal(buffer.sent.length, 2, "then every cycle");
   await sink.close();
   t.mock.timers.tick(240_000);
-  assert.equal(buffer.sent.length, 2);
+  assert.equal(buffer.sent.length, 3);
 });
 
 test("a sink needs a sender and somewhere to send", () => {

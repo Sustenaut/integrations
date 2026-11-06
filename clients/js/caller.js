@@ -65,7 +65,10 @@ export const OPERATIONS = Object.freeze({
 //
 // The operation's class sets its timeout and how often it is tried, so a call a person
 // is waiting on is not retried behind their back. A retry is only for a call that is
-// safe to repeat, or that says it is. POLICIES and OPERATIONS above come from
+// safe to repeat, or that says it is. It waits a random time up to 2**n seconds (full
+// jitter, so callers that failed together don't retry together), or what the provider's
+// Retry-After says, up to the class's timeout. A call never runs past its class's
+// timeout times its tries, waits included. POLICIES and OPERATIONS above come from
 // classes.json and plugins/*.json, the tables calls.py reads.
 //
 //   import { Caller, StorageSink } from "@sustenaut/integrations/caller.js";
@@ -75,6 +78,8 @@ export const OPERATIONS = Object.freeze({
 
 const IDEMPOTENT = new Set(["GET", "HEAD", "PUT", "DELETE"]);
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+// The statuses whose Retry-After says how long to wait.
+const WAIT_STATUSES = new Set([429, 503]);
 // Cloudflare refuses some default User-Agents before the request reaches whoever it was for.
 const AGENT = "integrations-caller.js";
 
@@ -143,15 +148,15 @@ export function readModes(data) {
 
 export class Caller {
   // fetch is the only thing that reaches the network; clock() is in milliseconds, sleep()
-  // takes seconds, as calls.py's do.
-  constructor(repo, app = "", { sink = new NullSink(), fetch = (...a) => globalThis.fetch(...a), modes = {}, clock = monotonic, sleep = nap, newId = () => crypto.randomUUID().replaceAll("-", "") } = {}) {
-    Object.assign(this, { repo, app, sink, fetch, modes, clock, sleep, newId });
+  // takes seconds, as calls.py's do; random() is the jitter's, from 0 to 1.
+  constructor(repo, app = "", { sink = new NullSink(), fetch = (...a) => globalThis.fetch(...a), modes = {}, clock = monotonic, sleep = nap, newId = () => crypto.randomUUID().replaceAll("-", ""), random = Math.random } = {}) {
+    Object.assign(this, { repo, app, sink, fetch, modes, clock, sleep, newId, random });
   }
 
   // The same caller, on behalf of a project, so its records are that project's.
   forRepo(repo) {
-    const { app, sink, fetch, modes, clock, sleep, newId } = this;
-    return new this.constructor(repo, app, { sink, fetch, modes, clock, sleep, newId });
+    const { app, sink, fetch, modes, clock, sleep, newId, random } = this;
+    return new this.constructor(repo, app, { sink, fetch, modes, clock, sleep, newId, random });
   }
 
   mode(plugin) {
@@ -169,12 +174,16 @@ export class Caller {
     const request = { method, url, headers, body };
     const tries = repeatable || IDEMPOTENT.has(method) ? policy.tries : 1;
     const started = this.clock();
+    const deadline = started + policy.timeout * tries * 1000;
     let answer = await this.#send(request, policy.timeout);
     let retries = 0;
     while (retries + 1 < tries && worthRetrying(answer)) {
-      await this.sleep(2 ** retries);
+      const wait = this.#wait(answer, retries, policy.timeout);
+      const left = (deadline - this.clock()) / 1000 - wait;
+      if (left <= 0) break;
+      await this.sleep(wait);
       retries += 1;
-      answer = await this.#send(request, policy.timeout);
+      answer = await this.#send(request, Math.min(policy.timeout, left));
     }
     const latency = Math.trunc(this.clock() - started);
     const failed = answer.status === null || answer.status >= 500 || answer.status === 429;
@@ -196,6 +205,13 @@ export class Caller {
     this.#keep(this.#record(plugin, operation, registered, {
       request_id: requestId, latency_ms: latencyMs, status, outcome, retries: 0, bytes_in: 0, bytes_out: 0,
     }));
+  }
+
+  // Seconds before the next try: the provider's Retry-After, up to the timeout, else a
+  // random time up to 2**retries.
+  #wait(answer, retries, timeout) {
+    const asked = WAIT_STATUSES.has(answer.status) ? retryAfter(answer.headers.get("Retry-After")) : null;
+    return asked === null ? this.random() * 2 ** retries : Math.min(asked, timeout);
   }
 
   #record(plugin, operation, registered, fields) {
@@ -244,6 +260,14 @@ function saysNo(answer, refused) {
   } catch {
     return false;
   }
+}
+
+// Retry-After's seconds, from a number of them or an HTTP date; null if it says neither.
+function retryAfter(value) {
+  if (!value) return null;
+  if (/^\s*\d+\s*$/.test(value)) return Number(value);
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? null : Math.max(0, (at - Date.now()) / 1000);
 }
 
 const worthRetrying = (answer) => answer.status === null || RETRY_STATUSES.has(answer.status);
@@ -315,14 +339,16 @@ export function pythonJson(value) {
 //
 // A Worker has no background timer: the write that finds the file overdue sends it, and
 // hands that work to waitUntil (set it per request: sink.waitUntil = (p) => ctx.waitUntil(p)),
-// so the answer doesn't wait on storage. In Node, start: true also sends on a timer.
+// so the answer doesn't wait on storage. In Node, start: true also sends on a timer, whose
+// first tick comes a random part of a cycle in, so pods started together don't all send
+// at once.
 
 const EVERY_SECONDS = 120;
 const PAGE_LIMIT = 10_000;
 const PUT_TIMEOUT_SECONDS = 60;
 
 export class StorageSink {
-  constructor(datasets, { sender, url, token, tokenFile, bucket, prefix = "", version = "js", everySeconds = EVERY_SECONDS, limit = 10_000, clock = () => Date.now(), fetch = (...a) => globalThis.fetch(...a), readFile, waitUntil, flushOnWrite = true, start = false } = {}) {
+  constructor(datasets, { sender, url, token, tokenFile, bucket, prefix = "", version = "js", everySeconds = EVERY_SECONDS, limit = 10_000, clock = () => Date.now(), fetch = (...a) => globalThis.fetch(...a), readFile, waitUntil, flushOnWrite = true, start = false, random = Math.random } = {}) {
     if (!sender) throw new TypeError("a StorageSink needs a sender");
     if (!bucket && !(url && (token || tokenFile))) throw new TypeError("a StorageSink needs a url and a token or tokenFile, or a bucket");
     Object.assign(this, { datasets, sender, version, everySeconds, limit, clock, fetch, waitUntil, flushOnWrite });
@@ -339,7 +365,13 @@ export class StorageSink {
     this.started = clock();
     this.flushing = null; // one flush at a time, whoever starts it
     if (start) {
-      this.timer = setInterval(() => void this.flush(), everySeconds * 1000);
+      const every = everySeconds * 1000;
+      const tick = () => void this.flush();
+      this.timer = setTimeout(() => {
+        tick();
+        this.timer = setInterval(tick, every);
+        this.timer.unref?.();
+      }, random() * every);
       this.timer.unref?.();
     }
   }
@@ -380,6 +412,7 @@ export class StorageSink {
 
   // Stops the timer and sends what is waiting.
   async close() {
+    clearTimeout(this.timer);
     clearInterval(this.timer);
     await this.flush();
   }

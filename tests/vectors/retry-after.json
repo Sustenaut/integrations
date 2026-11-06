@@ -1,0 +1,36 @@
+{
+  "description": "A 503's Retry-After is how long to wait",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": [
+      {
+        "status": 503,
+        "json": {},
+        "headers": {
+          "Retry-After": "3"
+        }
+      },
+      {
+        "status": 200,
+        "json": {}
+      }
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 2,
+    "sleeps": [
+      3
+    ],
+    "record": {
+      "outcome": "ok",
+      "retries": 1
+    }
+  }
+}

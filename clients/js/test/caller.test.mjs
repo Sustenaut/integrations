@@ -90,7 +90,7 @@ test("only https goes out", async () => {
 });
 
 test("the backoff sleeps by default, in seconds", async () => {
-  const { made } = caller({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 200, json: {} }] }, { sleep: undefined });
+  const { made } = caller({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 200, json: {} }] }, { sleep: undefined, random: () => 1 });
   const started = Date.now();
   assert.ok((await made.call(PLUGIN, "check", { method: "GET", url: URL_ })).ok);
   assert.ok(Date.now() - started >= 990);
@@ -159,4 +159,59 @@ test("json is written as Python's json.dumps writes it", () => {
   assert.equal(pythonJson({ a: [1, true, null], "é": "x \n" }), '{"a": [1, true, null], "\\u00e9": "x\\u2028\\n"}');
   assert.equal(pythonJson([]), "[]");
   assert.equal(pythonJson({}), "{}");
+});
+
+test("a Retry-After date is waited for up to the timeout, and one in the past not at all", async () => {
+  for (const [at, waited] of [[Date.now() + 3600e3, 30], [Date.now() - 3600e3, 0]]) {
+    const naps = [];
+    const responses = { [`GET ${URL_}`]: [{ status: 503, json: {}, headers: { "Retry-After": new Date(at).toUTCString() } }, { status: 200, json: {} }] };
+    const { made } = caller(responses, { sleep: async (s) => naps.push(s) });
+    await made.call(PLUGIN, "check", { method: "GET", url: URL_ });
+    assert.equal(naps.length, 1);
+    assert.ok(Math.abs(naps[0] - waited) < 1, `${naps[0]} for ${waited}`);
+  }
+});
+
+test("a call never runs past its timeout times its tries", async () => {
+  let now = 0;
+  const timeouts = [];
+  // Nothing answers: each try takes all the time its signal gives it.
+  const fetch = async (url, init) => {
+    timeouts.push(init.signal);
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  };
+  const made = new Caller("a-repo", "", { fetch, random: () => 1, clock: () => now, sleep: async (s) => (now += s * 1000) });
+  const send = made.call.bind(made);
+  // Each try costs its whole timeout: the clock moves when the signal would have fired.
+  const realTimeout = AbortSignal.timeout;
+  const given = [];
+  AbortSignal.timeout = (ms) => (given.push(ms), (now += ms), realTimeout.call(AbortSignal, ms));
+  try {
+    await assert.rejects(send("github.repo-ops", "call", { method: "GET", url: URL_ }), Unavailable);
+  } finally {
+    AbortSignal.timeout = realTimeout;
+  }
+  assert.deepEqual(given, [60_000, 60_000, 60_000, 53_000]);
+  assert.equal(now, 240_000);
+});
+
+test("no try starts that the deadline leaves no time for", async () => {
+  let now = 0;
+  let tries = 0;
+  const fetch = async () => {
+    tries += 1;
+    now += 29_500;
+    return new Response("{}", { status: 503, headers: { "Retry-After": "30" } });
+  };
+  const made = new Caller("a-repo", "", { fetch, clock: () => now, sleep: async (s) => (now += s * 1000) });
+  await assert.rejects(made.call(PLUGIN, "check", { method: "GET", url: URL_ }), Unavailable);
+  assert.equal(tries, 2, "the third would start at 89 s, with no time left to wait 30");
+});
+
+test("the jitter's random source is the caller's, and forRepo keeps it", async () => {
+  const naps = [];
+  const responses = { [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 503, json: {} }, { status: 200, json: {} }] };
+  const { made } = caller(responses, { sleep: async (s) => naps.push(s), random: () => 0.5 });
+  await made.forRepo("b-repo").call(PLUGIN, "check", { method: "GET", url: URL_ });
+  assert.deepEqual(naps, [0.5, 1]);
 });
