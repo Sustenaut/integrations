@@ -286,6 +286,11 @@ Before the first deploy with the ingest pod, a person puts the writer's key in t
 namespace, from a `shared-infra` checkout beside this one:
 `./with-secrets ../integrations/k8s/admin/push-ingest-key.sh`. It also needs the variable
 `INGEST_DATASETS` on this repository: JSON from each repository to its dataset.
+`INGEST_SIGNALS`, when set, also has it load observability's signals:
+`{"tenant": "signals", "dataset": "observability"}`, the tenant the evaluator writes
+them to and the dataset whose `signals` table they load into. That buffer holds Avro
+signals under `inbox/signals/`, loads like a call log's but into its own table, and
+gets no reports: the pod's report on it goes to its log.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.

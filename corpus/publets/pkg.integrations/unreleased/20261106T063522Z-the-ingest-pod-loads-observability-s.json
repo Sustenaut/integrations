@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "The ingest pod loads observability's signals, when INGEST_SIGNALS names their tenant and dataset, from that tenant's inbox/signals/ into the dataset's signals table"
+}

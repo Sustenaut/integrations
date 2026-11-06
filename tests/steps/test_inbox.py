@@ -7,10 +7,13 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from integrations.avrofile import decode, encode, file_status
+from datetime import datetime, timezone
+
+from integrations.avrofile import decode, decode_signals, encode, encode_signals, file_status
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.main import signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 
@@ -68,6 +71,8 @@ class PickyBigQuery(FakeBigQuery):
         self.call_jobs: list[str] = []
         self.status_jobs: list[str] = []
         self.status_rows: list[dict] = []
+        self.signal_rows: list[dict] = []
+        self.tables: list[str] = []
 
     def send(self, request, timeout):
         if request.method == "POST" and self.answer == "ok":
@@ -79,6 +84,10 @@ class PickyBigQuery(FakeBigQuery):
                 return Response(409, b"{}")
             data = tail[:tail.rindex(b"\r\n--")]
             self.jobs[job] = data
+            self.tables.append(table)
+            if table == "signals":
+                self.signal_rows += decode_signals(data)
+                return Response(200, b"{}")
             rows = decode(data)
             if table == STATUS_TABLE:
                 self.status_jobs.append(job)
@@ -445,3 +454,67 @@ def test_the_status_table_has_its_own_days_jobs(world):
     scanner.tick([DATASET])
     assert bigquery.rows == [] and len(buffer.inbox()) == 1 and "load jobs" in statuses[0]["problems"]
     assert statuses[0]["status_jobs_today"] == JOBS_PER_TABLE_PER_DAY
+
+
+
+def signal(n: int, **fields) -> dict:
+    moment = datetime(2027, 1, 15, 7, 50, tzinfo=timezone.utc)
+    return {"rule_id": "drops", "rule_version": "1", "subject": f"example/app{n}", "severity": "warning",
+            "started_at": moment, "ended_at": None, "evidence": '{"dropped": 3}', "emitted_at": moment, **fields}
+
+
+@pytest.fixture
+def signals_world():
+    buffer, bigquery = FakeBuffer(), PickyBigQuery()
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    statuses: list[dict] = []
+    clock = lambda: 1_800_000_000.0  # noqa: E731
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"observability": "signals"}),
+                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(clock), statuses.append, clock, kinds={"observability": SIGNALS})
+    return scanner, buffer, bigquery, statuses
+
+
+def test_signals_load_into_their_own_table_from_their_own_tenant_and_leave(signals_world):
+    scanner, buffer, bigquery, statuses = signals_world
+    for n in (1, 2):
+        buffer.files[f"inbox/signals/2027-01-15/0750{n:02d}-evaluator-{n}.avro"] = encode_signals([signal(n)])
+    scanner.tick(["observability"])
+    assert bigquery.tables == ["signals"]
+    assert sorted(r["subject"] for r in bigquery.signal_rows) == ["example/app1", "example/app2"]
+    assert bigquery.signal_rows[0]["evidence"] == '{"dropped": 3}'
+    # Its report goes to the log only: the tenant keeps nothing but signals.
+    assert buffer.files == {}
+    assert statuses[0]["dataset"] == "observability" and statuses[0]["loaded_files"] == 2
+    assert statuses[0]["problems"] is None
+    assert all(path.startswith(("list", "inbox/", "batches/")) for _, path in buffer.sent)
+
+
+def test_a_file_in_the_signals_inbox_that_isnt_signals_is_rejected(signals_world):
+    scanner, buffer, bigquery, statuses = signals_world
+    name = "inbox/signals/2027-01-15/075000-evaluator-x.avro"
+    buffer.files[name] = encode([record(1)])
+    scanner.tick(["observability"])
+    assert bigquery.signal_rows == []
+    assert buffer.under("rejected/") == ["rejected/signals/2027-01-15/075000-evaluator-x.avro"]
+    assert "not signals" in statuses[0]["problems"]
+
+
+def test_signals_are_the_same_bytes_for_the_same_rows():
+    rows = [signal(1), signal(2, ended_at=datetime(2027, 1, 15, 8, 0, tzinfo=timezone.utc))]
+    assert encode_signals(rows) == encode_signals([dict(r) for r in rows])
+    assert decode_signals(encode_signals(rows)) == rows
+
+
+@pytest.mark.parametrize(("text", "tenants"), [
+    ("", {}), ("  ", {}), ('{"tenant": "signals", "dataset": "observability"}', {"observability": "signals"})])
+def test_ingest_signals_names_the_tenant_and_dataset(text, tenants):
+    found, kinds = signals(text)
+    assert found == tenants
+    assert kinds == {dataset: SIGNALS for dataset in tenants}
+
+
+@pytest.mark.parametrize("text", ['["signals"]', '{"tenant": "signals"}', '{"tenant": "", "dataset": "observability"}'])
+def test_a_wrong_ingest_signals_is_refused(text):
+    with pytest.raises(ValueError, match="INGEST_SIGNALS is"):
+        signals(text)

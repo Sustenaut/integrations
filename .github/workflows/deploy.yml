@@ -3,7 +3,8 @@
 # "Deploying a service to k3s"), where the deploy key can only run sustenaut-deploy.
 #
 # What a deployment serves is in repository variables, so nothing here names a
-# consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS and INGEST_DATASETS. Without
+# consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS, INGEST_DATASETS and
+# INGEST_SIGNALS (unset: no signals are loaded). Without
 # SUSTENAUT_SERVER the image is built and pushed, and nothing is deployed.
 name: deploy
 
@@ -36,5 +37,6 @@ jobs:
           --from-literal="INTEGRATIONS_EDIT_PR_REPOS=$(var INTEGRATIONS_EDIT_PR_REPOS)" \
           --from-literal="INTEGRATIONS_ORIGINS=$(var INTEGRATIONS_ORIGINS)" \
           --from-literal="INGEST_DATASETS=$(var INGEST_DATASETS)"
-        kustomize edit add configmap ingest-settings --from-literal="INGEST_DATASETS=$(var INGEST_DATASETS)"
+        kustomize edit add configmap ingest-settings --from-literal="INGEST_DATASETS=$(var INGEST_DATASETS)" \
+          --from-literal="INGEST_SIGNALS=$(var INGEST_SIGNALS)"
     secrets: inherit

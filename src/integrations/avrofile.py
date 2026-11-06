@@ -106,3 +106,30 @@ def decode(data: bytes) -> list[dict]:
     for row in fastavro.reader(io.BytesIO(data)):
         rows.append({**row, "at": row["at"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
     return rows
+
+
+# Observability's signals, as its evaluator writes them to the signals tenant: the
+# columns of observability.signals, evidence a string BigQuery loads as JSON.
+SIGNAL_SCHEMA = fastavro.parse_schema({
+    "type": "record", "name": "signal", "fields": [
+        {"name": "rule_id", "type": "string"},
+        {"name": "rule_version", "type": "string"},
+        {"name": "subject", "type": "string"},
+        {"name": "severity", "type": "string"},
+        {"name": "started_at", "type": _TIME},
+        {"name": "ended_at", "type": ["null", _TIME], "default": None},
+        {"name": "evidence", "type": {"type": "string", "sqlType": "JSON"}},
+        {"name": "emitted_at", "type": _TIME},
+    ]})
+
+
+def encode_signals(rows: list[dict]) -> bytes:
+    """Signals as one file to load; the same signals always give the same bytes."""
+    out = io.BytesIO()
+    marker = hashlib.sha256(repr(sorted(map(repr, rows))).encode()).digest()[:16]
+    fastavro.writer(out, SIGNAL_SCHEMA, rows, codec="deflate", sync_marker=marker)
+    return out.getvalue()
+
+
+def decode_signals(data: bytes) -> list[dict]:
+    return list(fastavro.reader(io.BytesIO(data)))
