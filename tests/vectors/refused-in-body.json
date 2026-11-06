@@ -1,0 +1,32 @@
+{
+  "description": "A provider that says no in a 200: refused",
+  "plugin": "github.edit-pr",
+  "operation": "open-pr",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 200,
+      "json": {
+        "ok": false,
+        "error": "channel_not_found"
+      }
+    }
+  },
+  "refused": {
+    "key": "ok",
+    "equals": false
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "outcome": "refused",
+      "bytes_in": 43
+    }
+  }
+}

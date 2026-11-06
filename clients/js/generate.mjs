@@ -2,10 +2,14 @@
 // built from the spec alone and committed, so a browser can load it from jsDelivr
 // at a release's tag, and CI fails when it differs from what the spec gives.
 //
+// And caller.js: src/caller.js after the tables calls.py reads, each class's timeout
+// and tries (classes.json) and each operation's class and route (plugins/*.json), so
+// both languages call the same way. CI fails when it differs from what they give.
+//
 //   npm run generate
 import { build } from "esbuild";
 import { createClient } from "@hey-api/openapi-ts";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -106,3 +110,26 @@ for (const { tag, file, calls } of USE_CASES) {
     await rm(work, { recursive: true, force: true });
   }
 }
+
+const REGISTRY = "../../src/integrations";
+const classes = JSON.parse(await readFile(`${REGISTRY}/classes.json`, "utf8"));
+const policies = Object.fromEntries(Object.entries(classes).map(([id, c]) => [id, { timeout: c.timeout, tries: c.tries }]));
+const operations = {};
+for (const file of (await readdir(`${REGISTRY}/plugins`)).filter((f) => f.endsWith(".json")).sort()) {
+  const plugin = JSON.parse(await readFile(`${REGISTRY}/plugins/${file}`, "utf8"));
+  operations[plugin.id] = Object.fromEntries(plugin.operations.map((o) => [o.name, { class: o.class, route: o.route }]));
+}
+// One entry a line, so a change to the registry is a one-line change here.
+const table = (value) => `{\n${Object.entries(value).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)},`).join("\n")}\n}`;
+await writeFile("caller.js", [
+  "// Generated from src/integrations/classes.json, src/integrations/plugins/*.json and",
+  "// clients/js/src/caller.js by clients/js/generate.mjs: do not edit.",
+  "",
+  "// Each class's timeout in seconds and how often a call is tried.",
+  `export const POLICIES = Object.freeze(${table(policies)});`,
+  "",
+  "// Each plugin's operations: its class, and how its calls reach the call log.",
+  `export const OPERATIONS = Object.freeze(${table(operations)});`,
+  "",
+  await readFile("src/caller.js", "utf8"),
+].join("\n"));

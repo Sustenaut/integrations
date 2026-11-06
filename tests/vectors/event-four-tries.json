@@ -1,0 +1,47 @@
+{
+  "description": "An event-driven call (E) is tried four times, 1, 2 and 4 s apart",
+  "plugin": "github.repo-ops",
+  "operation": "call",
+  "request": {
+    "method": "PUT",
+    "url": "https://api.example/x",
+    "body": "{}"
+  },
+  "responses": {
+    "PUT https://api.example/x": [
+      {
+        "status": 502,
+        "json": {}
+      },
+      {
+        "status": 504,
+        "json": {}
+      },
+      {
+        "status": 429,
+        "json": {}
+      },
+      {
+        "status": 200,
+        "json": {}
+      }
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 4,
+    "sleeps": [
+      1,
+      2,
+      4
+    ],
+    "record": {
+      "status": 200,
+      "outcome": "ok",
+      "retries": 3,
+      "bytes_out": 2,
+      "route": "reported"
+    }
+  }
+}

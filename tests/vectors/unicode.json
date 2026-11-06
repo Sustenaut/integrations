@@ -1,0 +1,30 @@
+{
+  "description": "A body outside ASCII counts as json.dumps writes it",
+  "plugin": "github.repo-ops",
+  "operation": "check-push",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x",
+    "body": "\u00e9"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 200,
+      "json": {
+        "login": "J\u00fcrgen"
+      }
+    }
+  },
+  "expect": {
+    "status": 200,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "outcome": "ok",
+      "bytes_in": 24,
+      "bytes_out": 2,
+      "route": "routed"
+    }
+  }
+}

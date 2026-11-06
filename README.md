@@ -159,6 +159,41 @@ nothing answered or the provider asked for it (429, 502, 503, 504), and only if 
 is safe to repeat. A provider's refusal comes back to the client. No answer, or a
 failure, raises `Unavailable`, whatever the mode: a failure is never swallowed.
 
+### From JavaScript
+
+`clients/js/caller.js` is the same `Caller` for Node 22 and Cloudflare Workers, with no
+dependencies: the same classes, timeouts, retries and records, with `Unavailable`,
+`Refused`, `note()` and `forRepo()`. It is generated (`npm run generate` in `clients/js`)
+from `clients/js/src/caller.js` and the tables `calls.py` reads, `classes.json` and
+`plugins/*.json`, and CI fails when the committed file differs. The JSON vectors in
+`tests/vectors/` run on both callers.
+
+```js
+import { Caller, StorageSink } from "@sustenaut/integrations/caller.js";
+
+const sink = new StorageSink({ "my-repo": "my_project" }, {
+  sender: "my-app", url: "https://storage.sustenaut.eu", tokenFile: "/var/run/secrets/storage/token", start: true,
+});
+const caller = new Caller("my-repo", "web", { sink });
+const answer = await caller.call("github.repo-ops", "check-push",
+  { method: "GET", url: `https://api.github.com/repos/${repo}`, headers: { Authorization: `Bearer ${token}` } });
+if (!answer.ok || !answer.json().permissions?.push) throw new Error("no push");
+```
+
+`StorageSink` writes the same Avro files as `storage_sink.py`, to the storage service
+(`url` with `token` or `tokenFile`, read for each request) or, in the storage Worker, to
+its R2 binding (`bucket` and `prefix`). A Worker has no background timer, so the write
+that finds a file overdue sends it; give it the request's `waitUntil`
+(`sink.waitUntil = (p) => ctx.waitUntil(p)`) so the answer doesn't wait on storage. In
+Node, `start: true` also sends every two minutes. `MemorySink`, `NullSink` and `Replay`
+(a recorded fetch, for tests) are there too.
+
+There is no npm release: depend on a release's tag, as with pubpr.
+
+```json
+"dependencies": { "@sustenaut/integrations": "github:Sustenaut/integrations#vX.Y.Z" }
+```
+
 A shell script posts to Slack with a command, which takes the token from
 `SLACK_TOKEN`, never from the command line:
 

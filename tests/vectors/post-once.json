@@ -1,0 +1,25 @@
+{
+  "description": "A POST is not safe to repeat, so it is tried once",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "POST",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "POST https://api.example/x": {
+      "status": 503,
+      "json": {}
+    }
+  },
+  "expect": {
+    "status": 503,
+    "raises": "Unavailable",
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "outcome": "unavailable",
+      "retries": 0
+    }
+  }
+}

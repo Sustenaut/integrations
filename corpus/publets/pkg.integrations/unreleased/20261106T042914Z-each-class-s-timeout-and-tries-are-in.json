@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "Each class's timeout and tries are in classes.json, which calls.py and caller.js both read"
+}

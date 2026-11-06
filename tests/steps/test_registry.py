@@ -56,6 +56,8 @@ def test_every_class_has_its_targets():
     assert set(classes) == {"H", "E", "S", "M"}
     for target in classes.values():
         assert {"response_p95", "uptime", "on_failure"} <= set(target)
+        # How a Caller calls, in Python and in clients/js/caller.js.
+        assert target["timeout"] > 0 and isinstance(target["tries"], int) and target["tries"] >= 1
 
 
 def test_the_registry_names_no_consumer():
