@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "A retry waits a random time up to 2**n s (full jitter) or what a 429's or 503's Retry-After says, up to the class's timeout, and a call never runs past its timeout times its tries, in calls.py and caller.js"
-}

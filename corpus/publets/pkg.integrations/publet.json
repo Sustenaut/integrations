@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.13.0 is released as v0.13.0 from commit c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b.",
+      "content": "integrations 0.14.0 is released as v0.14.0 from commit 7e3a4604deaf459d4c22800a14efb27147917141.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.13.0",
+            "0.14.0",
             "",
             "",
-            "v0.13.0",
-            "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
+            "v0.14.0",
+            "7e3a4604deaf459d4c22800a14efb27147917141"
           ]
         ]
       },
-      "scope": "the published release v0.13.0 of integrations",
+      "scope": "the published release v0.14.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
+          "revision": "7e3a4604deaf459d4c22800a14efb27147917141"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.13.0 was released on 2026-11-06 from commit c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b with these changes.",
+      "content": "integrations 0.14.0 was released on 2026-11-06 from commit 7e3a4604deaf459d4c22800a14efb27147917141 with these changes.",
       "data": {
         "columns": [
           {
@@ -58,26 +58,38 @@
         "rows": [
           [
             "added",
-            "clients/js/caller.js: the Caller, its sinks and a StorageSink for Node and Cloudflare Workers, generated from the same class table as calls.py, and a root package.json to depend on it by release tag"
-          ],
-          [
-            "changed",
-            "Each class's timeout and tries are in classes.json, which calls.py and caller.js both read"
+            "A registry operation may name its own timeout and tries, in place of its class's"
           ],
           [
             "added",
-            "github.repo-ops check-push: a human-driven check that a token may push to a repository"
+            "Storage clients, clients/js/storage.js and integrations.clients.storage, generated from Sustenaut/storage's openapi.json as vendored and pinned in openapi/storage.json, as plugin storage.api"
+          ],
+          [
+            "changed",
+            "StorageSink sends its files through the storage client, as storage.api's sink operation: tried once, for up to a minute, and not recorded, as before"
+          ],
+          [
+            "added",
+            "Unavailable carries the last response, and a Replay answer may give its ETag"
+          ],
+          [
+            "added",
+            "A retry waits a random time up to 2**n s (full jitter) or what a 429's or 503's Retry-After says, up to the class's timeout, and a call never runs past its timeout times its tries, in calls.py and caller.js"
+          ],
+          [
+            "changed",
+            "A sink's timer sends its first file a random part of a cycle in, so pods started together don't send at once"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.13.0 of integrations",
+      "scope": "the published release v0.14.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
+          "revision": "7e3a4604deaf459d4c22800a14efb27147917141"
         }
       ]
     }
