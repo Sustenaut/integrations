@@ -14,6 +14,10 @@
     ],
     "release_app": 5529889
   },
+  "variables": {
+    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
+    "deploy": "deploy.yml"
+  },
   "signing_keys": [
     {"path": "corpus/.publet/signing.key", "bitwarden": {"project": {"id": "377de170-5487-40f7-9a01-b4f50064e1c5", "name": "Pub"}, "name": "pub-signing-key-integrations"}}
   ]
