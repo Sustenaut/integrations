@@ -1,0 +1,67 @@
+{
+  "description": "A file, its fields and its answer",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "upload_file",
+  "args": [
+    {
+      "bytes": "%PDF-1.7\n"
+    }
+  ],
+  "kwargs": {
+    "name": "offer.pdf",
+    "label": "Offer",
+    "subject": "card-42",
+    "kept": true
+  },
+  "responses": {
+    "POST https://storage.example/deals/files": {
+      "status": 200,
+      "json": {
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "name": "offer.pdf",
+        "url": "/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf",
+        "type": "application/pdf",
+        "size": 9,
+        "label": "Offer",
+        "subject": "card-42",
+        "kept": true
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "POST",
+        "url": "https://storage.example/deals/files",
+        "headers": {
+          "Authorization": "Bearer t"
+        }
+      }
+    ],
+    "result": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "offer.pdf",
+      "url": "/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/offer.pdf",
+      "type": "application/pdf",
+      "size": 9,
+      "label": "Offer",
+      "subject": "card-42",
+      "kept": true
+    },
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "write",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

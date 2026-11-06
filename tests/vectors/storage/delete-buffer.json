@@ -1,0 +1,38 @@
+{
+  "description": "Deleting a batch answers nothing",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "delete_buffer",
+  "args": [
+    "batches/job-1.json"
+  ],
+  "kwargs": {},
+  "responses": {
+    "DELETE https://storage.example/deals/batches/job-1.json": {
+      "status": 204
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "DELETE",
+        "url": "https://storage.example/deals/batches/job-1.json"
+      }
+    ],
+    "result": null,
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "buffer",
+        "status": 204,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

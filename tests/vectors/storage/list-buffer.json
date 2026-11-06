@@ -1,0 +1,56 @@
+{
+  "description": "A buffer's folder, a page at a time, as buffer work",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "list_buffer",
+  "args": [
+    "inbox/calls/"
+  ],
+  "kwargs": {
+    "limit": 1
+  },
+  "responses": {
+    "GET https://storage.example/deals/list?prefix=inbox%2Fcalls%2F&limit=1": {
+      "status": 200,
+      "json": {
+        "files": [
+          {
+            "name": "inbox/calls/a.avro",
+            "size": 4,
+            "uploaded": "2026-11-06T08:00:00.000Z"
+          }
+        ],
+        "cursor": null
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/list?prefix=inbox%2Fcalls%2F&limit=1"
+      }
+    ],
+    "result": [
+      {
+        "name": "inbox/calls/a.avro",
+        "size": 4,
+        "uploaded": "2026-11-06T08:00:00.000Z"
+      }
+    ],
+    "raises": null,
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "buffer",
+        "status": 200,
+        "outcome": "ok",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}

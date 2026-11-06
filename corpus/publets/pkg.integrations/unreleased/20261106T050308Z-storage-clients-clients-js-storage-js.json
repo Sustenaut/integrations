@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "Storage clients, clients/js/storage.js and integrations.clients.storage, generated from Sustenaut/storage's openapi.json as vendored and pinned in openapi/storage.json, as plugin storage.api"
+}

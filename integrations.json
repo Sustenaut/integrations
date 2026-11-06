@@ -92,6 +92,14 @@
       "mode": "required"
     },
     {
+      "plugin": "storage.api",
+      "paths": [
+        "src/integrations/clients/storage.py",
+        "src/integrations/storage_sink.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "tailscale.tailnet",
       "paths": [
         ".github/workflows/deploy.yml"
@@ -111,6 +119,10 @@
     {
       "path": "tests/**",
       "reason": "scenarios about the signatures"
+    },
+    {
+      "path": "corpus/**",
+      "reason": "release records: changelog prose and the signed publets made from it"
     }
   ],
   "other_secrets": [

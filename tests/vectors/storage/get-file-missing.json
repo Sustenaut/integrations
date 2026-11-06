@@ -1,0 +1,46 @@
+{
+  "description": "A 404 is NotFound with storage's reason, recorded as a refusal",
+  "client": {
+    "tenant": "deals",
+    "token": "t"
+  },
+  "call": "get_file",
+  "args": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "gone.pdf"
+  ],
+  "kwargs": {},
+  "responses": {
+    "GET https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/gone.pdf": {
+      "status": 404,
+      "json": {
+        "error": "not found"
+      }
+    }
+  },
+  "expect": {
+    "sent": [
+      {
+        "method": "GET",
+        "url": "https://storage.example/deals/f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/gone.pdf"
+      }
+    ],
+    "result": null,
+    "raises": {
+      "type": "NotFound",
+      "status": 404,
+      "error": "not found"
+    },
+    "sleeps": [],
+    "records": [
+      {
+        "plugin": "storage.api",
+        "operation": "read",
+        "status": 404,
+        "outcome": "refused",
+        "retries": 0,
+        "route": "routed"
+      }
+    ]
+  }
+}
