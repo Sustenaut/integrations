@@ -1,7 +1,11 @@
 # Deploys workers/call-log, the call log's Durable Object for code on Cloudflare, with
 # wrangler, after its tests. The token is the Actions secret CLOUDFLARE_WORKERS_GITHUB_TOKEN
-# (a Cloudflare account token: Workers, Editor role, on the Sustenaut account),
-# from the Bitwarden secret cloudflare-workers-github-token; without it nothing is deployed.
+# (a Cloudflare account token with the Workers Editor role, on the call-log Worker), from
+# the Bitwarden secret cloudflare-workers-github-token; without it nothing is deployed. It
+# can update an existing Worker, not create one: a new Worker's first deploy is run from a
+# laptop with a separate admin Cloudflare token, like the other admin tokens, and CI deploys
+# it after that. It is this repository's secret alone, and this workflow never runs on a
+# pull request.
 name: call-log
 
 on:
