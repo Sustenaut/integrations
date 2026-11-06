@@ -22,7 +22,7 @@
       "CLOUDFLARE_WORKERS_GITHUB_TOKEN"
     ],
     "patterns": [
-      "\\bdurable_objects\\b|\\bnew_sqlite_classes\\b"
+      "\\bnew_sqlite_classes\\b|\\bnew_classes\\b"
     ]
   }
 }
