@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "The service and the ingest pod answer /livez while the process is up; /healthz is integrations.calls.health over their checks: the ingest pod is unready, with 503, once its scanner goes three intervals without finishing a pass, and the service lists a storage buffer it can't reach as an alert only, since a call needs nothing it holds"
-}
