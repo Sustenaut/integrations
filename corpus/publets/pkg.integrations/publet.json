@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.12.4 is released as v0.12.4 from commit 5ffeaa386615802b6c10c8036f04214ca06fadbd.",
+      "content": "integrations 0.13.0 is released as v0.13.0 from commit c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.12.4",
+            "0.13.0",
             "",
             "",
-            "v0.12.4",
-            "5ffeaa386615802b6c10c8036f04214ca06fadbd"
+            "v0.13.0",
+            "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
           ]
         ]
       },
-      "scope": "the published release v0.12.4 of integrations",
+      "scope": "the published release v0.13.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "5ffeaa386615802b6c10c8036f04214ca06fadbd"
+          "revision": "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.12.4 was released on 2026-11-05 from commit 5ffeaa386615802b6c10c8036f04214ca06fadbd with these changes.",
+      "content": "integrations 0.13.0 was released on 2026-11-06 from commit c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b with these changes.",
       "data": {
         "columns": [
           {
@@ -58,23 +58,31 @@
         "rows": [
           [
             "added",
-            "A sink's report can carry its app's page times for the window, low, median and high, and whether the process started in it"
+            "clients/js/caller.js: the Caller, its sinks and a StorageSink for Node and Cloudflare Workers, generated from the same class table as calls.py, and a root package.json to depend on it by release tag"
+          ],
+          [
+            "changed",
+            "Each class's timeout and tries are in classes.json, which calls.py and caller.js both read"
+          ],
+          [
+            "added",
+            "github.repo-ops check-push: a human-driven check that a token may push to a repository"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.12.4 of integrations",
+      "scope": "the published release v0.13.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "5ffeaa386615802b6c10c8036f04214ca06fadbd"
+          "revision": "c82c526d2a3c4a2ee72bd8aaf6b00a483fef3e9b"
         }
       ]
     }
   },
-  "created": "2026-11-05T00:00:00Z",
+  "created": "2026-11-06T00:00:00Z",
   "sections": [
     {
       "heading": "Identity",
