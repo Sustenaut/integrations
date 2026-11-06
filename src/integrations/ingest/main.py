@@ -1,5 +1,8 @@
 """What the ingest pod runs: integrations.ingest.main:app. Its scanner starts with
-the app. Settings come from the environment, and a key from a mounted Secret."""
+the app. Settings come from the environment, and a key from a mounted Secret.
+INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
+"dataset": ...}, the tenant its evaluator writes them to and the dataset whose
+signals table they load into."""
 
 from __future__ import annotations
 
@@ -13,19 +16,32 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import GoogleToken
-from .inbox import INTERVAL_SECONDS, Inbox, Scanner
+from .inbox import INTERVAL_SECONDS, SIGNALS, Inbox, Kind, Scanner
+
+
+def signals(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_SIGNALS as the scanner takes it: the signals dataset's tenant, and its Kind."""
+    if not text.strip():
+        return {}, {}
+    given = json.loads(text)
+    if not isinstance(given, dict) or set(given) != {"tenant", "dataset"} or not all(
+            isinstance(v, str) and v for v in given.values()):
+        raise ValueError('INGEST_SIGNALS is {"tenant": ..., "dataset": ...}')
+    return {given["dataset"]: given["tenant"]}, {given["dataset"]: SIGNALS}
 
 
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
+    tenants, kinds = signals(os.environ.get("INGEST_SIGNALS", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])
     loader = BigQueryLoader(caller, GoogleToken(caller, key), key["project_id"])
-    inbox = Inbox(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(), os.environ["INGEST_STORAGE_URL"])
+    inbox = Inbox(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(), os.environ["INGEST_STORAGE_URL"],
+                  tenants)
     scanner = Scanner(inbox, loader, JobBudget(), report=lambda status: print(json.dumps(status), flush=True),
-                      sender=os.environ.get("HOSTNAME", "ingest"))
-    buffers = sorted(set(datasets.values()))
+                      sender=os.environ.get("HOSTNAME", "ingest"), kinds=kinds)
+    buffers = sorted(set(datasets.values()) | set(kinds))
 
     ticked = [time.monotonic()]
 

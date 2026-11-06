@@ -12,6 +12,10 @@ to rejected/ for a person.
 Every file carries its sender's report for the cycle, and those go to the status table as
 one more job. This pod reports the same way, with a file of its own for each project: facts
 only, and what to make of them is for whoever reads them.
+
+A buffer that isn't a call log has a `Kind` of its own: its inbox folder, its table, its
+files' format, and no reports. Observability's signals are one (SIGNALS): its evaluator
+leaves them in a tenant of their own, and they load into a table of their own.
 """
 
 from __future__ import annotations
@@ -19,14 +23,14 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
 from .. import __version__
-from ..avrofile import decode, encode, encode_status, file_name, file_status, timestamp
+from ..avrofile import decode, decode_signals, encode, encode_signals, encode_status, file_name, file_status, timestamp
 from ..calls import Request, Response, Transport
-from .bigquery import STATUS_TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
+from .bigquery import STATUS_TABLE, TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
 
 INTERVAL_SECONDS = 120
 INBOX = "inbox/calls/"
@@ -44,6 +48,25 @@ def tenant_of(dataset: str) -> str:
     return dataset.replace("_", "-")
 
 
+@dataclass(frozen=True)
+class Kind:
+    """What a buffer holds: where its files wait, the table they load into, how they are
+    read and merged, and whether senders' reports come with them."""
+
+    folder: str
+    table: str
+    decode: Callable[[bytes], list[dict]]
+    encode: Callable[[list[dict]], bytes]
+    reports: bool
+    what: str
+
+
+# Looked up when called, as the module's own decode and encode.
+CALLS = Kind(INBOX, TABLE, lambda data: decode(data), lambda rows: encode(rows), reports=True,  # noqa: PLW0108
+             what="call records")
+SIGNALS = Kind("inbox/signals/", "signals", decode_signals, encode_signals, reports=False, what="signals")
+
+
 class StorageDown(Exception):
     """Storage didn't answer as it should: everything stays where it is, for next time."""
 
@@ -56,11 +79,16 @@ class Waiting:
 
 
 class Inbox:
-    def __init__(self, transport: Transport, token: Callable[[], str], base_url: str):
+    """`tenants` names the tenant of a dataset not named like it."""
+
+    def __init__(self, transport: Transport, token: Callable[[], str], base_url: str,
+                 tenants: dict[str, str] | None = None):
         self.transport, self.token, self.base = transport, token, base_url.rstrip("/")
+        self.tenants = tenants or {}
 
     def _send(self, dataset: str, method: str, path: str, body: bytes | None = None) -> Response:
-        return self.transport.send(Request(method, f"{self.base}/{tenant_of(dataset)}/{path}",
+        tenant = self.tenants.get(dataset) or tenant_of(dataset)
+        return self.transport.send(Request(method, f"{self.base}/{tenant}/{path}",
                                            {"Authorization": f"Bearer {self.token()}"}, body), TIMEOUT)
 
     @staticmethod
@@ -99,6 +127,11 @@ class Scanner:
     report: Callable[[dict], None]
     clock: Callable[[], float] = time.time
     sender: str = "ingest"
+    # A dataset's Kind, when it isn't a call log.
+    kinds: dict[str, Kind] = field(default_factory=dict)
+
+    def kind(self, dataset: str) -> Kind:
+        return self.kinds.get(dataset, CALLS)
 
     def tick(self, datasets: list[str]) -> None:
         for dataset in datasets:
@@ -117,8 +150,13 @@ class Scanner:
         except Exception as e:  # noqa: BLE001 - one project's bad day must not stop the rest
             problems.append(f"{type(e).__name__}: {e}")
         ended = self.clock()
+        kind = self.kind(dataset)
         status.update(at=timestamp(ended), cycle_start=timestamp(started), cycle_end=timestamp(ended),
-                      jobs_today=self.jobs.used(dataset), status_jobs_today=self.jobs.used(dataset, STATUS_TABLE))
+                      jobs_today=self.jobs.used(dataset, kind.table), status_jobs_today=self.jobs.used(dataset, STATUS_TABLE))
+        if not kind.reports:
+            # Its report goes to the log alone: the buffer holds only what it is for.
+            self.report({**status, "dataset": dataset, "problems": "; ".join(problems) or None})
+            return
         try:
             data = encode([], {**status, "problems": "; ".join(problems) or None})
             self.inbox.put(dataset, file_name(ended, self.sender, data), data)
@@ -133,7 +171,7 @@ class Scanner:
         finished = True
         for record in self.inbox.list(dataset, BATCHES)[0]:
             finished = self._resume(dataset, record.name, status, problems) and finished
-        waiting, more = self.inbox.list(dataset, INBOX)
+        waiting, more = self.inbox.list(dataset, self.kind(dataset).folder)
         done: set[str] = set()
         if finished and waiting:
             files = self._choose(waiting)
@@ -178,13 +216,15 @@ class Scanner:
             if data is None:
                 gone.add(name)  # An earlier try got as far as deleting it.
                 continue
+            kind = self.kind(dataset)
             try:
-                rows[name] = decode(data)
+                rows[name] = kind.decode(data)
                 contents[name] = data
             except Exception as e:  # noqa: BLE001 - fastavro has many ways to say a file is bad
                 self._reject(dataset, name, data, f"can't be read: {type(e).__name__}", gone, status, problems)
                 continue
-            self._read_report(name, data, reports, problems)
+            if kind.reports:
+                self._read_report(name, data, reports, problems)
         if not self._load_reports(dataset, record, held, reports, problems):
             return False
         # All the record's files, even those gone: a job's id has to stay the same for a
@@ -238,15 +278,16 @@ class Scanner:
         if not records:
             self._forget(dataset, files, gone)
             return LoadResult(Outcome.LOADED)
-        if not self.jobs.may_load(dataset):
+        kind = self.kind(dataset)
+        if not self.jobs.may_load(dataset, kind.table):
             return LoadResult(Outcome.RETRY, "the day's load jobs are used")
         try:
-            data = encode(records)
+            data = kind.encode(records)
         except Exception as e:  # noqa: BLE001 - a file that decodes can still not be a call record
-            result = LoadResult(Outcome.REJECTED, f"not call records: {type(e).__name__}")
+            result = LoadResult(Outcome.REJECTED, f"not {kind.what}: {type(e).__name__}")
         else:
-            self.jobs.spend(dataset)
-            result = self.loader.load(dataset, data, _batch_job(files, attempt))
+            self.jobs.spend(dataset, kind.table)
+            result = self.loader.load(dataset, data, _batch_job(files, attempt), kind.table)
         if result.outcome is Outcome.LOADED:
             status["loaded_files"] += sum(name in rows for name in files)
             self._forget(dataset, files, gone)
