@@ -13,7 +13,7 @@ from integrations.avrofile import decode, decode_signals, encode, encode_signals
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
 from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import signals
+from integrations.ingest.main import scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 
@@ -518,3 +518,25 @@ def test_ingest_signals_names_the_tenant_and_dataset(text, tenants):
 def test_a_wrong_ingest_signals_is_refused(text):
     with pytest.raises(ValueError, match="INGEST_SIGNALS is"):
         signals(text)
+
+
+def test_the_scan_passes_once_at_start_and_then_each_interval():
+    events: list[str] = []
+
+    class Stop(Exception):
+        pass
+
+    class Ticking:
+        def tick(self, buffers):
+            events.append(f"tick {','.join(buffers)}")
+
+    def sleep(seconds):
+        events.append(f"sleep {seconds}")
+        if events.count(f"sleep {seconds}") == 2:
+            raise Stop
+
+    ticked = [0.0]
+    with pytest.raises(Stop):
+        scan(Ticking(), ["a", "b"], ticked, sleep=sleep, clock=lambda: 42.0)
+    assert events == ["tick a,b", "sleep 120", "tick a,b", "sleep 120"]
+    assert ticked == [42.0]

@@ -1,0 +1,4 @@
+{
+  "category": "fixed",
+  "change": "The ingest pod scans as soon as it starts, then every two minutes, so a deploy leaves no gap in its reports longer than the restart"
+}
