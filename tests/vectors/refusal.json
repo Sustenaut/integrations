@@ -1,0 +1,29 @@
+{
+  "description": "A refusal comes back to the client, is recorded, and isn't retried",
+  "plugin": "github.edit-pr",
+  "operation": "check",
+  "request": {
+    "method": "GET",
+    "url": "https://api.example/x"
+  },
+  "responses": {
+    "GET https://api.example/x": {
+      "status": 404,
+      "json": {
+        "message": "Not Found"
+      }
+    }
+  },
+  "expect": {
+    "status": 404,
+    "raises": null,
+    "sent": 1,
+    "sleeps": [],
+    "record": {
+      "status": 404,
+      "outcome": "refused",
+      "retries": 0,
+      "bytes_in": 24
+    }
+  }
+}

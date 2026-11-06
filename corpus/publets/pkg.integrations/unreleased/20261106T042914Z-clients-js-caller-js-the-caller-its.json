@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "clients/js/caller.js: the Caller, its sinks and a StorageSink for Node and Cloudflare Workers, generated from the same class table as calls.py, and a root package.json to depend on it by release tag"
+}

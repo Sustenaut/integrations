@@ -1,0 +1,22 @@
+{
+  "name": "@sustenaut/integrations",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The JavaScript side of integrations: caller.js and the generated clients. Depend on a release tag, github:Sustenaut/integrations#vX.Y.Z; the tag is the version.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./caller.js": "./clients/js/caller.js",
+    "./github-edit-pr.js": "./clients/js/github-edit-pr.js"
+  },
+  "files": [
+    "clients/js/*.js"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sustenaut/integrations.git"
+  }
+}
