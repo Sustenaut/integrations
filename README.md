@@ -315,7 +315,7 @@ step, from a checkout of this repository with Sustenaut/shared-infra checked out
 it, on a machine on the admin tailnet, signed in to `gh` and `gcloud`:
 
 ```sh
-./with-secrets ./pubkit deploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
+./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
 ```
 
 It checks every need, prints the plan, and waits for a typed `yes`; then it makes each
@@ -327,7 +327,7 @@ Every run can run again: what is ready is left alone. In order:
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
 | `gcp.service-account-key` | a new key of `integrations-ingest` (Terraform's, in shared-infra), written to Bitwarden as `integrations-calls-writer-key`, then put in the Secret `ingest-bigquery-key` as `key.json`. A key that is no longer one of the account's live keys is drift, and a new one is made |
 | `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
-| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubkit variables --apply` |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
 | `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
 
@@ -346,8 +346,8 @@ Some needs it only checks, and says what a person does:
 - **The DNS record** for `integrations.sustenaut.eu`, in shared-infra's hosting block.
 - **storage itself** (`upstream`).
 
-`./pubkit deploy walk` without `--fulfil` (or `deploy check`) changes nothing, and
-`./pubkit deploy walk --offline` checks only the files. `.github/workflows/deploy-check.yml`
+`./pubdeploy walk` without `--fulfil` (or `pubdeploy check`) changes nothing, and
+`./pubdeploy walk --offline` checks only the files. `.github/workflows/deploy-check.yml`
 walks it every 30 minutes, read-only, with the deploy key, and writes the walk to
 storage's `plane` tenant; it fails when a need is missing, drift or blocked.
 
