@@ -1,6 +1,13 @@
 {
   "uses": [
     {
+      "plugin": "bitwarden.secrets",
+      "paths": [
+        "with-secrets.json"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "cloudflare.dns",
       "paths": [
         "src/integrations/clients/cloudflare_dns.py"
@@ -19,6 +26,13 @@
       "paths": [
         ".github/workflows/call-log.yml",
         "workers/call-log/wrangler.toml"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "github.actions-oidc",
+      "paths": [
+        ".github/workflows/deploy-check.yml"
       ],
       "mode": "required"
     },

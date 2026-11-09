@@ -1,5 +1,5 @@
-# Applied by push-ingest-key.sh over the admin key: the deploy identity may not manage
-# network policies. Only the service's pods may send records to the ingest pod, which
+# Applied by the deploy walk (k8s.manifests) over the admin channel: the deploy identity
+# may not manage network policies. Only the service's pods may send records to the ingest pod, which
 # takes them without a token because of this.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -20,5 +20,51 @@
   },
   "signing_keys": [
     {"path": "corpus/.publet/signing.key", "bitwarden": {"project": {"id": "377de170-5487-40f7-9a01-b4f50064e1c5", "name": "Pub"}, "name": "pub-signing-key-integrations"}}
-  ]
+  ],
+  "deploy": {
+    "namespace": "integrations",
+    "host": "integrations.sustenaut.eu",
+    "workflow": "deploy.yml",
+    "gate": "DEPLOY_INTEGRATIONS",
+    "needs": [
+      {
+        "type": "gcp.service-account-key",
+        "account": "integrations-ingest",
+        "project": "sustenaut",
+        "bitwarden": "integrations-calls-writer-key",
+        "secret": {
+          "name": "ingest-bigquery-key",
+          "key": "key.json",
+          "decode": "base64"
+        }
+      },
+      {
+        "type": "k8s.manifests",
+        "path": "k8s/admin/network-policy.yaml"
+      },
+      {
+        "type": "upstream",
+        "name": "storage",
+        "health": "https://storage.sustenaut.eu/"
+      },
+      {
+        "type": "storage.tenant",
+        "name": "calls-integrations",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "read": [
+          "k8s:integrations/ingest"
+        ],
+        "write": [
+          "k8s:integrations/app",
+          "k8s:integrations/ingest"
+        ],
+        "delete": [
+          "k8s:integrations/ingest"
+        ],
+        "private": true,
+        "inbox": true
+      }
+    ]
+  }
 }

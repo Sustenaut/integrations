@@ -8,7 +8,8 @@
 # INGEST_SIGNALS (unset: no signals are loaded), which pubkit.json declares. Their
 # values are kept in the owner's state repository: a change there sets them with
 # `pubkit variables --apply` and runs this workflow. Without SUSTENAUT_SERVER the image
-# is built and pushed, and nothing is deployed.
+# is built and pushed, and nothing is deployed. It deploys only once DEPLOY_INTEGRATIONS
+# is "on", which the deploy walk sets once every need before it is ready.
 name: deploy
 
 on:
@@ -24,10 +25,10 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubkit/.github/workflows/k8s-deploy.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/k8s-deploy.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
     with:
       image: ghcr.io/sustenaut/sustenaut-integrations
-      deploys: k8s integrations
+      deploys: k8s integrations DEPLOY_INTEGRATIONS
       # It starts, serves its docs and refuses a proposal without a token; the ingest pod's imports load.
       check: |
         docker run -d --name app -p 8080:8080 "$IMAGE"
