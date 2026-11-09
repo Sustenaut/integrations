@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Managed by pubkit 0.34.0: `pubkit sync` rewrites this file, and
+# `pubkit sync --check` fails when it differs.
+#
+# Run this repository's pinned pubdeploy, the deploy walk: what pubkit.json's
+# deploy block says the service needs, whether it has it, and making it.
+#
+#   ./with-secrets ./pubdeploy walk --fulfil
+#   ./pubdeploy check --offline
+#   ./pubdeploy types
+#
+# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.34.0
+# works with where it lists none, or an older one, and it runs with every
+# other deploy.providers wheel, so their need types load. Each wheel is
+# fetched once into the user's cache (from the wheel mirror, when
+# pubkit.json names one and GitHub fails) and checked against its sha256 on
+# every run, and uvx runs that file; nothing is installed into the
+# repository or the system. pubdeploy runs in the repository's root, where
+# pubkit.json is, from whichever directory this is called.
+set -euo pipefail
+
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "pubdeploy: ./pubdeploy runs pubdeploy with uv, which is not installed: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  exit 127
+fi
+
+cd "$(dirname "$0")"
+# A wheel, fetched once into the user's cache, checked against its sha256 on every run.
+fetch() {
+  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/pubkit/$3/$2" sum
+  fetched="$dir/${1##*/}"
+  if [ ! -f "$fetched" ]; then
+    mkdir -p "$dir"
+    curl -fsSL -o "$fetched.part" "$1" \
+      || curl -fsSL -o "$fetched.part" "https://storage.sustenaut.eu/wheels/f/$2/${1##*/}" \
+      || { rm -f "$fetched.part"; echo "pubkit: could not fetch $1" >&2; exit 1; }
+    mv "$fetched.part" "$fetched"
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$fetched"); else sum=$(shasum -a 256 "$fetched"); fi
+  if [ "${sum%% *}" != "$2" ]; then
+    rm -f "$fetched"
+    echo "pubkit: $1 is not the wheel $4 pins (sha256 $2)" >&2
+    exit 1
+  fi
+}
+
+# The packages pubkit.json's deploy.providers names, each wheel checked against its sha256.
+with=()
+provider() {
+  fetch "$1" "$2" providers deploy.providers
+  with+=(--with "$fetched")
+}
+provider https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl 88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17
+
+fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.2.0/pubdeploy-0.2.0-py3-none-any.whl 1aaf15c384a4e9d3b7ac95bec1c1a1f99b9612d105c982e22518f99867b644c0 providers deploy.providers
+exec uvx --from "$fetched" ${with[@]+"${with[@]}"} pubdeploy "$@"

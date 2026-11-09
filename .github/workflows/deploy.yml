@@ -7,7 +7,7 @@
 # consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS, INGEST_DATASETS and
 # INGEST_SIGNALS (unset: no signals are loaded), which pubkit.json declares. Their
 # values are kept in the owner's state repository: a change there sets them with
-# `pubkit variables --apply` and runs this workflow. Without SUSTENAUT_SERVER the image
+# `pubfleet variables --apply` and runs this workflow. Without SUSTENAUT_SERVER the image
 # is built and pushed, and nothing is deployed. It deploys only once DEPLOY_INTEGRATIONS
 # is "on", which the deploy walk sets once every need before it is ready.
 name: deploy
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubkit/.github/workflows/k8s-deploy.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@2df756eb5916723abb2d9fac9e3fd58e67693877 # v0.2.0
     with:
       image: ghcr.io/sustenaut/sustenaut-integrations
       deploys: k8s integrations DEPLOY_INTEGRATIONS
