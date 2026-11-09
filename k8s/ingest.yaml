@@ -1,7 +1,7 @@
 # The ingest pod: each project's buffer in storage, into BigQuery every two minutes. One
 # replica, as one writer per table keeps a table within BigQuery's daily load jobs; to
 # scale, more pods split by dataset. Nothing sends to it, so it has no Service; its
-# only routes are /healthz and /livez. Its key is the Secret admin/push-ingest-key.sh puts in.
+# only routes are /healthz and /livez. Its key is the Secret the deploy walk puts in.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

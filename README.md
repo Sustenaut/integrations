@@ -288,15 +288,9 @@ named it serves nothing. `INTEGRATIONS_EDIT_PR_PER_MINUTE` and `INTEGRATIONS_EDI
 its proposals and reads, and `INTEGRATIONS_EDIT_PR_TIMINGS_PER_MINUTE` the timings, which need no
 token, so that they can't use up the others.
 
-It runs on the shared k3s server, namespace `integrations`. `.github/workflows/deploy.yml`
-builds the image and applies `k8s/` on each merge to main. A new server needs
-`sustenaut-app integrations` once, the deploy secrets and variables on this repository,
-and the DNS record for `integrations.sustenaut.eu`.
-
-Before the first deploy with the ingest pod, a person puts the writer's key in the
-namespace, from a `shared-infra` checkout beside this one:
-`./with-secrets ../integrations/k8s/admin/push-ingest-key.sh`. It also needs the variable
-`INGEST_DATASETS` on this repository: JSON from each repository to its dataset.
+It runs on the shared k3s server, namespace `integrations`, and "Deploying" below says
+how it gets there. The ingest pod needs the variable `INGEST_DATASETS` on this
+repository: JSON from each repository to its dataset.
 `INGEST_SIGNALS`, when set, also has it load observability's signals:
 `{"tenant": "signals", "dataset": "observability"}`, the tenant the evaluator writes
 them to and the dataset whose `signals` table they load into. That buffer holds Avro
@@ -305,6 +299,57 @@ gets no reports: the pod's report on it goes to its log.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
+
+### Deploying
+
+`.github/workflows/deploy.yml` builds the image on each merge to main, once CI has
+passed, and applies `k8s/` with pubkit's `k8s-deploy.yml`, once `DEPLOY_INTEGRATIONS` is
+`on`. The variables become the ConfigMaps `settings` and `ingest-settings`.
+
+What it needs elsewhere: shared-infra's `integrations-ingest` account and the call log
+datasets (`infra/call_log.tf`), storage's `calls-integrations` tenant and the buffers of
+the projects it loads, and its variables on this repository.
+pubkit.json's `deploy` block lists them with everything else it needs, and pubkit's
+deploy walk checks each and makes what it can. To take it live, or bring it back in
+step, from a checkout of this repository with Sustenaut/shared-infra checked out beside
+it, on a machine on the admin tailnet, signed in to `gh` and `gcloud`:
+
+```sh
+./with-secrets ./pubkit deploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
+```
+
+It checks every need, prints the plan, and waits for a typed `yes`; then it makes each
+missing need it can, over the admin channel (`ssh root@sustenaut`), and checks it again.
+Every run can run again: what is ready is left alone. In order:
+
+| Need | What the walk does |
+|---|---|
+| the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
+| `gcp.service-account-key` | a new key of `integrations-ingest` (Terraform's, in shared-infra), written to Bitwarden as `integrations-calls-writer-key`, then put in the Secret `ingest-bigquery-key` as `key.json`. A key that is no longer one of the account's live keys is drift, and a new one is made |
+| `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubkit variables --apply` |
+| `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
+| `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
+
+A new key wants a Bitwarden token that may write: the walk asks for it once, at a hidden
+prompt, and keeps it only in its process.
+
+Some needs it only checks, and says what a person does:
+
+- **storage's tenant** `calls-integrations` in Sustenaut/storage's `tenants.json`
+  (private, an inbox), the service's own call log buffer, which `k8s:integrations/app`
+  writes and `k8s:integrations/ingest` reads, writes and deletes. When it is missing,
+  the fix is the entry to add there. The other projects' buffers are their own needs.
+- **The entries other services need in its variables**: their own deploy blocks check
+  them, such as the notifier's `INGEST_DATASETS` entry and observability's
+  `INGEST_SIGNALS`.
+- **The DNS record** for `integrations.sustenaut.eu`, in shared-infra's hosting block.
+- **storage itself** (`upstream`).
+
+`./pubkit deploy walk` without `--fulfil` (or `deploy check`) changes nothing, and
+`./pubkit deploy walk --offline` checks only the files. `.github/workflows/deploy-check.yml`
+walks it every 30 minutes, read-only, with the deploy key, and writes the walk to
+storage's `plane` tenant; it fails when a need is missing, drift or blocked.
 
 ## The call log
 

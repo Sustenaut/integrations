@@ -1,0 +1,11 @@
+# Seeded by pubkit 0.31.3: this repository's own. Every 30 minutes, the deploy walk, read-only.
+name: deploy-check
+on: { schedule: [{ cron: '*/30 * * * *' }], workflow_dispatch: {} }
+permissions: { actions: read, contents: read, id-token: write }
+jobs:
+  check:
+    uses: Sustenaut/pubkit/.github/workflows/deploy-check.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
+    # The journal goes to storage's plane tenant. The zone is shared-infra's, which is
+    # private, so the job can't check it out, and the DNS record stays unknown there.
+    with: { journal: 'https://storage.sustenaut.eu' }
+    secrets: inherit

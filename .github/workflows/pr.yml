@@ -12,24 +12,24 @@ permissions:
 jobs:
   functional:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
 
   audit:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
 
   osv:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
 
   review:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-review.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/job-review.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
 
   sonar:
     name: ci
     needs: [functional]
-    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@0c1f1c3ff98315c6eabad6b58ba9fad79374572a # v0.31.0
+    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@01c2711869ce046ec875edee83e575b955cfbabf # v0.31.3
     with: {"reports": "sonar.python.coverage.reportPaths=*.xml", "layout": "-Dsonar.sources=src -Dsonar.tests=tests"}
     secrets: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' }
 
