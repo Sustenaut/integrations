@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by pubkit 0.34.0: `pubkit sync` rewrites this file, and
+# Managed by pubkit 0.35.0: `pubkit sync` rewrites this file, and
 # `pubkit sync --check` fails when it differs.
 #
 # Run this repository's pinned pubdeploy, the deploy walk: what pubkit.json's
@@ -9,7 +9,7 @@
 #   ./pubdeploy check --offline
 #   ./pubdeploy types
 #
-# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.34.0
+# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.35.0
 # works with where it lists none, or an older one, and it runs with every
 # other deploy.providers wheel, so their need types load. Each wheel is
 # fetched once into the user's cache (from the wheel mirror, when
@@ -52,5 +52,5 @@ provider() {
 }
 provider https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl 88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17
 
-fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.2.0/pubdeploy-0.2.0-py3-none-any.whl 1aaf15c384a4e9d3b7ac95bec1c1a1f99b9612d105c982e22518f99867b644c0 providers deploy.providers
+fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07 providers deploy.providers
 exec uvx --from "$fetched" ${with[@]+"${with[@]}"} pubdeploy "$@"
