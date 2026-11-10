@@ -9,11 +9,11 @@ import pytest
 
 from datetime import datetime, timezone
 
-from integrations.avrofile import decode, decode_signals, encode, encode_signals, file_status
+from integrations.avrofile import decode, decode_need_states, decode_signals, encode, encode_need_states, encode_signals, file_status
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import scan, signals
+from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.main import buffers, need_states, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 
@@ -72,6 +72,7 @@ class PickyBigQuery(FakeBigQuery):
         self.status_jobs: list[str] = []
         self.status_rows: list[dict] = []
         self.signal_rows: list[dict] = []
+        self.need_state_rows: list[dict] = []
         self.tables: list[str] = []
 
     def send(self, request, timeout):
@@ -87,6 +88,9 @@ class PickyBigQuery(FakeBigQuery):
             self.tables.append(table)
             if table == "signals":
                 self.signal_rows += decode_signals(data)
+                return Response(200, b"{}")
+            if table == "need_states":
+                self.need_state_rows += decode_need_states(data)
                 return Response(200, b"{}")
             rows = decode(data)
             if table == STATUS_TABLE:
@@ -518,6 +522,51 @@ def test_ingest_signals_names_the_tenant_and_dataset(text, tenants):
 def test_a_wrong_ingest_signals_is_refused(text):
     with pytest.raises(ValueError, match="INGEST_SIGNALS is"):
         signals(text)
+
+
+def need_state(n: int, **fields) -> dict:
+    moment = datetime(2027, 1, 15, 7, 50, tzinfo=timezone.utc)
+    return {"observed_at": moment, "repository": "example-org/app", "unit": "app", "need": f"k8s.secret:s{n}",
+            "type": "k8s.secret", "name": f"s{n}", "grade": "auto", "state": "ready", "walked_from": "plane",
+            "walk_started_at": moment, **fields}
+
+
+def test_need_states_load_into_their_own_table_from_their_own_tenant_and_leave():
+    buffer, bigquery = FakeBuffer(), PickyBigQuery()
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    statuses: list[dict] = []
+    clock = lambda: 1_800_000_000.0  # noqa: E731
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"convergence": "need-states"}),
+                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(clock), statuses.append, clock, kinds={"convergence": NEED_STATES})
+    buffer.files["inbox/need-states/2027-01-15/075000-example-org.app.app-1.avro"] = encode_need_states(
+        [need_state(1), need_state(2, state="missing")])
+    buffer.files["inbox/need-states/2027-01-15/075001-example-org.app.app-2.avro"] = encode_signals([signal(1)])
+    scanner.tick(["convergence"])
+    assert bigquery.tables == ["need_states"]
+    assert sorted((r["need"], r["state"]) for r in bigquery.need_state_rows) == [
+        ("k8s.secret:s1", "ready"), ("k8s.secret:s2", "missing")]
+    assert buffer.under("rejected/") == ["rejected/need-states/2027-01-15/075001-example-org.app.app-2.avro"]
+    # Read against the need-state schema, so a file of anything else is set aside alone.
+    assert "can't be read" in statuses[0]["problems"]
+
+
+def test_need_states_are_the_same_bytes_for_the_same_rows():
+    rows = [need_state(1), need_state(2, state="drift")]
+    assert encode_need_states(rows) == encode_need_states([dict(r) for r in rows])
+    assert decode_need_states(encode_need_states(rows)) == rows
+
+
+def test_ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
+    tenants, kinds = buffers('{"tenant": "signals", "dataset": "observability"}',
+                             '{"tenant": "need-states", "dataset": "convergence"}')
+    assert tenants == {"observability": "signals", "convergence": "need-states"}
+    assert kinds == {"observability": SIGNALS, "convergence": NEED_STATES}
+    assert buffers("", "") == ({}, {})
+    with pytest.raises(ValueError, match="INGEST_NEED_STATES is"):
+        need_states('{"tenant": "need-states"}')
+    with pytest.raises(ValueError, match="name the same dataset"):
+        buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
 
 
 def test_the_scan_passes_once_at_start_and_then_each_interval():
