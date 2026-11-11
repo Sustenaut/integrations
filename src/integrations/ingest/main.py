@@ -42,7 +42,7 @@ def need_states(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     return buffer(text, "INGEST_NEED_STATES", NEED_STATES)
 
 
-def buffers(signals_text: str, need_states_text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+def named_buffers(signals_text: str, need_states_text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     """Both, which must name two datasets: a dataset holds one Kind of buffer."""
     tenants, kinds = signals(signals_text)
     more_tenants, more_kinds = need_states(need_states_text)
@@ -53,7 +53,7 @@ def buffers(signals_text: str, need_states_text: str) -> tuple[dict[str, str], d
 
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
-    tenants, kinds = buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""))
+    tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])

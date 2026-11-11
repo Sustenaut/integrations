@@ -13,7 +13,7 @@ from integrations.avrofile import decode, decode_need_states, decode_signals, en
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
 from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import buffers, need_states, scan, signals
+from integrations.ingest.main import named_buffers, need_states, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 
@@ -558,15 +558,15 @@ def test_need_states_are_the_same_bytes_for_the_same_rows():
 
 
 def test_ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
-    tenants, kinds = buffers('{"tenant": "signals", "dataset": "observability"}',
+    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                              '{"tenant": "need-states", "dataset": "convergence"}')
     assert tenants == {"observability": "signals", "convergence": "need-states"}
     assert kinds == {"observability": SIGNALS, "convergence": NEED_STATES}
-    assert buffers("", "") == ({}, {})
+    assert named_buffers("", "") == ({}, {})
     with pytest.raises(ValueError, match="INGEST_NEED_STATES is"):
         need_states('{"tenant": "need-states"}')
     with pytest.raises(ValueError, match="name the same dataset"):
-        buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
+        named_buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
 
 
 def test_the_scan_passes_once_at_start_and_then_each_interval():
