@@ -2,7 +2,8 @@
 the app. Settings come from the environment, and a key from a mounted Secret.
 INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
 "dataset": ...}, the tenant its evaluator writes them to and the dataset whose
-signals table they load into."""
+signals table they load into. INGEST_NEED_STATES, in the same shape, loads the
+convergence engine's need states into that dataset's need_states table."""
 
 from __future__ import annotations
 
@@ -16,23 +17,43 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import GoogleToken
-from .inbox import INTERVAL_SECONDS, SIGNALS, Inbox, Kind, Scanner
+from .inbox import INTERVAL_SECONDS, NEED_STATES, SIGNALS, Inbox, Kind, Scanner
 
 
-def signals(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
-    """INGEST_SIGNALS as the scanner takes it: the signals dataset's tenant, and its Kind."""
+def buffer(text: str, variable: str, kind: Kind) -> tuple[dict[str, str], dict[str, Kind]]:
+    """A {"tenant": ..., "dataset": ...} variable as the scanner takes it: the dataset's
+    tenant, and its Kind."""
     if not text.strip():
         return {}, {}
     given = json.loads(text)
     if not isinstance(given, dict) or set(given) != {"tenant", "dataset"} or not all(
             isinstance(v, str) and v for v in given.values()):
-        raise ValueError('INGEST_SIGNALS is {"tenant": ..., "dataset": ...}')
-    return {given["dataset"]: given["tenant"]}, {given["dataset"]: SIGNALS}
+        raise ValueError(f'{variable} is {{"tenant": ..., "dataset": ...}}')
+    return {given["dataset"]: given["tenant"]}, {given["dataset"]: kind}
+
+
+def signals(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_SIGNALS: observability's signals."""
+    return buffer(text, "INGEST_SIGNALS", SIGNALS)
+
+
+def need_states(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_NEED_STATES: the convergence engine's need states."""
+    return buffer(text, "INGEST_NEED_STATES", NEED_STATES)
+
+
+def named_buffers(signals_text: str, need_states_text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """Both, which must name two datasets: a dataset holds one Kind of buffer."""
+    tenants, kinds = signals(signals_text)
+    more_tenants, more_kinds = need_states(need_states_text)
+    if set(kinds) & set(more_kinds):
+        raise ValueError("INGEST_SIGNALS and INGEST_NEED_STATES name the same dataset")
+    return {**tenants, **more_tenants}, {**kinds, **more_kinds}
 
 
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
-    tenants, kinds = signals(os.environ.get("INGEST_SIGNALS", ""))
+    tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])

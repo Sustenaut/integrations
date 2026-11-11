@@ -295,7 +295,11 @@ repository: JSON from each repository to its dataset.
 `{"tenant": "signals", "dataset": "observability"}`, the tenant the evaluator writes
 them to and the dataset whose `signals` table they load into. That buffer holds Avro
 signals under `inbox/signals/`, loads like a call log's but into its own table, and
-gets no reports: the pod's report on it goes to its log.
+gets no reports: the pod's report on it goes to its log. `INGEST_NEED_STATES`, in the
+same shape (`{"tenant": "need-states", "dataset": "convergence"}`), loads the
+convergence engine's need states the same way, from `inbox/need-states/` into that
+dataset's `need_states` table, for observability's `need_drift` rule. A file there that
+isn't need states is set aside alone, in `rejected/`.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
@@ -327,7 +331,7 @@ Every run can run again: what is ready is left alone. In order:
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
 | `gcp.service-account-key` | a new key of `integrations-ingest` (Terraform's, in shared-infra), written to Bitwarden as `integrations-calls-writer-key`, then put in the Secret `ingest-bigquery-key` as `key.json`. A key that is no longer one of the account's live keys is drift, and a new one is made |
 | `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
-| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
 | `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
 

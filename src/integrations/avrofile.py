@@ -133,3 +133,32 @@ def encode_signals(rows: list[dict]) -> bytes:
 
 def decode_signals(data: bytes) -> list[dict]:
     return list(fastavro.reader(io.BytesIO(data)))
+
+
+# The convergence engine's facts, as it writes them to the need-states tenant: one row per
+# need per walk, the columns of convergence.need_states, for observability's need_drift rule.
+NEED_STATE_SCHEMA = fastavro.parse_schema({
+    "type": "record", "name": "need_state", "fields": [
+        {"name": "observed_at", "type": _TIME},
+        {"name": "repository", "type": "string"},
+        {"name": "unit", "type": "string"},
+        {"name": "need", "type": "string"},
+        {"name": "type", "type": "string"},
+        {"name": "name", "type": "string"},
+        {"name": "grade", "type": "string"},
+        {"name": "state", "type": "string"},
+        {"name": "walked_from", "type": "string"},
+        {"name": "walk_started_at", "type": _TIME},
+    ]})
+
+
+def encode_need_states(rows: list[dict]) -> bytes:
+    """Need states as one file to load; the same rows always give the same bytes."""
+    out = io.BytesIO()
+    marker = hashlib.sha256(repr(sorted(map(repr, rows))).encode()).digest()[:16]
+    fastavro.writer(out, NEED_STATE_SCHEMA, rows, codec="deflate", sync_marker=marker)
+    return out.getvalue()
+
+
+def decode_need_states(data: bytes) -> list[dict]:
+    return list(fastavro.reader(io.BytesIO(data), NEED_STATE_SCHEMA))
