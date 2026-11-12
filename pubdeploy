@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by pubkit 0.35.0: `pubkit sync` rewrites this file, and
+# Managed by pubkit 0.36.0: `pubkit sync` rewrites this file, and
 # `pubkit sync --check` fails when it differs.
 #
 # Run this repository's pinned pubdeploy, the deploy walk: what pubkit.json's
@@ -9,7 +9,7 @@
 #   ./pubdeploy check --offline
 #   ./pubdeploy types
 #
-# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.35.0
+# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.36.0
 # works with where it lists none, or an older one, and it runs with every
 # other deploy.providers wheel, so their need types load. Each wheel is
 # fetched once into the user's cache (from the wheel mirror, when

@@ -14,7 +14,7 @@ jobs:
   # jobs it ran are skipped, and nothing here tests less than it did.
   tested:
     name: ci
-    uses: Sustenaut/pubkit/.github/workflows/job-tested.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    uses: Sustenaut/pubkit/.github/workflows/job-tested.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
     with: {"workflow": ".github/workflows/pr.yml"}
     permissions:
       actions: read
@@ -24,37 +24,38 @@ jobs:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    uses: Sustenaut/pubkit/.github/workflows/job-python-functional.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
 
   audit:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    uses: Sustenaut/pubkit/.github/workflows/job-python-audit.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
 
   osv:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    uses: Sustenaut/pubkit/.github/workflows/job-osv.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
 
   review:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-review.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    uses: Sustenaut/pubkit/.github/workflows/job-review.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
 
   sonar:
     name: ci
     needs: [tested, functional]
-    if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@3bf6ed20f0ae2fe63ffb08cba96fe59a6cfddcb1 # v0.35.0
+    if: ${{ github.event_name != 'merge_group' && needs.tested.outputs.tested != 'true' }}
+    uses: Sustenaut/pubkit/.github/workflows/job-sonar.yml@ec25e7ea8a86d688a626b0326fb131c11b6da081 # v0.36.0
     with: {"reports": "sonar.python.coverage.reportPaths=*.xml", "layout": "-Dsonar.sources=src -Dsonar.tests=tests"}
     secrets: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' }
 
   # The one check a ruleset requires: it passes only when every job
   # above succeeded or, where an earlier run already passed on the
-  # commit's tree, was skipped for it. None is skipped for not being asked for.
+  # commit's tree, was skipped for it, or is the scan, which the merge
+  # queue never runs. None is skipped for not being asked for.
   passed:
     name: ci / passed
     if: always()
@@ -63,9 +64,10 @@ jobs:
     steps:
       - run: |
           echo "$RESULTS"
-          echo "$RESULTS" | jq -e --arg tested "$TESTED" '.tested.result == "success"
-            and all(.[]; .result == "success" or (.result == "skipped" and $tested == "true"))' > /dev/null
-        env: { RESULTS: '${{ toJSON(needs) }}', TESTED: '${{ needs.tested.outputs.tested }}' }
+          echo "$RESULTS" | jq -e --arg tested "$TESTED" --arg event "$EVENT" '.tested.result == "success"
+            and all(to_entries[]; .value.result == "success" or (.value.result == "skipped"
+              and ($tested == "true" or (.key == "sonar" and $event == "merge_group"))))' > /dev/null
+        env: { RESULTS: '${{ toJSON(needs) }}', TESTED: '${{ needs.tested.outputs.tested }}', EVENT: '${{ github.event_name }}' }
 
   # pubrel's release workflow: on a pull request, a code change records
   # what it changes and a release is the bump its changes require; on
