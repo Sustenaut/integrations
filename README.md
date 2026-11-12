@@ -126,6 +126,10 @@ jobs:
     uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
 ```
 
+The scan runs on GitHub's `ubuntu-latest` unless the caller names other
+runners, such as a self-hosted runner scale set, with
+`with: { runs-on: my-runners }`; it needs git and Python 3 there.
+
 ## The library
 
 A program calls an outside service through a client here. Every client makes

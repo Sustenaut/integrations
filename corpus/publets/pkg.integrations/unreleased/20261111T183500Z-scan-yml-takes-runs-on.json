@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "scan.yml takes a runs-on input, the runner label the scan runs on (ubuntu-latest by default), so a repository with self-hosted runners scans on them"
+}

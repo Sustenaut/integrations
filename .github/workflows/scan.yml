@@ -4,6 +4,7 @@
 #   jobs:
 #     integrations:
 #       uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
+#       with: { runs-on: my-runners }   # optional: a self-hosted runner label
 #
 # It runs the scanner at the commit the caller pinned, from a plain checkout:
 # the scanner needs Python and nothing else, and no job here has secrets.
@@ -11,13 +12,15 @@ name: scan
 
 on:
   workflow_call:
+    inputs:
+      runs-on: { type: string, default: ubuntu-latest, description: "The runner label the scan runs on: a self-hosted runner scale set, or GitHub's ubuntu-latest." }
 
 permissions:
   contents: read
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { path: repository, persist-credentials: false }
