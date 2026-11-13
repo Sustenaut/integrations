@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.14.1 is released as v0.14.1 from commit 548e61b426ad17b59b20d8621b521489a1931b7d.",
+      "content": "integrations 0.14.2 is released as v0.14.2 from commit a47adea4b9eaf43151564ed9836f6baf740b4739.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.14.1",
+            "0.14.2",
             "",
             "",
-            "v0.14.1",
-            "548e61b426ad17b59b20d8621b521489a1931b7d"
+            "v0.14.2",
+            "a47adea4b9eaf43151564ed9836f6baf740b4739"
           ]
         ]
       },
-      "scope": "the published release v0.14.1 of integrations",
+      "scope": "the published release v0.14.2 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "548e61b426ad17b59b20d8621b521489a1931b7d"
+          "revision": "a47adea4b9eaf43151564ed9836f6baf740b4739"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.14.1 was released on 2026-11-06 from commit 548e61b426ad17b59b20d8621b521489a1931b7d with these changes.",
+      "content": "integrations 0.14.2 was released on 2026-11-13 from commit a47adea4b9eaf43151564ed9836f6baf740b4739 with these changes.",
       "data": {
         "columns": [
           {
@@ -57,36 +57,36 @@
         ],
         "rows": [
           [
-            "added",
-            "The service and the ingest pod answer /livez while the process is up; /healthz is integrations.calls.health over their checks: the ingest pod is unready, with 503, once its scanner goes three intervals without finishing a pass, and the service lists a storage buffer it can't reach as an alert only, since a call needs nothing it holds"
+            "fixed",
+            "The ingest pod scans as soon as it starts, then every two minutes, so a deploy leaves no gap in its reports longer than the restart"
           ],
           [
             "added",
-            "The ingest pod loads observability's signals, when INGEST_SIGNALS names their tenant and dataset, from that tenant's inbox/signals/ into the dataset's signals table"
+            "The ingest pod loads the convergence engine's need states: INGEST_NEED_STATES, {\"tenant\": ..., \"dataset\": ...} like INGEST_SIGNALS, from inbox/need-states/ into the dataset's need_states table; avrofile has encode_need_states and decode_need_states"
           ],
           [
             "added",
-            "The cloudflare.workers plugin, for Workers deploys"
+            "scan.yml takes a runs-on input, the runner label the scan runs on (ubuntu-latest by default), so a repository with self-hosted runners scans on them"
           ],
           [
             "added",
-            "workers/call-log, a Durable Object per Cloudflare sender that keeps its call records durably and writes its file every two minutes, even an idle one, with caller.js's CallLogSink to send it records"
+            "The ingest pod loads the platform's nightly pubkit checks: INGEST_PUBKIT_CHECKS, {\"tenant\": ..., \"dataset\": ...} like INGEST_NEED_STATES, from inbox/pubkit-checks/ into the dataset's pubkit_checks table; avrofile has encode_pubkit_checks and decode_pubkit_checks"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.14.1 of integrations",
+      "scope": "the published release v0.14.2 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "548e61b426ad17b59b20d8621b521489a1931b7d"
+          "revision": "a47adea4b9eaf43151564ed9836f6baf740b4739"
         }
       ]
     }
   },
-  "created": "2026-11-06T00:00:00Z",
+  "created": "2026-11-13T00:00:00Z",
   "sections": [
     {
       "heading": "Identity",
