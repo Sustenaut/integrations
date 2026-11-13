@@ -15,7 +15,7 @@
     "release_app": 5529889
   },
   "variables": {
-    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INGEST_NEED_STATES", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
+    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INGEST_NEED_STATES", "INGEST_PUBKIT_CHECKS", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
     "deploy": "deploy.yml"
   },
   "signing_keys": [

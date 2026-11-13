@@ -9,11 +9,11 @@ import pytest
 
 from datetime import datetime, timezone
 
-from integrations.avrofile import decode, decode_need_states, decode_signals, encode, encode_need_states, encode_signals, file_status
+from integrations.avrofile import decode, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_need_states, encode_pubkit_checks, encode_signals, file_status
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import named_buffers, need_states, scan, signals
+from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.main import named_buffers, need_states, pubkit_checks, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 
@@ -73,6 +73,7 @@ class PickyBigQuery(FakeBigQuery):
         self.status_rows: list[dict] = []
         self.signal_rows: list[dict] = []
         self.need_state_rows: list[dict] = []
+        self.pubkit_check_rows: list[dict] = []
         self.tables: list[str] = []
 
     def send(self, request, timeout):
@@ -91,6 +92,9 @@ class PickyBigQuery(FakeBigQuery):
                 return Response(200, b"{}")
             if table == "need_states":
                 self.need_state_rows += decode_need_states(data)
+                return Response(200, b"{}")
+            if table == "pubkit_checks":
+                self.pubkit_check_rows += decode_pubkit_checks(data)
                 return Response(200, b"{}")
             rows = decode(data)
             if table == STATUS_TABLE:
@@ -567,6 +571,51 @@ def test_ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
         need_states('{"tenant": "need-states"}')
     with pytest.raises(ValueError, match="name the same dataset"):
         named_buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
+
+
+def pubkit_check(n: int, **fields) -> dict:
+    moment = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
+    return {"observed_at": moment, "repository": f"example-org/repo{n}", "check": "pin", "status": "pass",
+            "pinned": "0.37.0", "latest": "0.37.0", "main_commit": "abc123", "run_url": "", "fix": "",
+            "run_started_at": moment, **fields}
+
+
+def test_pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
+    buffer, bigquery = FakeBuffer(), PickyBigQuery()
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    statuses: list[dict] = []
+    clock = lambda: 1_800_000_000.0  # noqa: E731
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"platform": "pubkit-checks"}),
+                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(clock), statuses.append, clock, kinds={"platform": PUBKIT_CHECKS})
+    buffer.files["inbox/pubkit-checks/2027-01-15/024100-nightly-1.avro"] = encode_pubkit_checks(
+        [pubkit_check(1), pubkit_check(2, status="fail", pinned="0.35.1",
+                                       fix="`git latest && ./pubkit bump`, then open its PR")])
+    buffer.files["inbox/pubkit-checks/2027-01-15/024101-nightly-2.avro"] = encode_signals([signal(1)])
+    scanner.tick(["platform"])
+    assert bigquery.tables == ["pubkit_checks"]
+    assert sorted((r["repository"], r["status"]) for r in bigquery.pubkit_check_rows) == [
+        ("example-org/repo1", "pass"), ("example-org/repo2", "fail")]
+    assert buffer.under("rejected/") == ["rejected/pubkit-checks/2027-01-15/024101-nightly-2.avro"]
+    assert "can't be read" in statuses[0]["problems"]
+
+
+def test_pubkit_checks_are_the_same_bytes_for_the_same_rows():
+    rows = [pubkit_check(1), pubkit_check(2, check="sync", status="fail")]
+    assert encode_pubkit_checks(rows) == encode_pubkit_checks([dict(r) for r in rows])
+    assert decode_pubkit_checks(encode_pubkit_checks(rows)) == rows
+
+
+def test_ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
+    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
+                                   '{"tenant": "need-states", "dataset": "convergence"}',
+                                   '{"tenant": "pubkit-checks", "dataset": "platform"}')
+    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubkit-checks"}
+    assert kinds["platform"] == PUBKIT_CHECKS
+    with pytest.raises(ValueError, match="INGEST_PUBKIT_CHECKS is"):
+        pubkit_checks('{"dataset": "platform"}')
+    with pytest.raises(ValueError, match="INGEST_NEED_STATES and INGEST_PUBKIT_CHECKS name the same dataset"):
+        named_buffers("", '{"tenant": "need-states", "dataset": "x"}', '{"tenant": "pubkit-checks", "dataset": "x"}')
 
 
 def test_the_scan_passes_once_at_start_and_then_each_interval():

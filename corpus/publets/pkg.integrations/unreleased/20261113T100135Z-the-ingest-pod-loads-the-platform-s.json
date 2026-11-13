@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "The ingest pod loads the platform's nightly pubkit checks: INGEST_PUBKIT_CHECKS, {\"tenant\": ..., \"dataset\": ...} like INGEST_NEED_STATES, from inbox/pubkit-checks/ into the dataset's pubkit_checks table; avrofile has encode_pubkit_checks and decode_pubkit_checks"
+}
