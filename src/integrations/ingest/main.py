@@ -3,7 +3,8 @@ the app. Settings come from the environment, and a key from a mounted Secret.
 INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
 "dataset": ...}, the tenant its evaluator writes them to and the dataset whose
 signals table they load into. INGEST_NEED_STATES, in the same shape, loads the
-convergence engine's need states into that dataset's need_states table."""
+convergence engine's need states into that dataset's need_states table, and
+INGEST_PUBKIT_CHECKS the platform's nightly pubkit checks into its pubkit_checks table."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import GoogleToken
-from .inbox import INTERVAL_SECONDS, NEED_STATES, SIGNALS, Inbox, Kind, Scanner
+from .inbox import INTERVAL_SECONDS, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Kind, Scanner
 
 
 def buffer(text: str, variable: str, kind: Kind) -> tuple[dict[str, str], dict[str, Kind]]:
@@ -42,18 +43,33 @@ def need_states(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     return buffer(text, "INGEST_NEED_STATES", NEED_STATES)
 
 
-def named_buffers(signals_text: str, need_states_text: str) -> tuple[dict[str, str], dict[str, Kind]]:
-    """Both, which must name two datasets: a dataset holds one Kind of buffer."""
-    tenants, kinds = signals(signals_text)
-    more_tenants, more_kinds = need_states(need_states_text)
-    if set(kinds) & set(more_kinds):
-        raise ValueError("INGEST_SIGNALS and INGEST_NEED_STATES name the same dataset")
-    return {**tenants, **more_tenants}, {**kinds, **more_kinds}
+def pubkit_checks(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_PUBKIT_CHECKS: the platform's nightly checks of each repository against pubkit."""
+    return buffer(text, "INGEST_PUBKIT_CHECKS", PUBKIT_CHECKS)
+
+
+def named_buffers(signals_text: str, need_states_text: str,
+                  pubkit_checks_text: str = "") -> tuple[dict[str, str], dict[str, Kind]]:
+    """All of them, which must name different datasets: a dataset holds one Kind of buffer."""
+    tenants: dict[str, str] = {}
+    kinds: dict[str, Kind] = {}
+    named: dict[str, str] = {}
+    for variable, (more_tenants, more_kinds) in (
+            ("INGEST_SIGNALS", signals(signals_text)), ("INGEST_NEED_STATES", need_states(need_states_text)),
+            ("INGEST_PUBKIT_CHECKS", pubkit_checks(pubkit_checks_text))):
+        for dataset in more_kinds:
+            if dataset in named:
+                raise ValueError(f"{named[dataset]} and {variable} name the same dataset")
+            named[dataset] = variable
+        tenants.update(more_tenants)
+        kinds.update(more_kinds)
+    return tenants, kinds
 
 
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
-    tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""))
+    tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""),
+                                   os.environ.get("INGEST_PUBKIT_CHECKS", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])

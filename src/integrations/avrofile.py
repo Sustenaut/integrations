@@ -162,3 +162,34 @@ def encode_need_states(rows: list[dict]) -> bytes:
 
 def decode_need_states(data: bytes) -> list[dict]:
     return list(fastavro.reader(io.BytesIO(data), NEED_STATE_SCHEMA))
+
+
+# The platform's checks of each repository against pubkit, as release-controlplane's nightly
+# writes them to the pubkit-checks tenant: one row per repository per check per night,
+# passes as well as failures, the columns of platform.pubkit_checks, for observability's
+# pubkit_drift rule and for audits.
+PUBKIT_CHECK_SCHEMA = fastavro.parse_schema({
+    "type": "record", "name": "pubkit_check", "fields": [
+        {"name": "observed_at", "type": _TIME},
+        {"name": "repository", "type": "string"},
+        {"name": "check", "type": "string"},
+        {"name": "status", "type": "string"},
+        {"name": "pinned", "type": "string"},
+        {"name": "latest", "type": "string"},
+        {"name": "main_commit", "type": "string"},
+        {"name": "run_url", "type": "string"},
+        {"name": "fix", "type": "string"},
+        {"name": "run_started_at", "type": _TIME},
+    ]})
+
+
+def encode_pubkit_checks(rows: list[dict]) -> bytes:
+    """pubkit checks as one file to load; the same rows always give the same bytes."""
+    out = io.BytesIO()
+    marker = hashlib.sha256(repr(sorted(map(repr, rows))).encode()).digest()[:16]
+    fastavro.writer(out, PUBKIT_CHECK_SCHEMA, rows, codec="deflate", sync_marker=marker)
+    return out.getvalue()
+
+
+def decode_pubkit_checks(data: bytes) -> list[dict]:
+    return list(fastavro.reader(io.BytesIO(data), PUBKIT_CHECK_SCHEMA))

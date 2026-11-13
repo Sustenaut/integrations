@@ -28,7 +28,8 @@ from datetime import datetime
 from typing import Callable
 
 from .. import __version__
-from ..avrofile import decode, decode_need_states, decode_signals, encode, encode_need_states, encode_signals, encode_status, file_name, file_status, timestamp
+from ..avrofile import (decode, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_need_states,
+                        encode_pubkit_checks, encode_signals, encode_status, file_name, file_status, timestamp)
 from ..calls import Request, Response, Transport
 from .bigquery import STATUS_TABLE, TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
 
@@ -67,6 +68,8 @@ CALLS = Kind(INBOX, TABLE, lambda data: decode(data), lambda rows: encode(rows),
 SIGNALS = Kind("inbox/signals/", "signals", decode_signals, encode_signals, reports=False, what="signals")
 NEED_STATES = Kind("inbox/need-states/", "need_states", decode_need_states, encode_need_states, reports=False,
                    what="need states")
+PUBKIT_CHECKS = Kind("inbox/pubkit-checks/", "pubkit_checks", decode_pubkit_checks, encode_pubkit_checks,
+                     reports=False, what="pubkit checks")
 
 
 class StorageDown(Exception):
