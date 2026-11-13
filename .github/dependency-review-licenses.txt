@@ -1,6 +1,5 @@
 # Written by `pubkit sync` from this repository's workflows. Do not edit:
 # the review job leaves these out of its license check, and no other.
-pkg:githubactions/Sustenaut/pubdeploy/.github/workflows/deploy-check.yml
 pkg:githubactions/Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml
 pkg:githubactions/Sustenaut/pubkit/.github/workflows/job-osv.yml
 pkg:githubactions/Sustenaut/pubkit/.github/workflows/job-python-audit.yml
