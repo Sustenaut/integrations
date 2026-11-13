@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "The ingest pod loads the convergence engine's need states: INGEST_NEED_STATES, {\"tenant\": ..., \"dataset\": ...} like INGEST_SIGNALS, from inbox/need-states/ into the dataset's need_states table; avrofile has encode_need_states and decode_need_states"
-}
