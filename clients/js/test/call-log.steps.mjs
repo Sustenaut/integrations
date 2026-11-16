@@ -1,10 +1,21 @@
 // workers/call-log's Durable Object, on fakes of its storage and R2, and caller.js's
 // CallLogSink that sends it records.
-import { test } from "node:test";
+import { After, Then } from "@cucumber/cucumber";
+import { mock as nodeMock } from "node:test";
 import assert from "node:assert/strict";
 import { CallLog, report } from "../../../workers/call-log/src/call-log.js";
 import worker from "../../../workers/call-log/src/call-log.js";
 import { CallLogSink } from "../caller.js";
+
+// What node:test gave each test as `t`: its mocks, restored when the
+// scenario ends, and the cleanups it registers with t.after().
+const cleanups = [];
+const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
+After("@call-log", async function () {
+  while (cleanups.length) await cleanups.pop()();
+  nodeMock.restoreAll();
+});
+
 
 const START = 1_800_000_000_000; // 2027-01-15T08:00:00Z
 const SENDERS = { storage: "calls_storage", other: "calls_other" };
@@ -77,7 +88,8 @@ function metadata(bytes) {
   return JSON.parse(meta["integrations.status"]);
 }
 
-test("records are kept the moment they come, and the first sets the two-minute alarm", async () => {
+Then("records are kept the moment they come, and the first sets the two-minute alarm", function () {
+  return (async () => {
   const { storage, post } = made();
   const answer = await post({ sender: "storage", records: [record(1), record(2)] });
   assert.deepEqual([answer.status, await answer.json()], [200, { kept: 2 }]);
@@ -85,9 +97,11 @@ test("records are kept the moment they come, and the first sets the two-minute a
   assert.deepEqual([...(await storage.list({ prefix: "r:" })).values()].map((r) => r.request_id), ["r1", "r2"]);
   await post({ sender: "storage", records: [record(3)] });
   assert.equal(storage.alarm, START + 120_000, "a set alarm isn't moved");
+})(scenarioContext);
 });
 
-test("the alarm writes one file of the cycle's records into the sender's buffer, and re-arms", async () => {
+Then("the alarm writes one file of the cycle's records into the sender's buffer, and re-arms", function () {
+  return (async () => {
   const { object, storage, calls, clock, post } = made();
   await post({ sender: "storage", records: [record(1), record(2)] });
   clock.now += 120_000;
@@ -100,9 +114,11 @@ test("the alarm writes one file of the cycle's records into the sender's buffer,
   });
   assert.equal((await storage.list({ prefix: "r:" })).size, 0, "sent records are gone");
   assert.equal(storage.alarm, START + 240_000);
+})(scenarioContext);
 });
 
-test("an idle cycle still writes a report, so a quiet sender can be told from a stopped one", async () => {
+Then("an idle cycle still writes a report, so a quiet sender can be told from a stopped one", function () {
+  return (async () => {
   const { object, calls, clock, post } = made();
   await post({ sender: "storage", records: [] });
   for (let i = 0; i < 3; i++) {
@@ -111,9 +127,11 @@ test("an idle cycle still writes a report, so a quiet sender can be told from a 
   }
   assert.equal(calls.files.size, 3);
   assert.deepEqual([...calls.files.values()].map((d) => metadata(d).calls), [0, 0, 0]);
+})(scenarioContext);
 });
 
-test("a file R2 didn't take goes again as it was, under its name, and nothing is sent twice", async (t) => {
+Then("a file R2 didn't take goes again as it was, under its name, and nothing is sent twice", function () {
+  return (async (t) => {
   t.mock.method(console, "error", () => {});
   const { object, calls, clock, post } = made();
   await post({ sender: "storage", records: [record(1)] });
@@ -130,9 +148,11 @@ test("a file R2 didn't take goes again as it was, under its name, and nothing is
   const files = [...calls.files.values()].map(metadata);
   assert.deepEqual(files.map((m) => [m.calls, m.storage_failures]), [[1, 0], [1, 2]]);
   assert.match([...calls.files.keys()][0], /080200-storage-/, "the held file keeps its first name");
+})(scenarioContext);
 });
 
-test("past the limit the oldest records go and are counted", async () => {
+Then("past the limit the oldest records go and are counted", function () {
+  return (async () => {
   const { object, calls, clock, post } = made();
   const many = Array.from({ length: 10_003 }, (_, n) => record(n));
   await post({ sender: "storage", records: many });
@@ -140,9 +160,11 @@ test("past the limit the oldest records go and are counted", async () => {
   await object.alarm();
   const status = metadata([...calls.files.values()][0]);
   assert.deepEqual([status.calls, status.drops, status.buffer_size], [10_000, 3, 10_000]);
+})(scenarioContext);
 });
 
-test("an instance is one sender's, and only a sender SENDERS names may use it", async () => {
+Then("an instance is one sender's, and only a sender SENDERS names may use it", function () {
+  return (async () => {
   const { post } = made();
   assert.equal((await post({ sender: "stranger", records: [] })).status, 403);
   assert.equal((await post({ sender: "toString", records: [] })).status, 403);
@@ -153,21 +175,26 @@ test("an instance is one sender's, and only a sender SENDERS names may use it", 
   assert.equal((await post({}, "GET")).status, 404);
   const bad = await made().object.fetch(new Request("https://call-log/records", { method: "POST", body: "{" }));
   assert.equal(bad.status, 400);
+})(scenarioContext);
 });
 
-test("an instance nobody has sent to does nothing on an alarm, and the Worker answers nothing itself", async () => {
+Then("an instance nobody has sent to does nothing on an alarm, and the Worker answers nothing itself", function () {
+  return (async () => {
   const { object, calls, storage } = made();
   await object.alarm();
   assert.equal(calls.files.size, 0);
   assert.equal(storage.alarm, START + 120_000, "it re-arms, harmlessly");
   assert.equal((await worker.fetch(new Request("https://call-log/"))).status, 404);
+})(scenarioContext);
 });
 
-test("the report is where health checks and statistics can join, as StorageSink's is", () => {
+Then("the report is where health checks and statistics can join, as StorageSink's is", function () {
+  return (() => {
   assert.deepEqual(report("s", { started: START, drops: 1, peak: 4, failures: 2 }, [record(1)], START + 120_000), {
     kind: "sender", sender: "s", version: "call-log", at: "2027-01-15T08:02:00Z", cycle_start: "2027-01-15T08:00:00Z",
     cycle_end: "2027-01-15T08:02:00Z", calls: 1, drops: 1, buffer_size: 4, storage_failures: 2,
   });
+})(scenarioContext);
 });
 
 // The binding a Worker gets for the object's namespace, here backed by a real CallLog.
@@ -183,7 +210,8 @@ function binding() {
   };
 }
 
-test("a sink keeps a request's records and sends them to its sender's object in one call", async () => {
+Then("a sink keeps a request's records and sends them to its sender's object in one call", function () {
+  return (async () => {
   const b = binding();
   const sink = new CallLogSink({ sender: "storage", namespace: () => b.namespace });
   sink.write(record(1));
@@ -193,9 +221,11 @@ test("a sink keeps a request's records and sends them to its sender's object in 
   assert.deepEqual(b.names, ["storage"]);
   assert.deepEqual([...(await b.storage.list({ prefix: "r:" })).values()].map((r) => r.request_id), ["r1", "r2"]);
   assert.deepEqual(sink.pending, []);
+})(scenarioContext);
 });
 
-test("a sink that can't send says so and lets the records go, never failing the request", async (t) => {
+Then("a sink that can't send says so and lets the records go, never failing the request", function () {
+  return (async (t) => {
   const said = [];
   t.mock.method(console, "error", (line) => said.push(line));
   const refusing = { idFromName: () => ({}), get: () => ({ fetch: async () => Response.json({ error: "stranger is not a sender here" }, { status: 403 }) }) };
@@ -210,4 +240,5 @@ test("a sink that can't send says so and lets the records go, never failing the 
     "integrations: the call log didn't take 1 records from storage: no binding",
   ]);
   assert.throws(() => new CallLogSink({ sender: "storage" }), /needs a sender and a namespace/);
+})(scenarioContext);
 });

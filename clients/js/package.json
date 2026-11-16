@@ -5,11 +5,12 @@
   "description": "Builds one dependency-free module per use case from ../../openapi/integrations.json.",
   "scripts": {
     "generate": "node generate.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "cucumber-js",
     "mock": "npx --yes @stoplight/prism-cli@5.16.0 mock ../../openapi/integrations.json",
     "docs": "redocly build-docs ../../openapi/integrations.json -o docs-site/index.html"
   },
   "devDependencies": {
+    "@cucumber/cucumber": "13.3.0",
     "@hey-api/openapi-ts": "0.99.0",
     "@redocly/cli": "2.72.1",
     "esbuild": "0.28.2",

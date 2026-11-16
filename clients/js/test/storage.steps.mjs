@@ -1,10 +1,21 @@
 // clients/js/storage.js, on the vectors in tests/vectors/storage/ that
 // tests/steps/test_storage_client.py runs too, and what they don't cover.
-import { test } from "node:test";
+import { After, Then } from "@cucumber/cucumber";
+import { mock as nodeMock } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { Caller, MemorySink, Replay, Refused, Unavailable } from "../caller.js";
 import { NotFound, ROUTES, SPEC, Storage, StorageError, StorageUnavailable } from "../storage.js";
+
+// What node:test gave each test as `t`: its mocks, restored when the
+// scenario ends, and the cleanups it registers with t.after().
+const cleanups = [];
+const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
+After("@storage", async function () {
+  while (cleanups.length) await cleanups.pop()();
+  nodeMock.restoreAll();
+});
+
 
 const VECTORS = new URL("../../../tests/vectors/storage/", import.meta.url);
 const BASE = "https://storage.example";
@@ -29,9 +40,11 @@ function made(vector, options = {}) {
 }
 
 const names = (await readdir(VECTORS)).filter((n) => n.endsWith(".json")).sort();
-for (const name of names) {
+Then("storage.js gives every vector in tests\\/vectors\\/storage\\/ what it expects", async function () {
+  // Every case, in turn, as the loop of tests did.
+  for (const name of names) {
   const vector = JSON.parse(await readFile(new URL(name, VECTORS), "utf8"));
-  test(`${name}: ${vector.description}`, async () => {
+  await (async () => {
     const { storage, sink, replay, naps } = made(vector);
     const kwargs = Object.fromEntries(Object.entries(vector.kwargs).map(([k, v]) => [camel(k), v]));
     const args = vector.args.map(value);
@@ -55,19 +68,25 @@ for (const name of names) {
     });
     assert.equal(sink.records.length, expect.records.length);
     expect.records.forEach((want, i) => assert.deepEqual(Object.fromEntries(Object.keys(want).map((k) => [k, sink.records[i][k]])), want));
-  });
+  })(scenarioContext);
 }
+});
 
-test("there are vectors to run", () => assert.ok(names.length >= 10));
+Then("there are vectors to run", function () {
+  return (() => assert.ok(names.length >= 10))(scenarioContext);
+});
 
-test("the routes are the pinned spec's", async () => {
+Then("the routes are the pinned spec's", function () {
+  return (async () => {
   const lock = JSON.parse(await readFile(new URL("../../../openapi/storage.lock.json", import.meta.url), "utf8"));
   assert.deepEqual(SPEC, { repository: lock.repository, commit: lock.commit, sha256: lock.sha256 });
   assert.deepEqual(ROUTES.list.query, ["prefix", "limit", "cursor"]);
   assert.ok(Object.isFrozen(ROUTES));
+})(scenarioContext);
 });
 
-test("an upload is one form with the fields given", async () => {
+Then("an upload is one form with the fields given", function () {
+  return (async () => {
   const { storage, replay } = made({ client: { tenant: "deals", token: "t" }, responses: { [`POST ${BASE}/deals/files`]: { status: 200, json: {} } } });
   await storage.uploadFile(new Blob(["%PDF-1.7"]), { name: "a.pdf", kept: false, for: "someone" });
   const form = replay.sent[0].body;
@@ -76,9 +95,11 @@ test("an upload is one form with the fields given", async () => {
   assert.equal(await form.get("file").text(), "%PDF-1.7");
   assert.deepEqual([form.get("name"), form.get("kept"), form.get("for"), form.get("label"), form.get("subject")], ["a.pdf", "false", "someone", null, null]);
   await assert.rejects(storage.uploadFile(new Uint8Array([1])), /needs the file's name/);
+})(scenarioContext);
 });
 
-test("the token file is read for each request, and another tenant shares it", async () => {
+Then("the token file is read for each request, and another tenant shares it", function () {
+  return (async () => {
   let token = "first";
   const reads = [];
   const vector = { client: { tenant: "deals" }, responses: {
@@ -90,24 +111,30 @@ test("the token file is read for each request, and another tenant shares it", as
   assert.deepEqual(replay.sent.map((s) => s.headers.Authorization), ["Bearer first", "Bearer second"]);
   assert.equal(replay.sent[1].url, `${BASE}/other/head/board/log`);
   assert.deepEqual(reads[0], ["/var/run/token", "utf8"]);
+})(scenarioContext);
 });
 
-test("a token can be a function, and one is needed, as is a tenant", async () => {
+Then("a token can be a function, and one is needed, as is a tenant", function () {
+  return (async () => {
   const { storage, replay } = made({ client: { tenant: "deals" }, responses: { [`GET ${BASE}/deals/head/board/log`]: { status: 200, json: { log: [] } } } }, { token: async () => "minted" });
   await storage.headLog("board");
   assert.equal(replay.sent[0].headers.Authorization, "Bearer minted");
   assert.throws(() => new Storage({ tenant: "deals" }), /a token or a tokenFile/);
   assert.throws(() => new Storage({ token: "t" }), /needs a tenant/);
   assert.equal(new Storage({ tenant: "d", token: "t" }).baseUrl, "https://storage.sustenaut.eu");
+})(scenarioContext);
 });
 
-test("a place outside the buffers' folders is refused here", async () => {
+Then("a place outside the buffers' folders is refused here", function () {
+  return (async () => {
   const { storage, replay } = made({ client: { tenant: "deals", token: "t" }, responses: {} });
   for (const place of ["f/x", "inbox", "other/a.avro"]) await assert.rejects(storage.getBuffer(place), /is not in inbox\/, batches\/ or rejected\//);
   assert.equal(replay.sent.length, 0);
+})(scenarioContext);
 });
 
-test("a batch's JSON goes as it is, and the errors are the caller's kinds", async () => {
+Then("a batch's JSON goes as it is, and the errors are the caller's kinds", function () {
+  return (async () => {
   const { storage, replay } = made({ client: { tenant: "deals", token: "t" }, responses: {
     [`PUT ${BASE}/deals/batches/job.json`]: { status: 200, json: { name: "batches/job.json", size: 2 } },
     [`GET ${BASE}/deals/batches/job.json`]: { status: 200, json: { files: [] } } } });
@@ -119,4 +146,5 @@ test("a batch's JSON goes as it is, and the errors are the caller's kinds", asyn
   assert.equal(error.message, "storage.api read: HTTP 404 not found");
   assert.equal(new StorageError("write", 500, "").message, "storage.api write: HTTP 500");
   assert.ok(new StorageUnavailable(new Unavailable("storage.api", "read", "no answer")) instanceof Unavailable);
+})(scenarioContext);
 });

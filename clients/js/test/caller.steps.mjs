@@ -1,8 +1,19 @@
 // clients/js/caller.js: what tests/vectors/ doesn't cover.
-import { test } from "node:test";
+import { After, Then } from "@cucumber/cucumber";
+import { mock as nodeMock } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Answer, Caller, IntegrationError, MemorySink, NullSink, OPERATIONS, POLICIES, Refused, Replay, Unavailable, pythonJson, readModes } from "../caller.js";
+
+// What node:test gave each test as `t`: its mocks, restored when the
+// scenario ends, and the cleanups it registers with t.after().
+const cleanups = [];
+const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
+After("@caller", async function () {
+  while (cleanups.length) await cleanups.pop()();
+  nodeMock.restoreAll();
+});
+
 
 const REGISTRY = new URL("../../../src/integrations/", import.meta.url);
 const URL_ = "https://api.example/x";
@@ -15,15 +26,18 @@ function caller(responses = {}, options = {}) {
   return { made, sink, replay };
 }
 
-test("the tables are classes.json's and the plugins'", async () => {
+Then("the tables are classes.json's and the plugins'", function () {
+  return (async () => {
   const classes = JSON.parse(await readFile(new URL("classes.json", REGISTRY), "utf8"));
   for (const [id, c] of Object.entries(classes)) assert.deepEqual(POLICIES[id], { timeout: c.timeout, tries: c.tries });
   const ops = JSON.parse(await readFile(new URL("plugins/github.repo-ops.json", REGISTRY), "utf8")).operations;
   for (const o of ops) assert.deepEqual(OPERATIONS["github.repo-ops"][o.name], { class: o.class, route: o.route });
   assert.ok(Object.isFrozen(POLICIES) && Object.isFrozen(OPERATIONS));
+})(scenarioContext);
 });
 
-test("a record has CallRecord's fields, in its order, and no body, URL or token", async () => {
+Then("a record has CallRecord's fields, in its order, and no body, URL or token", function () {
+  return (async () => {
   const { made, sink } = caller({ [`POST ${URL_}`]: { status: 201, json: { "secret-answer": 1 } } });
   await made.call(PLUGIN, "open-pr", { method: "POST", url: URL_, headers: { Authorization: "secret-token" }, body: "secret-body" });
   const [record] = sink.records;
@@ -32,25 +46,31 @@ test("a record has CallRecord's fields, in its order, and no body, URL or token"
   assert.ok(Number.isInteger(record.latency_ms) && record.latency_ms >= 0);
   const text = JSON.stringify(record);
   for (const leak of ["secret", "api.example"]) assert.ok(!text.includes(leak), leak);
+})(scenarioContext);
 });
 
-test("an operation not in the registry is refused, for a call and a note", async () => {
+Then("an operation not in the registry is refused, for a call and a note", function () {
+  return (async () => {
   const { made, sink } = caller();
   await assert.rejects(made.call(PLUGIN, "nope", { method: "GET", url: URL_ }), /github.edit-pr nope is not a registered operation/);
   assert.throws(() => made.note(PLUGIN, "nope", { requestId: "r", latencyMs: 1, status: null, outcome: "ok" }), RangeError);
   assert.equal(sink.records.length, 0);
+})(scenarioContext);
 });
 
-test("the answer can be read as the client needs it", async () => {
+Then("the answer can be read as the client needs it", function () {
+  return (async () => {
   const { made } = caller({ [`GET ${URL_}`]: { status: 200, json: { permissions: { push: true } } } });
   const answer = await made.call("github.repo-ops", "check-push", { method: "GET", url: URL_ });
   assert.ok(answer instanceof Answer && answer.ok);
   assert.deepEqual(await answer.json(), { permissions: { push: true } });
   assert.equal(new Answer(204).json(), null);
   assert.equal(new Answer(null).ok, false);
+})(scenarioContext);
 });
 
-test("the call is sent with its method, headers, body, a User-Agent and a class timeout", async () => {
+Then("the call is sent with its method, headers, body, a User-Agent and a class timeout", function () {
+  return (async () => {
   const seen = [];
   const fetch = async (url, init) => {
     seen.push({ url, init });
@@ -65,9 +85,11 @@ test("the call is sent with its method, headers, body, a User-Agent and a class 
   assert.deepEqual(init.headers, { "User-Agent": "integrations-caller.js", Authorization: "t" });
   assert.deepEqual(init.body, new Uint8Array([1, 2]));
   assert.ok(init.signal instanceof AbortSignal && !init.signal.aborted);
+})(scenarioContext);
 });
 
-test("a provider that doesn't answer within its class's timeout is no answer", async () => {
+Then("a provider that doesn't answer within its class's timeout is no answer", function () {
+  return (async () => {
   const sink = new MemorySink();
   const fetch = async () => {
     throw new DOMException("The operation timed out.", "TimeoutError");
@@ -80,40 +102,50 @@ test("a provider that doesn't answer within its class's timeout is no answer", a
     return true;
   });
   assert.equal(sink.records[0].status, null);
+})(scenarioContext);
 });
 
-test("only https goes out", async () => {
+Then("only https goes out", function () {
+  return (async () => {
   let asked = false;
   const made = new Caller("a-repo", "", { fetch: async () => (asked = true) });
   await assert.rejects(made.call(PLUGIN, "open-pr", { method: "GET", url: "http://api.example/x" }), /not https/);
   assert.equal(asked, false);
+})(scenarioContext);
 });
 
-test("the backoff sleeps by default, in seconds", async () => {
+Then("the backoff sleeps by default, in seconds", function () {
+  return (async () => {
   const { made } = caller({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 200, json: {} }] }, { sleep: undefined, random: () => 1 });
   const started = Date.now();
   assert.ok((await made.call(PLUGIN, "check", { method: "GET", url: URL_ })).ok);
   assert.ok(Date.now() - started >= 990);
+})(scenarioContext);
 });
 
-test("a note is a record of time that wasn't a call", async () => {
+Then("a note is a record of time that wasn't a call", function () {
+  return (async () => {
   const { made, sink, replay } = caller();
   made.note(PLUGIN, "service-total", { requestId: "r", latencyMs: 9, status: 200, outcome: "ok" });
   const [record] = sink.records;
   assert.deepEqual([record.operation, record.latency_ms, record.route, record.bytes_in, record.request_id], ["service-total", 9, "none", 0, "r"]);
   assert.equal(replay.sent.length, 0);
+})(scenarioContext);
 });
 
-test("forRepo is the same caller for another project", async () => {
+Then("forRepo is the same caller for another project", function () {
+  return (async () => {
   const { made, sink } = caller({ [`GET ${URL_}`]: { status: 200, json: {} } }, { modes: { [PLUGIN]: "advisory" } });
   const other = made.forRepo("b-repo");
   await other.call(PLUGIN, "open-pr", { method: "GET", url: URL_ });
   assert.deepEqual([sink.records[0].repo, sink.records[0].app, sink.records[0].mode], ["b-repo", "web", "advisory"]);
   assert.equal(made.repo, "a-repo");
   assert.ok(other instanceof Caller);
+})(scenarioContext);
 });
 
-test("a sink that fails loses the record, not the call", async (t) => {
+Then("a sink that fails loses the record, not the call", function () {
+  return (async (t) => {
   const said = [];
   t.mock.method(console, "error", (line) => said.push(line));
   const fetch = new Replay({ [`GET ${URL_}`]: { status: 200, json: {} } }).fetch;
@@ -123,21 +155,27 @@ test("a sink that fails loses the record, not the call", async (t) => {
   assert.ok((await rejecting.call(PLUGIN, "open-pr", { method: "GET", url: URL_ })).ok);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(said, ["integrations: could not keep a call record: disk full", "integrations: could not keep a call record: bucket gone"]);
+})(scenarioContext);
 });
 
-test("the default sink keeps nothing, and the default fetch is the global one", async (t) => {
+Then("the default sink keeps nothing, and the default fetch is the global one", function () {
+  return (async (t) => {
   new NullSink().write({});
   t.mock.method(globalThis, "fetch", async () => new Response("{}"));
   assert.ok((await new Caller("a-repo").call(PLUGIN, "open-pr", { method: "GET", url: URL_ })).ok);
+})(scenarioContext);
 });
 
-test("Refused is for clients, as in Python", () => {
+Then("Refused is for clients, as in Python", function () {
+  return (() => {
   const err = new Refused(PLUGIN, "open-pr", "no");
   assert.ok(err instanceof IntegrationError && !(err instanceof Unavailable));
   assert.equal(err.message, "github.edit-pr open-pr: no");
+})(scenarioContext);
 });
 
-test("modes come from integrations.json, required winning", () => {
+Then("modes come from integrations.json, required winning", function () {
+  return (() => {
   const modes = readModes({
     uses: [{ plugin: PLUGIN, paths: ["a"], mode: "advisory" }, { plugin: "slack.post", paths: ["a"] },
       { plugin: "linear.sync", paths: ["a"], mode: "advisory" }, { plugin: "linear.sync", paths: ["b"] }],
@@ -145,23 +183,29 @@ test("modes come from integrations.json, required winning", () => {
   });
   assert.deepEqual(modes, { [PLUGIN]: "advisory", "slack.post": "required", "linear.sync": "required", "terraform.hetzner": "advisory" });
   assert.deepEqual(readModes({}), {});
+})(scenarioContext);
 });
 
-test("a replay answers in turn, keeps its last answer, and a null-body status has none", async () => {
+Then("a replay answers in turn, keeps its last answer, and a null-body status has none", function () {
+  return (async () => {
   const replay = new Replay({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 204 }] });
   assert.equal((await replay.fetch(URL_)).status, 503);
   assert.equal((await replay.fetch(URL_)).status, 204);
   assert.equal((await replay.fetch(URL_)).status, 204);
   await assert.rejects(replay.fetch("https://other.example/"), /not recorded/);
+})(scenarioContext);
 });
 
-test("json is written as Python's json.dumps writes it", () => {
+Then("json is written as Python's json.dumps writes it", function () {
+  return (() => {
   assert.equal(pythonJson({ a: [1, true, null], "é": "x \n" }), '{"a": [1, true, null], "\\u00e9": "x\\u2028\\n"}');
   assert.equal(pythonJson([]), "[]");
   assert.equal(pythonJson({}), "{}");
+})(scenarioContext);
 });
 
-test("a Retry-After date is waited for up to the timeout, and one in the past not at all", async () => {
+Then("a Retry-After date is waited for up to the timeout, and one in the past not at all", function () {
+  return (async () => {
   for (const [at, waited] of [[Date.now() + 3600e3, 30], [Date.now() - 3600e3, 0]]) {
     const naps = [];
     const responses = { [`GET ${URL_}`]: [{ status: 503, json: {}, headers: { "Retry-After": new Date(at).toUTCString() } }, { status: 200, json: {} }] };
@@ -170,9 +214,11 @@ test("a Retry-After date is waited for up to the timeout, and one in the past no
     assert.equal(naps.length, 1);
     assert.ok(Math.abs(naps[0] - waited) < 1, `${naps[0]} for ${waited}`);
   }
+})(scenarioContext);
 });
 
-test("a call never runs past its timeout times its tries", async () => {
+Then("a call never runs past its timeout times its tries", function () {
+  return (async () => {
   let now = 0;
   const timeouts = [];
   // Nothing answers: each try takes all the time its signal gives it.
@@ -193,9 +239,11 @@ test("a call never runs past its timeout times its tries", async () => {
   }
   assert.deepEqual(given, [60_000, 60_000, 60_000, 53_000]);
   assert.equal(now, 240_000);
+})(scenarioContext);
 });
 
-test("no try starts that the deadline leaves no time for", async () => {
+Then("no try starts that the deadline leaves no time for", function () {
+  return (async () => {
   let now = 0;
   let tries = 0;
   const fetch = async () => {
@@ -206,12 +254,15 @@ test("no try starts that the deadline leaves no time for", async () => {
   const made = new Caller("a-repo", "", { fetch, clock: () => now, sleep: async (s) => (now += s * 1000) });
   await assert.rejects(made.call(PLUGIN, "check", { method: "GET", url: URL_ }), Unavailable);
   assert.equal(tries, 2, "the third would start at 89 s, with no time left to wait 30");
+})(scenarioContext);
 });
 
-test("the jitter's random source is the caller's, and forRepo keeps it", async () => {
+Then("the jitter's random source is the caller's, and forRepo keeps it", function () {
+  return (async () => {
   const naps = [];
   const responses = { [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 503, json: {} }, { status: 200, json: {} }] };
   const { made } = caller(responses, { sleep: async (s) => naps.push(s), random: () => 0.5 });
   await made.forRepo("b-repo").call(PLUGIN, "check", { method: "GET", url: URL_ });
   assert.deepEqual(naps, [0.5, 1]);
+})(scenarioContext);
 });
