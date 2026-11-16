@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.14.4 is released as v0.14.4 from commit cd299d5b74c36c30fa5bac4685481306168257ce.",
+      "content": "integrations 0.15.0 is released as v0.15.0 from commit 1dddb468b47ac3693609833d23649c75398c3907.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.14.4",
+            "0.15.0",
             "",
             "",
-            "v0.14.4",
-            "cd299d5b74c36c30fa5bac4685481306168257ce"
+            "v0.15.0",
+            "1dddb468b47ac3693609833d23649c75398c3907"
           ]
         ]
       },
-      "scope": "the published release v0.14.4 of integrations",
+      "scope": "the published release v0.15.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "cd299d5b74c36c30fa5bac4685481306168257ce"
+          "revision": "1dddb468b47ac3693609833d23649c75398c3907"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.14.4 was released on 2026-11-16 from commit cd299d5b74c36c30fa5bac4685481306168257ce with these changes.",
+      "content": "integrations 0.15.0 was released on 2026-11-16 from commit 1dddb468b47ac3693609833d23649c75398c3907 with these changes.",
       "data": {
         "columns": [
           {
@@ -57,23 +57,19 @@
         ],
         "rows": [
           [
-            "added",
-            "integrations ci-usage: CI's wait times and compute load for platform.ci_jobs and platform.cluster_usage, through storage's ci-usage buffer. `jobs` (k8s/ci-jobs.yaml, every ten minutes, as the release reader app) writes each finished GitHub Actions job of the board's repositories once, with wait_seconds and run_seconds, its state a head in the ci-jobs tenant; `--since-days 90` backfills. `cluster` writes the k3s server's node, namespace, ci (quota, runners) and runner rows, with each runner pod's cgroup memory.peak; avrofile has encode_ci_jobs, encode_cluster_usage and their decoders"
-          ],
-          [
-            "added",
-            "The ingest pod loads any number of buffers more: INGEST_BUFFERS, [{\"tenant\": ..., \"dataset\": ..., \"table\": ...}], so one dataset holds several Kinds (platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside pubkit_checks); Kinds sharing a tenant keep their batch records apart (batches/<table>-). INGEST_SIGNALS, INGEST_NEED_STATES and INGEST_PUBKIT_CHECKS work as before"
+            "changed",
+            "integrations ci-usage jobs polls every repository the release reader app's installation sees (GET /installation/repositories, archived ones left out), not the release board's alone, so repositories such as shared-infra are collected too; --except-board leaves the board's out, for a backfill of the repositories the first one missed"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.14.4 of integrations",
+      "scope": "the published release v0.15.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "cd299d5b74c36c30fa5bac4685481306168257ce"
+          "revision": "1dddb468b47ac3693609833d23649c75398c3907"
         }
       ]
     }

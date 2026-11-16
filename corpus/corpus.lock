@@ -3,8 +3,8 @@
   "corpus": {
     "domain": "pub:sha2-256:25d3iiaxyczcpiri6rjgup73zutbbzmpozqodclupbasc6rgqvsq",
     "generation": {
-      "cid": "pub:sha2-256:gnyf6a4r3g6powezy45fbhwcihdgnfug2llukgy4jaqmnhbf2oqa",
-      "index": 7
+      "cid": "pub:sha2-256:jmy7gtfpwkzbsxzeienckphyaycyyc5fzxemj322o5l7swzd3svq",
+      "index": 8
     },
     "imports": {},
     "key": "pub:sha2-256:srsdpdvxotuqshmlmmio73gcwcg7ynjbnub64lujp3z5kkqeuyca",
@@ -18,8 +18,8 @@
     ]
   },
   "publets": [
-    {"slug": "pkg.integrations", "kind": "doc", "tag": "PKG-INTEGR-11-2026", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:rsu4l2zpevnp5elv5tl7bq5zx2sqypfmwrmfmafft2pbnygewdcq", "genesis": "pub:sha2-256:o7ufmvzbtuz7m62jg3c2vpbfc2hg2z5jdahnhvoqj7jau7v6gwqq", "deps": ["pkg.integrations#identity", "pkg.integrations#release"]},
-    {"slug": "pkg.integrations#identity", "kind": "claim", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:dz24dxyzpgjoerx42u3j3tsulcynijir7khpfrrnszya7d25rjfq", "genesis": "pub:sha2-256:ok72dncwrxzpzowea4v6nrqzwgbylmrugprt7apx3sngsq4wopsa", "deps": []},
-    {"slug": "pkg.integrations#release", "kind": "claim", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:p6aes64wf3pvc2sa2q7uslxgx5ah773j7ybnv7ri47l2citilina", "genesis": "pub:sha2-256:nujmis3wdimlghoomj753vos5shl37vzatxoy2jgigkf5lor3ama", "deps": ["pkg.integrations#identity"]}
+    {"slug": "pkg.integrations", "kind": "doc", "tag": "PKG-INTEGR-11-2026", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:2w2cdadm3eay2kx4uw4tecpobis65knmcka3rni2vm67ksdkrina", "genesis": "pub:sha2-256:o7ufmvzbtuz7m62jg3c2vpbfc2hg2z5jdahnhvoqj7jau7v6gwqq", "deps": ["pkg.integrations#identity", "pkg.integrations#release"]},
+    {"slug": "pkg.integrations#identity", "kind": "claim", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:lfireufva6ufnfkfvgl2alykrwqjnedssmrlkooaha5odaqyspxq", "genesis": "pub:sha2-256:ok72dncwrxzpzowea4v6nrqzwgbylmrugprt7apx3sngsq4wopsa", "deps": []},
+    {"slug": "pkg.integrations#release", "kind": "claim", "source": "publets/pkg.integrations", "cid": "pub:sha2-256:pkhgh56axa224qmwmse5gjpthbqzs3xgdsrt6c27pcu2mrqss7la", "genesis": "pub:sha2-256:nujmis3wdimlghoomj753vos5shl37vzatxoy2jgigkf5lor3ama", "deps": ["pkg.integrations#identity"]}
   ]
 }

@@ -1,4 +1,0 @@
-{
-  "category": "changed",
-  "change": "integrations ci-usage jobs polls every repository the release reader app's installation sees (GET /installation/repositories, archived ones left out), not the release board's alone, so repositories such as shared-infra are collected too; --except-board leaves the board's out, for a backfill of the repositories the first one missed"
-}
