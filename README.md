@@ -308,6 +308,31 @@ isn't need states is set aside alone, in `rejected/`. `INGEST_PUBKIT_CHECKS`
 checks of each repository against pubkit, passes and failures, from
 `inbox/pubkit-checks/` into that dataset's `pubkit_checks` table, for observability's
 `pubkit_drift` rule and for audits; it too sets aside what isn't pubkit checks.
+`INGEST_BUFFERS` names any number more, as a list of `{"tenant": ..., "dataset": ...,
+"table": ...}`, each the buffer whose table it names, so one dataset may hold several:
+`[{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"}, {"tenant":
+"ci-usage", "dataset": "platform", "table": "cluster_usage"}]` loads CI's wait times and
+compute load (below) beside `pubkit_checks`. Buffers that share a tenant keep their
+batch records apart, under `batches/<table>-`. The three variables before it work as
+they did.
+
+### CI's wait times and compute load
+
+`integrations ci-usage` collects them into storage's `ci-usage` buffer, for BigQuery's
+`platform.ci_jobs` and `platform.cluster_usage` (shared-infra's `infra/platform.tf`).
+Nothing reads them as a rule yet: they are the history a rule will be designed from.
+
+- `integrations ci-usage jobs`, the CronJob `ci-jobs` (`k8s/ci-jobs.yaml`), every ten
+  minutes: each finished GitHub Actions job of the repositories on the release board
+  (release-state's `state.json`), GitHub's runners and `sustenaut-ci` alike, written once,
+  with `wait_seconds` (started minus queued) and `run_seconds`. It reads as the release
+  reader app, from the Secret `ci-jobs-app`, and keeps which jobs it has written in a head
+  of the `ci-jobs` tenant. `--since-days 90` backfills, once, by
+  `scripts/go-live-ci-jobs.sh`.
+- `integrations ci-usage cluster`, the CronJob beside the runners in shared-infra's
+  `infra/ci-runners/`, every two minutes: node, namespace, `ci` (quota and runners) and
+  runner rows, each runner pod with its runner's and Docker's cgroup `memory.peak`, its
+  `runner_name` the one `ci_jobs` names.
 
 To add a use case: add its route, regenerate the spec, and add it to `USE_CASES` in
 `clients/js/generate.mjs`.
@@ -339,7 +364,7 @@ Every run can run again: what is ready is left alone. In order:
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
 | `gcp.workload-identity` `ingest` | that the ingest's ServiceAccount may act as `integrations-ingest` (Terraform's, in shared-infra) through the `services` Workload Identity pool: the ingest reads BigQuery with no key, its `INGEST_KEY_FILE` being `k8s/google-credential.yaml`'s external_account credential. The grant is Terraform's (`infra/services-identity.tf`), so a missing one is proposed |
 | `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
-| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBKIT_CHECKS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBKIT_CHECKS`, `INGEST_BUFFERS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
 | `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
 

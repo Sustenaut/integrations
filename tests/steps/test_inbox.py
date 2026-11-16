@@ -9,11 +9,11 @@ import pytest
 
 from datetime import datetime, timezone
 
-from integrations.avrofile import decode, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_need_states, encode_pubkit_checks, encode_signals, file_status
+from integrations.avrofile import decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states, encode_pubkit_checks, encode_signals, file_status
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import named_buffers, need_states, pubkit_checks, scan, signals
+from integrations.ingest.inbox import CI_JOBS, CLUSTER_USAGE, MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.main import buffers, named_buffers, need_states, pubkit_checks, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 from pytest_bdd import scenarios, then
@@ -77,6 +77,9 @@ class PickyBigQuery(FakeBigQuery):
         self.signal_rows: list[dict] = []
         self.need_state_rows: list[dict] = []
         self.pubkit_check_rows: list[dict] = []
+        self.ci_job_rows: list[dict] = []
+        self.cluster_usage_rows: list[dict] = []
+        self.datasets: list[str] = []
         self.tables: list[str] = []
 
     def send(self, request, timeout):
@@ -90,11 +93,18 @@ class PickyBigQuery(FakeBigQuery):
             data = tail[:tail.rindex(b"\r\n--")]
             self.jobs[job] = data
             self.tables.append(table)
+            self.datasets.append(config["configuration"]["load"]["destinationTable"]["datasetId"])
             if table == "signals":
                 self.signal_rows += decode_signals(data)
                 return Response(200, b"{}")
             if table == "need_states":
                 self.need_state_rows += decode_need_states(data)
+                return Response(200, b"{}")
+            if table == "ci_jobs":
+                self.ci_job_rows += decode_ci_jobs(data)
+                return Response(200, b"{}")
+            if table == "cluster_usage":
+                self.cluster_usage_rows += decode_cluster_usage(data)
                 return Response(200, b"{}")
             if table == "pubkit_checks":
                 self.pubkit_check_rows += decode_pubkit_checks(data)
@@ -696,3 +706,62 @@ def the_scan_passes_once_at_start_and_then_each_interval():
         scan(Ticking(), ["a", "b"], ticked, sleep=sleep, clock=lambda: 42.0)
     assert events == ["tick a,b", "sleep 120", "tick a,b", "sleep 120"]
     assert ticked == [42.0]
+
+
+@then("ci jobs and cluster usage share a tenant and load into their own tables")
+def ci_jobs_and_cluster_usage_share_a_tenant_and_load_into_their_own_tables():
+    from integrations.ci_usage.jobs import row
+
+    buffer, bigquery = FakeBuffer(), PickyBigQuery()
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    statuses: list[dict] = []
+    clock = lambda: 1_800_000_000.0  # noqa: E731
+    tenants, kinds = named_buffers("", "", '{"tenant": "pubkit-checks", "dataset": "platform"}', json.dumps([
+        {"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
+        {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]))
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, tenants),
+                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(clock), statuses.append, clock, kinds=kinds)
+    moment = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
+    job = {"id": 1, "run_id": 2, "name": "test", "created_at": "2027-01-15T02:30:00Z",
+           "started_at": "2027-01-15T02:35:00Z", "completed_at": "2027-01-15T02:40:00Z", "runner_name": "r"}
+    buffer.files["inbox/ci-jobs/2027-01-15/024100-ci-jobs-1.avro"] = encode_ci_jobs([row("o/r", {"event": "push"}, job, moment)])
+    buffer.files["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"] = encode_cluster_usage(
+        [{"observed_at": moment, "kind": "node", "node": "n", "cpu_millicores": 400}])
+    # A batch of the other Kind's, left by a pod stopped partway, is not this one's to resume.
+    buffer.files["batches/cluster_usage-left.json"] = json.dumps(
+        {"files": ["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"], "attempt": 0, "status_attempt": 0,
+         "status_done": False}).encode()
+    scanner.tick(["platform.ci_jobs"])
+    assert bigquery.tables == ["ci_jobs"] and bigquery.datasets == ["platform"]
+    assert [r["wait_seconds"] for r in bigquery.ci_job_rows] == [300]
+    assert buffer.inbox() == ["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"]
+    assert statuses[0]["dataset"] == "platform" and statuses[0]["table"] == "ci_jobs"
+    scanner.tick(["platform.cluster_usage", "platform"])
+    assert bigquery.tables == ["ci_jobs", "cluster_usage"] and [r["cpu_millicores"] for r in bigquery.cluster_usage_rows] == [400]
+    assert not buffer.inbox() and not buffer.under("batches/")
+    assert {(s["dataset"], s["table"]) for s in statuses} == {
+        ("platform", "ci_jobs"), ("platform", "cluster_usage"), ("platform", "pubkit_checks")}
+
+
+@then("INGEST_BUFFERS names more buffers beside the three single variables")
+def ingest_buffers_names_more_buffers_beside_the_three_single_variables():
+    given = [{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
+             {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]
+    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
+                                   '{"tenant": "need-states", "dataset": "convergence"}',
+                                   '{"tenant": "pubkit-checks", "dataset": "platform"}', json.dumps(given))
+    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubkit-checks",
+                       "platform.ci_jobs": "ci-usage", "platform.cluster_usage": "ci-usage"}
+    assert kinds["platform.ci_jobs"] == CI_JOBS and kinds["platform.cluster_usage"] == CLUSTER_USAGE
+    assert kinds["platform"] == PUBKIT_CHECKS
+    assert buffers("") == ({}, {})
+    for bad, says in (('{"tenant": "x"}', "INGEST_BUFFERS is"), ('[{"tenant": "x", "dataset": "d"}]', "INGEST_BUFFERS is"),
+                      ('[{"tenant": "x", "dataset": "d", "table": "calls"}]', "names table calls"),
+                      ('[{"tenant": "x", "dataset": "a.b", "table": "ci_jobs"}]', "can't hold a dot"),
+                      (json.dumps(given + given[:1]), "names platform.ci_jobs twice")):
+        with pytest.raises(ValueError, match=says):
+            buffers(bad)
+    with pytest.raises(ValueError, match="INGEST_PUBKIT_CHECKS and INGEST_BUFFERS both load platform.pubkit_checks"):
+        named_buffers("", "", '{"tenant": "pubkit-checks", "dataset": "platform"}',
+                      '[{"tenant": "p", "dataset": "platform", "table": "pubkit_checks"}]')

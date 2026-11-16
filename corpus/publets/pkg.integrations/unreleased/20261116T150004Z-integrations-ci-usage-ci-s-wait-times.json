@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "integrations ci-usage: CI's wait times and compute load for platform.ci_jobs and platform.cluster_usage, through storage's ci-usage buffer. `jobs` (k8s/ci-jobs.yaml, every ten minutes, as the release reader app) writes each finished GitHub Actions job of the board's repositories once, with wait_seconds and run_seconds, its state a head in the ci-jobs tenant; `--since-days 90` backfills. `cluster` writes the k3s server's node, namespace, ci (quota, runners) and runner rows, with each runner pod's cgroup memory.peak; avrofile has encode_ci_jobs, encode_cluster_usage and their decoders"
+}

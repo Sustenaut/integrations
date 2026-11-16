@@ -15,7 +15,7 @@
     "release_app": 5529889
   },
   "variables": {
-    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INGEST_NEED_STATES", "INGEST_PUBKIT_CHECKS", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
+    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INGEST_NEED_STATES", "INGEST_PUBKIT_CHECKS", "INGEST_BUFFERS", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
     "deploy": "deploy.yml"
   },
   "signing_keys": [
@@ -62,6 +62,42 @@
         ],
         "private": true,
         "inbox": true
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "github-release-reader-id",
+        "secret": {"name": "ci-jobs-app", "key": "app-id"}
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "github-release-reader-key",
+        "secret": {"name": "ci-jobs-app", "key": "app-key"}
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "github-release-reader-installation-id",
+        "secret": {"name": "ci-jobs-app", "key": "installation-id"}
+      },
+      {
+        "type": "storage.tenant",
+        "name": "ci-usage",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "read": ["k8s:integrations/ingest"],
+        "write": ["k8s:integrations/ci-jobs", "k8s:integrations/ingest"],
+        "delete": ["k8s:integrations/ingest"],
+        "private": true,
+        "inbox": true
+      },
+      {
+        "type": "storage.tenant",
+        "name": "ci-jobs",
+        "storage": "Sustenaut/storage",
+        "url": "https://storage.sustenaut.eu",
+        "read": ["k8s:integrations/ci-jobs"],
+        "write": ["k8s:integrations/ci-jobs"],
+        "private": true,
+        "heads": true
       }
     ]
   },

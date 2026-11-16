@@ -16,6 +16,11 @@ only, and what to make of them is for whoever reads them.
 A buffer that isn't a call log has a `Kind` of its own: its inbox folder, its table, its
 files' format, and no reports. Observability's signals are one (SIGNALS): its evaluator
 leaves them in a tenant of their own, and they load into a table of their own.
+
+The scanner names each buffer by a key: a call log's or a named buffer's dataset, or, for
+the buffers INGEST_BUFFERS names, `<dataset>.<table>`, so that one dataset can hold
+several Kinds (platform holds pubkit_checks, ci_jobs and cluster_usage). Kinds that share
+a tenant keep their batch records apart by a prefix of their own (`batches/<table>-`).
 """
 
 from __future__ import annotations
@@ -28,7 +33,8 @@ from datetime import datetime
 from typing import Callable
 
 from .. import __version__
-from ..avrofile import (decode, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_need_states,
+from ..avrofile import (decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubkit_checks,
+                        decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states,
                         encode_pubkit_checks, encode_signals, encode_status, file_name, file_status, timestamp)
 from ..calls import Request, Response, Transport
 from .bigquery import STATUS_TABLE, TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
@@ -60,6 +66,8 @@ class Kind:
     encode: Callable[[list[dict]], bytes]
     reports: bool
     what: str
+    # Where its batch records go: BATCHES for a Kind alone in its tenant.
+    batches: str = BATCHES
 
 
 # Looked up when called, as the module's own decode and encode.
@@ -70,6 +78,18 @@ NEED_STATES = Kind("inbox/need-states/", "need_states", decode_need_states, enco
                    what="need states")
 PUBKIT_CHECKS = Kind("inbox/pubkit-checks/", "pubkit_checks", decode_pubkit_checks, encode_pubkit_checks,
                      reports=False, what="pubkit checks")
+# CI's wait times and compute load: two Kinds in the one tenant ci-usage.
+CI_JOBS = Kind("inbox/ci-jobs/", "ci_jobs", decode_ci_jobs, encode_ci_jobs, reports=False, what="CI jobs",
+               batches=f"{BATCHES}ci_jobs-")
+CLUSTER_USAGE = Kind("inbox/cluster-usage/", "cluster_usage", decode_cluster_usage, encode_cluster_usage,
+                     reports=False, what="cluster usage", batches=f"{BATCHES}cluster_usage-")
+# The Kinds INGEST_BUFFERS may name, by their tables.
+KINDS = {kind.table: kind for kind in (SIGNALS, NEED_STATES, PUBKIT_CHECKS, CI_JOBS, CLUSTER_USAGE)}
+
+
+def dataset_of(key: str) -> str:
+    """The dataset a buffer's key names: the key itself, or what is before `.<table>`."""
+    return key.partition(".")[0]
 
 
 class StorageDown(Exception):
@@ -84,7 +104,7 @@ class Waiting:
 
 
 class Inbox:
-    """`tenants` names the tenant of a dataset not named like it."""
+    """`tenants` names the tenant of a buffer (by its key) not named like its dataset."""
 
     def __init__(self, transport: Transport, token: Callable[[], str], base_url: str,
                  tenants: dict[str, str] | None = None):
@@ -92,7 +112,7 @@ class Inbox:
         self.tenants = tenants or {}
 
     def _send(self, dataset: str, method: str, path: str, body: bytes | None = None) -> Response:
-        tenant = self.tenants.get(dataset) or tenant_of(dataset)
+        tenant = self.tenants.get(dataset) or tenant_of(dataset_of(dataset))
         return self.transport.send(Request(method, f"{self.base}/{tenant}/{path}",
                                            {"Authorization": f"Bearer {self.token()}"}, body), TIMEOUT)
 
@@ -132,7 +152,7 @@ class Scanner:
     report: Callable[[dict], None]
     clock: Callable[[], float] = time.time
     sender: str = "ingest"
-    # A dataset's Kind, when it isn't a call log.
+    # A buffer's Kind, by its key, when it isn't a call log.
     kinds: dict[str, Kind] = field(default_factory=dict)
 
     def kind(self, dataset: str) -> Kind:
@@ -157,10 +177,12 @@ class Scanner:
         ended = self.clock()
         kind = self.kind(dataset)
         status.update(at=timestamp(ended), cycle_start=timestamp(started), cycle_end=timestamp(ended),
-                      jobs_today=self.jobs.used(dataset, kind.table), status_jobs_today=self.jobs.used(dataset, STATUS_TABLE))
+                      jobs_today=self.jobs.used(dataset_of(dataset), kind.table),
+                      status_jobs_today=self.jobs.used(dataset_of(dataset), STATUS_TABLE))
         if not kind.reports:
             # Its report goes to the log alone: the buffer holds only what it is for.
-            self.report({**status, "dataset": dataset, "problems": "; ".join(problems) or None})
+            self.report({**status, "dataset": dataset_of(dataset), "table": kind.table,
+                         "problems": "; ".join(problems) or None})
             return
         try:
             data = encode([], {**status, "problems": "; ".join(problems) or None})
@@ -174,13 +196,13 @@ class Scanner:
 
     def _work(self, dataset: str, status: dict, problems: list[str]) -> None:
         finished = True
-        for record in self.inbox.list(dataset, BATCHES)[0]:
+        for record in self.inbox.list(dataset, self.kind(dataset).batches)[0]:
             finished = self._resume(dataset, record.name, status, problems) and finished
         waiting, more = self.inbox.list(dataset, self.kind(dataset).folder)
         done: set[str] = set()
         if finished and waiting:
             files = self._choose(waiting)
-            record = f"{BATCHES}{_batch_job(files, 0)}.json"
+            record = f"{self.kind(dataset).batches}{_batch_job(files, 0)}.json"
             held = {"files": files, "attempt": 0, "status_attempt": 0, "status_done": False}
             self.inbox.put(dataset, record, json.dumps(held).encode())
             self._run(dataset, record, held, done, status, problems)
@@ -261,12 +283,12 @@ class Scanner:
         a new job for its calls can't load them twice."""
         if not reports or held["status_done"]:
             return True
-        if not self.jobs.may_load(dataset, STATUS_TABLE):
+        if not self.jobs.may_load(dataset_of(dataset), STATUS_TABLE):
             problems.append("waiting to load reports: the day's load jobs are used")
             return False
-        self.jobs.spend(dataset, STATUS_TABLE)
+        self.jobs.spend(dataset_of(dataset), STATUS_TABLE)
         digest = hashlib.sha256(json.dumps([held["status_attempt"], sorted(held["files"])]).encode()).hexdigest()
-        result = self.loader.load(dataset, encode_status(reports), job_id("status", digest), STATUS_TABLE)
+        result = self.loader.load(dataset_of(dataset), encode_status(reports), job_id("status", digest), STATUS_TABLE)
         if result.outcome is Outcome.RETRY:
             problems.append(f"waiting to load reports: {result.detail}")
             if result.ended:
@@ -284,15 +306,15 @@ class Scanner:
             self._forget(dataset, files, gone)
             return LoadResult(Outcome.LOADED)
         kind = self.kind(dataset)
-        if not self.jobs.may_load(dataset, kind.table):
+        if not self.jobs.may_load(dataset_of(dataset), kind.table):
             return LoadResult(Outcome.RETRY, "the day's load jobs are used")
         try:
             data = kind.encode(records)
         except Exception as e:  # noqa: BLE001 - a file that decodes can still not be a call record
             result = LoadResult(Outcome.REJECTED, f"not {kind.what}: {type(e).__name__}")
         else:
-            self.jobs.spend(dataset, kind.table)
-            result = self.loader.load(dataset, data, _batch_job(files, attempt), kind.table)
+            self.jobs.spend(dataset_of(dataset), kind.table)
+            result = self.loader.load(dataset_of(dataset), data, _batch_job(files, attempt), kind.table)
         if result.outcome is Outcome.LOADED:
             status["loaded_files"] += sum(name in rows for name in files)
             self._forget(dataset, files, gone)

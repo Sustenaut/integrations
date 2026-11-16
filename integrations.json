@@ -39,6 +39,13 @@
       "mode": "required"
     },
     {
+      "plugin": "github.board-read",
+      "paths": [
+        "src/integrations/ci_usage/jobs.py"
+      ],
+      "mode": "required"
+    },
+    {
       "plugin": "github.edit-pr",
       "paths": [
         "src/integrations/clients/github_edit_pr.py"
@@ -51,7 +58,8 @@
         ".github/workflows/deploy.yml",
         "k8s/app.yaml",
         "k8s/ingest.yaml",
-        "k8s/kustomization.yaml"
+        "k8s/kustomization.yaml",
+        "k8s/ci-jobs.yaml"
       ],
       "mode": "required"
     },
@@ -118,7 +126,9 @@
       "plugin": "storage.api",
       "paths": [
         "src/integrations/clients/storage.py",
-        "src/integrations/storage_sink.py"
+        "src/integrations/storage_sink.py",
+        "src/integrations/ci_usage/jobs.py",
+        "src/integrations/ci_usage/main.py"
       ],
       "mode": "required"
     }
@@ -148,6 +158,7 @@
     }
   ],
   "own_hosts": [
-    "sustenaut.eu"
+    "sustenaut.eu",
+    "kubernetes.default.svc"
   ]
 }

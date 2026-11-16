@@ -4,7 +4,12 @@ INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
 "dataset": ...}, the tenant its evaluator writes them to and the dataset whose
 signals table they load into. INGEST_NEED_STATES, in the same shape, loads the
 convergence engine's need states into that dataset's need_states table, and
-INGEST_PUBKIT_CHECKS the platform's nightly pubkit checks into its pubkit_checks table."""
+INGEST_PUBKIT_CHECKS the platform's nightly pubkit checks into its pubkit_checks table.
+
+INGEST_BUFFERS names any number more, as a list: [{"tenant": ..., "dataset": ..., "table":
+...}], each the Kind whose table it names (inbox.KINDS), so one dataset may hold several
+(platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside its
+pubkit_checks). The three variables above keep working as they are."""
 
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import google_token, project_of
-from .inbox import INTERVAL_SECONDS, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Kind, Scanner
+from .inbox import INTERVAL_SECONDS, KINDS, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Kind, Scanner, dataset_of
 
 
 def buffer(text: str, variable: str, kind: Kind) -> tuple[dict[str, str], dict[str, Kind]]:
@@ -48,19 +53,51 @@ def pubkit_checks(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     return buffer(text, "INGEST_PUBKIT_CHECKS", PUBKIT_CHECKS)
 
 
-def named_buffers(signals_text: str, need_states_text: str,
-                  pubkit_checks_text: str = "") -> tuple[dict[str, str], dict[str, Kind]]:
-    """All of them, which must name different datasets: a dataset holds one Kind of buffer."""
+def buffers(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_BUFFERS: each buffer's tenant and Kind, by its key, `<dataset>.<table>`."""
+    if not text.strip():
+        return {}, {}
+    given = json.loads(text)
+    shape = 'INGEST_BUFFERS is [{"tenant": ..., "dataset": ..., "table": ...}]'
+    if not isinstance(given, list):
+        raise ValueError(shape)
+    tenants: dict[str, str] = {}
+    kinds: dict[str, Kind] = {}
+    for entry in given:
+        if not isinstance(entry, dict) or set(entry) != {"tenant", "dataset", "table"} or not all(
+                isinstance(v, str) and v for v in entry.values()):
+            raise ValueError(shape)
+        if entry["table"] not in KINDS:
+            raise ValueError(f"INGEST_BUFFERS names table {entry['table']}, which is none of {', '.join(sorted(KINDS))}")
+        if "." in entry["dataset"]:
+            raise ValueError(f"INGEST_BUFFERS names dataset {entry['dataset']}, which can't hold a dot")
+        key = f"{entry['dataset']}.{entry['table']}"
+        if key in kinds:
+            raise ValueError(f"INGEST_BUFFERS names {key} twice")
+        tenants[key], kinds[key] = entry["tenant"], KINDS[entry["table"]]
+    return tenants, kinds
+
+
+def named_buffers(signals_text: str, need_states_text: str, pubkit_checks_text: str = "",
+                  buffers_text: str = "") -> tuple[dict[str, str], dict[str, Kind]]:
+    """All of them. No two may load into the same table of the same dataset, and each of the
+    three single variables takes its dataset for its one Kind."""
     tenants: dict[str, str] = {}
     kinds: dict[str, Kind] = {}
     named: dict[str, str] = {}
+    tables: dict[tuple[str, str], str] = {}
     for variable, (more_tenants, more_kinds) in (
             ("INGEST_SIGNALS", signals(signals_text)), ("INGEST_NEED_STATES", need_states(need_states_text)),
-            ("INGEST_PUBKIT_CHECKS", pubkit_checks(pubkit_checks_text))):
-        for dataset in more_kinds:
-            if dataset in named:
-                raise ValueError(f"{named[dataset]} and {variable} name the same dataset")
-            named[dataset] = variable
+            ("INGEST_PUBKIT_CHECKS", pubkit_checks(pubkit_checks_text)), ("INGEST_BUFFERS", buffers(buffers_text))):
+        for key, kind in more_kinds.items():
+            if variable != "INGEST_BUFFERS":
+                if key in named:
+                    raise ValueError(f"{named[key]} and {variable} name the same dataset")
+                named[key] = variable
+            table = (dataset_of(key), kind.table)
+            if table in tables:
+                raise ValueError(f"{tables[table]} and {variable} both load {table[0]}.{table[1]}")
+            tables[table] = variable
         tenants.update(more_tenants)
         kinds.update(more_kinds)
     return tenants, kinds
@@ -69,7 +106,7 @@ def named_buffers(signals_text: str, need_states_text: str,
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
     tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""),
-                                   os.environ.get("INGEST_PUBKIT_CHECKS", ""))
+                                   os.environ.get("INGEST_PUBKIT_CHECKS", ""), os.environ.get("INGEST_BUFFERS", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])
