@@ -1,8 +1,19 @@
 // caller.js's StorageSink: as tests/steps/test_storage_sink.py holds storage_sink.py.
-import { test } from "node:test";
+import { After, Then } from "@cucumber/cucumber";
+import { mock as nodeMock } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { StorageSink, encode, fileName } from "../caller.js";
+
+// What node:test gave each test as `t`: its mocks, restored when the
+// scenario ends, and the cleanups it registers with t.after().
+const cleanups = [];
+const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
+After("@sink", async function () {
+  while (cleanups.length) await cleanups.pop()();
+  nodeMock.restoreAll();
+});
+
 
 const START = 1_800_000_000_000; // 2027-01-15T08:00:00Z
 const VECTORS = new URL("../../../tests/vectors/", import.meta.url);
@@ -64,7 +75,8 @@ function metadata(bytes) {
 
 const report = (bytes) => JSON.parse(metadata(bytes)["integrations.status"]);
 
-test("an idle cycle still writes a report", async () => {
+Then("an idle cycle still writes a report", function () {
+  return (async () => {
   const { sink, buffer, clock } = world();
   clock.now += 120_000;
   await sink.flush();
@@ -79,9 +91,11 @@ test("an idle cycle still writes a report", async () => {
   assert.equal(buffer.sent[0].init.headers.Authorization, "Bearer pod-token");
   assert.equal(buffer.sent[0].init.method, "PUT");
   assert.ok(buffer.sent[0].init.signal instanceof AbortSignal);
+})();
 });
 
-test("each dataset is its own tenant, and a cycle's calls are one file", async () => {
+Then("each dataset is its own tenant, and a cycle's calls are one file", function () {
+  return (async () => {
   const buffer = storage();
   const sink = new StorageSink({ "a-repo": "proj_a", "b-repo": "proj_b" }, { sender: "s", url: "https://storage.example", token: () => "pod-token", fetch: buffer.fetch, flushOnWrite: false });
   sink.write(record(1));
@@ -91,9 +105,11 @@ test("each dataset is its own tenant, and a cycle's calls are one file", async (
   const names = [...buffer.files.keys()];
   assert.deepEqual(names.map((n) => n.split("/")[0]), ["proj-a", "proj-b"]);
   assert.deepEqual([report(buffer.files.get(names[0])).calls, report(buffer.files.get(names[1])).calls], [2, 1]);
+})();
 });
 
-test("past the limit the oldest go and are counted, as are a project's with no buffer", async () => {
+Then("past the limit the oldest go and are counted, as are a project's with no buffer", function () {
+  return (async () => {
   const { sink, buffer } = world();
   for (let n = 1; n <= 5; n++) sink.write(record(n));
   sink.write(record(6, { repo: "elsewhere" }));
@@ -104,9 +120,11 @@ test("past the limit the oldest go and are counted, as are a project's with no b
   const none = new StorageSink({}, { sender: "s", bucket: { put: async () => {} } });
   none.write(record());
   await none.flush();
+})();
 });
 
-test("a refused file goes again as it was, under its name, and the failures are reported", async (t) => {
+Then("a refused file goes again as it was, under its name, and the failures are reported", function () {
+  return (async (t) => {
   const said = [];
   t.mock.method(console, "error", (line) => said.push(line));
   const { sink, buffer, clock } = world();
@@ -129,9 +147,11 @@ test("a refused file goes again as it was, under its name, and the failures are 
   assert.equal(report(held).calls, 1);
   assert.deepEqual([report(next).calls, report(next).storage_failures], [1, 2]);
   assert.match(said[0], /^integrations: storage didn't take inbox\/calls\/.+\.avro for ds: HTTP 403 github:x may not write here$/);
+})(scenarioContext);
 });
 
-test("no answer, a status without a reason, and a token that can't be read are failed writes too", async (t) => {
+Then("no answer, a status without a reason, and a token that can't be read are failed writes too", function () {
+  return (async (t) => {
   const said = [];
   t.mock.method(console, "error", (line) => said.push(line));
   const { sink, buffer } = world();
@@ -149,9 +169,11 @@ test("no answer, a status without a reason, and a token that can't be read are f
   await reading.flush();
   assert.equal(files.sent[0].init.headers.Authorization, "Bearer ");
   assert.match(said[2], /HTTP 401; no token to send: ENOENT/);
+})(scenarioContext);
 });
 
-test("the token file is read for each request", async () => {
+Then("the token file is read for each request", function () {
+  return (async () => {
   let token = "first";
   const reads = [];
   const buffer = storage();
@@ -164,9 +186,11 @@ test("the token file is read for each request", async () => {
   await sink.flush();
   assert.deepEqual(buffer.sent.map((s) => s.init.headers.Authorization), ["Bearer first", "Bearer second"]);
   assert.deepEqual(reads[0], ["/var/run/token", "utf8"]);
+})();
 });
 
-test("into an R2 bucket binding, under its prefix, for the storage Worker", async () => {
+Then("into an R2 bucket binding, under its prefix, for the storage Worker", function () {
+  return (async () => {
   const put = [];
   let failing = false;
   const bucket = { put: async (key, data) => { if (failing) throw new Error("R2 is down"); put.push([key, data]); } };
@@ -182,9 +206,11 @@ test("into an R2 bucket binding, under its prefix, for the storage Worker", asyn
   const prefixed = new StorageSink({ "a-repo": "ds" }, { sender: "s", bucket, prefix: "x/", flushOnWrite: false });
   await prefixed.flush();
   assert.match(put[2][0], /^x\/ds\/inbox\//);
+})();
 });
 
-test("a write that finds the file overdue sends it, and hands that to waitUntil", async () => {
+Then("a write that finds the file overdue sends it, and hands that to waitUntil", function () {
+  return (async () => {
   const handed = [];
   const { sink, buffer, clock } = world({ flushOnWrite: true, waitUntil: (p) => handed.push(p) });
   sink.write(record(1));
@@ -197,9 +223,11 @@ test("a write that finds the file overdue sends it, and hands that to waitUntil"
   assert.equal(buffer.files.size, 1);
   assert.equal(report([...buffer.files.values()][0]).calls, 2);
   assert.deepEqual(sink.waiting.ds.map((r) => r.request_id), ["r3"]);
+})();
 });
 
-test("by default, a Worker's way: flush from write, with no timer", async () => {
+Then("by default, a Worker's way: flush from write, with no timer", function () {
+  return (async () => {
   const buffer = storage();
   const clock = { now: START };
   const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, clock: () => clock.now });
@@ -208,9 +236,11 @@ test("by default, a Worker's way: flush from write, with no timer", async () => 
   sink.write(record());
   await sink.flushing;
   assert.equal(buffer.files.size, 1);
+})();
 });
 
-test("in Node, start: true sends on a timer, first a random part of a cycle in, and close() stops it", async (t) => {
+Then("in Node, start: true sends on a timer, first a random part of a cycle in, and close\\(\\) stops it", function () {
+  return (async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const buffer = storage();
   const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, start: true, everySeconds: 120, random: () => 0.25 });
@@ -225,14 +255,18 @@ test("in Node, start: true sends on a timer, first a random part of a cycle in, 
   await sink.close();
   t.mock.timers.tick(240_000);
   assert.equal(buffer.sent.length, 3);
+})(scenarioContext);
 });
 
-test("a sink needs a sender and somewhere to send", () => {
+Then("a sink needs a sender and somewhere to send", function () {
+  return (() => {
   assert.throws(() => new StorageSink({}, { url: "https://s", token: "t" }), /needs a sender/);
   assert.throws(() => new StorageSink({}, { sender: "s", url: "https://s" }), /needs a url and a token/);
+})();
 });
 
-test("page times become the window's low, median and high, rounded as Python rounds", async () => {
+Then("page times become the window's low, median and high, rounded as Python rounds", function () {
+  return (async () => {
   const { sink, buffer } = world();
   for (const ms of [3, 2, 9, 1]) sink.page(ms); // median 2.5: Python's round() makes it 2
   await sink.flush();
@@ -245,26 +279,32 @@ test("page times become the window's low, median and high, rounded as Python rou
   assert.deepEqual([first.page_count, first.page_ms_low, first.page_ms_median, first.page_ms_high, first.cold_start], [4, 1, 2, 9, true]);
   assert.deepEqual([second.page_ms_low, second.page_ms_median, second.page_ms_high, second.cold_start], [0, 2, 2, false]);
   assert.deepEqual([third.page_count, third.page_ms_median], [0, null]);
+})();
 });
 
-test("past the limit page times are still counted", async () => {
+Then("past the limit page times are still counted", function () {
+  return (async () => {
   const { sink, buffer } = world();
   for (let i = 0; i < 10_005; i++) sink.page(1);
   assert.equal(sink.pages.length, 10_000);
   await sink.flush();
   assert.equal(report([...buffer.files.values()][0]).page_count, 10_005);
+})();
 });
 
-test("the same records give the same bytes, and the name holds their hash", async () => {
+Then("the same records give the same bytes, and the name holds their hash", function () {
+  return (async () => {
   const a = await encode([record(1), record(2)], { kind: "sender" });
   assert.deepEqual(a, await encode([record(1), record(2)], { kind: "sender" }));
   assert.notDeepEqual(a, await encode([record(1)], { kind: "sender" }));
   assert.match(await fileName(START, "a b/c", a), /^inbox\/calls\/2027-01-15\/080000-a-b-c-[0-9a-f]{16}\.avro$/);
   assert.equal(metadata(await encode([]))["integrations.status"], undefined);
+})();
 });
 
 // tests/vectors/sink.avro, which test_vectors.py reads with avrofile.decode and file_status.
-test("the file in tests/vectors/ is what the sink writes", async () => {
+Then("the file in tests\\/vectors\\/ is what the sink writes", function () {
+  return (async () => {
   const put = [];
   const clock = { now: START };
   const sink = new StorageSink({ "a-repo": "ds" }, { sender: "app-1_x", version: "0.0.0-test", bucket: { put: async (key, data) => put.push([key, data]) }, clock: () => clock.now, flushOnWrite: false });
@@ -287,4 +327,5 @@ test("the file in tests/vectors/ is what the sink writes", async () => {
   }
   assert.deepEqual(new Uint8Array(await readFile(new URL("sink.avro", VECTORS))), data);
   assert.deepEqual(JSON.parse(await readFile(new URL("sink.json", VECTORS), "utf8")), expected);
+})();
 });
