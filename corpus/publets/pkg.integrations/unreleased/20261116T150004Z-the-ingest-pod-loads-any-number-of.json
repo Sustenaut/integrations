@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "The ingest pod loads any number of buffers more: INGEST_BUFFERS, [{\"tenant\": ..., \"dataset\": ..., \"table\": ...}], so one dataset holds several Kinds (platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside pubkit_checks); Kinds sharing a tenant keep their batch records apart (batches/<table>-). INGEST_SIGNALS, INGEST_NEED_STATES and INGEST_PUBKIT_CHECKS work as before"
-}
