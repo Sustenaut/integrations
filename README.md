@@ -337,7 +337,7 @@ Every run can run again: what is ready is left alone. In order:
 | Need | What the walk does |
 |---|---|
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
-| `gcp.service-account-key` | a new key of `integrations-ingest` (Terraform's, in shared-infra), written to Bitwarden as `integrations-calls-writer-key`, then put in the Secret `ingest-bigquery-key` as `key.json`. A key that is no longer one of the account's live keys is drift, and a new one is made |
+| `gcp.workload-identity` `ingest` | that the ingest's ServiceAccount may act as `integrations-ingest` (Terraform's, in shared-infra) through the `services` Workload Identity pool: the ingest reads BigQuery with no key, its `INGEST_KEY_FILE` being `k8s/google-credential.yaml`'s external_account credential. The grant is Terraform's (`infra/services-identity.tf`), so a missing one is proposed |
 | `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
 | the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBKIT_CHECKS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |

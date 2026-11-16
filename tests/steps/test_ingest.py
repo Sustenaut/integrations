@@ -215,3 +215,30 @@ def test_a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credent
         FederatedToken(Caller("r"), {"type": "service_account"})
     with pytest.raises(ValueError):
         project_of({"type": "external_account"})
+
+
+def test_the_ingests_token_its_credential_and_the_provider_name_one_audience():
+    """A mismatch fails only at run time, as Google's STS refusing the token."""
+    import yaml
+
+    from integrations.ingest.google_token import FederatedToken, google_token, project_of
+
+    root = Path(__file__).resolve().parents[2]
+    provider = ("//iam.googleapis.com/projects/948171295184/locations/global/workloadIdentityPools/services/"
+                "providers/sustenaut-k3s")
+    configmap = yaml.safe_load((root / "k8s" / "google-credential.yaml").read_text(encoding="utf-8"))
+    credential = json.loads(configmap["data"]["credential.json"])
+    assert credential["audience"] == provider and project_of(credential) == "sustenaut"
+    assert isinstance(google_token(Caller("integrations", "ingest"), credential), FederatedToken)
+    deployment = next(d for d in yaml.safe_load_all((root / "k8s" / "ingest.yaml").read_text(encoding="utf-8"))
+                      if d and d["kind"] == "Deployment")
+    spec = deployment["spec"]["template"]["spec"]
+    assert spec["serviceAccountName"] == "ingest" and spec["automountServiceAccountToken"] is False
+    (volume,) = [v for v in spec["volumes"] if v["name"] == "google-token"]
+    (source,) = volume["projected"]["sources"]
+    assert source["serviceAccountToken"]["audience"] == provider
+    (container,) = spec["containers"]
+    mounts = {m["name"]: m["mountPath"] for m in container["volumeMounts"]}
+    assert f"{mounts['google-token']}/{source['serviceAccountToken']['path']}" == credential["credential_source"]["file"]
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    assert env["INGEST_KEY_FILE"] == f"{mounts['google-credential']}/credential.json"
