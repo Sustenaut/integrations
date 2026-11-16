@@ -49,8 +49,10 @@ on_server k3s kubectl -n integrations get cronjob ci-jobs
 
 step "3/3 the 90-day backfill"
 if on_server k3s kubectl -n integrations get job ci-jobs-backfill >/dev/null 2>&1; then
-  echo "the Job ci-jobs-backfill is already there:"; on_server k3s kubectl -n integrations get job ci-jobs-backfill
-  ask "Delete it and run the backfill again?" || exit 0
+  echo "an earlier backfill's Kubernetes Job is still there:"; on_server k3s kubectl -n integrations get job ci-jobs-backfill
+  echo "Deleting it removes only that Job and its pod: the rows it wrote stay in BigQuery, its"
+  echo "progress stays in storage, and the new run skips what it already wrote."
+  ask "Delete the Job ci-jobs-backfill and start a new backfill?" || exit 0
   on_server k3s kubectl -n integrations delete job ci-jobs-backfill --wait
 fi
 ask "Run the poller once over the last 90 days (${backfill_args[*]}; up to an hour and a half)?" || exit 0
