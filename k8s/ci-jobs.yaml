@@ -1,0 +1,79 @@
+# The ci-jobs poller (src/integrations/ci_usage/jobs.py): every ten minutes, each finished
+# GitHub Actions job of the repositories on the release board, once, into storage's ci-usage
+# buffer, for platform.ci_jobs. It reads GitHub as the release reader app, whose id, key and
+# installation id the deploy walk puts in the Secret ci-jobs-app (pubkit.json's needs), and
+# writes to storage as its service account, k8s:integrations/ci-jobs. A pass that is still
+# running when the next is due goes on alone (Forbid); its state's head moves with If-Match
+# besides.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ci-jobs
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app: integrations-ci-jobs
+        spec:
+          restartPolicy: Never
+          serviceAccountName: ci-jobs
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: ci-jobs
+              image: ghcr.io/sustenaut/sustenaut-integrations
+              command: ["integrations", "ci-usage", "jobs"]
+              env:
+                - name: CI_USAGE_STORAGE_URL
+                  value: https://storage.sustenaut.eu
+                - name: CI_USAGE_STORAGE_TOKEN_FILE
+                  value: /var/run/secrets/storage.sustenaut.eu/token
+                - name: CI_JOBS_APP_DIR
+                  value: /etc/ci-jobs-app
+                - name: CI_JOBS_STATE
+                  value: Sustenaut/release-state:state.json
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: app
+                  mountPath: /etc/ci-jobs-app
+                  readOnly: true
+                - name: storage-token
+                  mountPath: /var/run/secrets/storage.sustenaut.eu
+                  readOnly: true
+          volumes:
+            - name: app
+              secret:
+                secretName: ci-jobs-app
+                defaultMode: 0440
+            - name: storage-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: storage.sustenaut.eu
+                      path: token
+                      expirationSeconds: 600

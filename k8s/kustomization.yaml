@@ -9,6 +9,7 @@ resources:
   - google-credential.yaml
   - app.yaml
   - ingest.yaml
+  - ci-jobs.yaml
   - ingress.yaml
 # The app's hardening and probes, shared by every service (pubkit's README, "Deploying a
 # service to k3s"). The ingest pod keeps its own, in ingest.yaml.

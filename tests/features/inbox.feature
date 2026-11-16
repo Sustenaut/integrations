@@ -128,3 +128,9 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
 
   Scenario: The scan passes once at start and then each interval
     Then the scan passes once at start and then each interval
+
+  Scenario: CI jobs and cluster usage share a tenant and load into their own tables
+    Then ci jobs and cluster usage share a tenant and load into their own tables
+
+  Scenario: INGEST_BUFFERS names more buffers beside the three single variables
+    Then INGEST_BUFFERS names more buffers beside the three single variables

@@ -193,3 +193,76 @@ def encode_pubkit_checks(rows: list[dict]) -> bytes:
 
 def decode_pubkit_checks(data: bytes) -> list[dict]:
     return list(fastavro.reader(io.BytesIO(data), PUBKIT_CHECK_SCHEMA))
+
+
+def _nullable(avro_type) -> list:
+    return ["null", avro_type]
+
+
+# CI's finished jobs, as the ci-jobs poller writes them to the ci-usage tenant: one row
+# per GitHub Actions job of each repository on the board, once it has completed, the
+# columns of platform.ci_jobs.
+CI_JOB_SCHEMA = fastavro.parse_schema({
+    "type": "record", "name": "ci_job", "fields": [
+        {"name": "observed_at", "type": _TIME},
+        {"name": "job_id", "type": "long"},
+        {"name": "run_id", "type": "long"},
+        {"name": "run_attempt", "type": "long"},
+        {"name": "repository", "type": "string"},
+        {"name": "workflow", "type": "string"},
+        {"name": "job_name", "type": "string"},
+        {"name": "event", "type": "string"},
+        {"name": "head_branch", "type": _nullable("string"), "default": None},
+        {"name": "labels", "type": {"type": "array", "items": "string"}},
+        {"name": "runner_name", "type": _nullable("string"), "default": None},
+        {"name": "runner_group", "type": _nullable("string"), "default": None},
+        {"name": "created_at", "type": _TIME},
+        {"name": "started_at", "type": _nullable(_TIME), "default": None},
+        {"name": "completed_at", "type": _TIME},
+        {"name": "wait_seconds", "type": _nullable("long"), "default": None},
+        {"name": "run_seconds", "type": _nullable("long"), "default": None},
+        {"name": "conclusion", "type": _nullable("string"), "default": None},
+    ]})
+
+_USAGE_NUMBERS = ("cpu_millicores", "memory_bytes", "cpu_capacity_millicores", "memory_capacity_bytes",
+                  "cpu_requests_millicores", "memory_requests_bytes", "quota_cpu_used", "quota_cpu_hard",
+                  "quota_memory_used", "quota_memory_hard", "runners_running", "runners_pending", "runners_max",
+                  "runner_memory_peak_bytes", "dind_memory_peak_bytes")
+
+# The k3s server's usage, as the sampler beside the runners writes it to the ci-usage
+# tenant every two minutes: node, namespace, ci and runner rows, the columns of
+# platform.cluster_usage.
+CLUSTER_USAGE_SCHEMA = fastavro.parse_schema({
+    "type": "record", "name": "cluster_usage", "fields": [
+        {"name": "observed_at", "type": _TIME},
+        {"name": "kind", "type": "string"},
+        {"name": "node", "type": _nullable("string"), "default": None},
+        {"name": "namespace", "type": _nullable("string"), "default": None},
+        {"name": "runner_name", "type": _nullable("string"), "default": None},
+        *({"name": name, "type": _nullable("long"), "default": None} for name in _USAGE_NUMBERS),
+    ]})
+
+
+def _encode(schema, rows: list[dict]) -> bytes:
+    out = io.BytesIO()
+    marker = hashlib.sha256(repr(sorted(map(repr, rows))).encode()).digest()[:16]
+    fastavro.writer(out, schema, rows, codec="deflate", sync_marker=marker)
+    return out.getvalue()
+
+
+def encode_ci_jobs(rows: list[dict]) -> bytes:
+    """Finished jobs as one file to load; the same rows always give the same bytes."""
+    return _encode(CI_JOB_SCHEMA, rows)
+
+
+def decode_ci_jobs(data: bytes) -> list[dict]:
+    return list(fastavro.reader(io.BytesIO(data), CI_JOB_SCHEMA))
+
+
+def encode_cluster_usage(rows: list[dict]) -> bytes:
+    """One sample as one file to load; the same rows always give the same bytes."""
+    return _encode(CLUSTER_USAGE_SCHEMA, rows)
+
+
+def decode_cluster_usage(data: bytes) -> list[dict]:
+    return list(fastavro.reader(io.BytesIO(data), CLUSTER_USAGE_SCHEMA))
