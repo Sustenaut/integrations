@@ -41,6 +41,7 @@ HEAD = "written"
 LOOKBACK_DAYS = 3
 PER_PAGE = 100
 RATE_LIMIT_WAITS = 60
+SAVE_TRIES = 5
 
 
 def when(text: str | None) -> datetime | None:
@@ -115,6 +116,11 @@ class State:
     def encode(self) -> bytes:
         return json.dumps({"written": self.written, "finished": self.finished}, sort_keys=True).encode()
 
+    def merge(self, other: State) -> None:
+        """What another pass saved, kept beside this one's: a job either wrote is written."""
+        self.written = {**other.written, **self.written}
+        self.finished = {**other.finished, **self.finished}
+
     def forget_before(self, start: datetime) -> None:
         """Only what the next look back can see again is worth keeping."""
         self.written = {k: v for k, v in self.written.items() if when(v) >= start}
@@ -168,7 +174,23 @@ class Poller:
         return State.decode(data), etag
 
     def save(self, state: State, read: str | None) -> str:
-        """Saves it, and gives the head's new hash, for the next save's If-Match."""
+        """Saves it, and gives the head's new hash, for the next save's If-Match. When another
+        pass moved the head since it was read (a backfill and the ten-minute CronJob run side
+        by side), storage refuses the move (412): what that pass saved is read back and merged
+        in, a job written by either staying written, and the save tried again, SAVE_TRIES
+        times in all."""
+        from ..clients.storage import StorageError  # noqa: PLC0415
+
+        for _ in range(SAVE_TRIES - 1):
+            stored = self.store.upload_file(state.encode(), name="written.json")
+            try:
+                self.store.move_head(HEAD, stored["id"], if_match=read)
+                return stored["id"]
+            except StorageError as e:
+                if e.status != 412:
+                    raise
+            theirs, read = self.load()
+            state.merge(theirs)
         stored = self.store.upload_file(state.encode(), name="written.json")
         self.store.move_head(HEAD, stored["id"], if_match=read)
         return stored["id"]

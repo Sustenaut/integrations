@@ -65,6 +65,6 @@ container["command"] = [*container["command"], *sys.argv[1:]]
 json.dump({"apiVersion": "batch/v1", "kind": "Job",
            "metadata": {"name": "ci-jobs-backfill", "namespace": "integrations"}, "spec": spec}, sys.stdout)
 ' "${backfill_args[@]}" | on_server k3s kubectl apply -f -
-on_server k3s kubectl -n integrations wait --for=condition=complete --timeout=6h job/ci-jobs-backfill
+scripts/wait-for-job.sh integrations ci-jobs-backfill
 on_server k3s kubectl -n integrations logs job/ci-jobs-backfill | grep -v '^{' | tail -3
 echo "Done: the backfill's rows wait in the ci-usage buffer until INGEST_BUFFERS loads them."

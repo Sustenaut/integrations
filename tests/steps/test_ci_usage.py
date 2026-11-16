@@ -90,7 +90,10 @@ class FakeStore:
         return {"id": key}
 
     def move_head(self, name, hash, *, if_match=None):  # noqa: A002
-        assert if_match == self.head, "the head moved under it"
+        from integrations.clients.storage import StorageError
+
+        if if_match != self.head:
+            raise StorageError("write", 412, "written moved just now")
         self.head = hash
         self.moves += 1
         return {"hash": hash}
@@ -301,3 +304,98 @@ def ci_jobs_and_cluster_usage_are_the_same_bytes_for_the_same_rows():
 def the_poller_reads_every_repository_the_installation_sees():
     caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=FakeGitHub())
     assert installed(GitHub(caller, lambda: "app-token")) == ["example-org/app", "example-org/infra"]
+
+
+def other_pass_saves(store, job_id, move=None):
+    """The ten-minute CronJob's pass, saving its state while the backfill runs."""
+    theirs = json.loads(store.files[store.head]) if store.head else {"written": {}, "finished": {}}
+    theirs["written"][job_id] = at(-1)
+    stored = store.upload_file(json.dumps(theirs).encode(), name="written.json")
+    (move or store.move_head)("written", stored["id"], if_match=store.head)
+
+
+@then("a save the CronJob got in first is merged with it and tried again")
+def a_save_the_cronjob_got_in_first_is_merged_with_it():
+    github, store = FakeGitHub(), FakeStore()
+    for n, days_ago in ((7, 0), (8, 1)):
+        created = -days_ago * 24 * 60 - 40
+        github.run(n, created=created, updated=created + 30)
+        github.jobs[n] = [job(n, queued=created + 1, started=created + 2, done=created + 20)]
+    put = store.put_buffer
+
+    def cronjob_between(place, data):
+        put(place, data)
+        other_pass_saves(store, "99")
+    store.put_buffer = cronjob_between
+    assert poller(github, store).poll() == 2
+    assert sorted(json.loads(store.files[store.head])["written"]) == ["7", "8", "99"], "both passes' jobs stay written"
+
+
+@then("a save refused every time stops after a few tries")
+def a_save_refused_every_time_stops_after_a_few_tries():
+    from integrations.ci_usage.jobs import SAVE_TRIES, State
+    from integrations.clients.storage import StorageError
+
+    store, moves = FakeStore(), []
+    move = store.move_head
+
+    def always_moved(name, hash, *, if_match=None):  # noqa: A002
+        moves.append(hash)
+        other_pass_saves(store, f"x{len(moves)}", move)
+        return move(name, hash, if_match=if_match)
+    store.move_head = always_moved
+    with pytest.raises(StorageError, match="412"):
+        poller(FakeGitHub(), store).save(State({"1": at(0)}), None)
+    assert len(moves) == SAVE_TRIES
+
+
+@then("a refusal that is no conflict is not tried again")
+def a_refusal_that_is_no_conflict_is_not_tried_again():
+    from integrations.ci_usage.jobs import State
+    from integrations.clients.storage import StorageError
+
+    store = FakeStore()
+
+    def forbidden(name, hash, *, if_match=None):  # noqa: A002
+        raise StorageError("write", 403, "not on the tenant's write list")
+    store.move_head = forbidden
+    with pytest.raises(StorageError, match="403"):
+        poller(FakeGitHub(), store).save(State({"1": at(0)}), None)
+    assert len(store.files) == 1
+
+
+def wait_for_job(tmp_path, conditions: list[str]):
+    """Runs scripts/wait-for-job.sh with an ssh that answers each look with the next of
+    `conditions`, and the log once asked."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    answers = tmp_path / "answers"
+    answers.write_text("\n".join(conditions) + "\n")
+    ssh = tmp_path / "ssh"
+    ssh.write_text("""#!/usr/bin/env bash
+case "$*" in
+  *" logs "*) printf '{"call":"record"}\\nsaved 40 jobs\\nstorage.api write: HTTP 412 written moved just now\\n' ;;
+  *) head -n 1 "$ANSWERS"; sed -i 1d "$ANSWERS" ;;
+esac
+""")
+    ssh.chmod(0o755)
+    script = Path(__file__).resolve().parents[2] / "scripts" / "wait-for-job.sh"
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "ANSWERS": str(answers), "WAIT_SECONDS": "0"}
+    return subprocess.run([str(script), "integrations", "ci-jobs-backfill"], env=env, capture_output=True, text=True,
+                          timeout=30)
+
+
+@then("the backfill's wait ends when the Job completes")
+def the_backfills_wait_ends_when_the_job_completes(tmp_path):
+    ran = wait_for_job(tmp_path, ["", "", "Complete "])
+    assert ran.returncode == 0 and not ran.stderr
+
+
+@then("the backfill's wait fails with the end of its log when the Job fails")
+def the_backfills_wait_fails_when_the_job_fails(tmp_path):
+    ran = wait_for_job(tmp_path, ["", "Failed "])
+    assert ran.returncode == 1
+    assert "Job ci-jobs-backfill failed" in ran.stderr and "HTTP 412" in ran.stderr
+    assert '{"call"' not in ran.stderr, "call records stay out"
