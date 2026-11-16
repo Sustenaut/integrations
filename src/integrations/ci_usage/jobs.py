@@ -1,5 +1,6 @@
-"""The ci-jobs poller: each finished GitHub Actions job of the repositories on the release
-board, as one row of platform.ci_jobs, written once.
+"""The ci-jobs poller: each finished GitHub Actions job of every repository the release
+reader app's installation sees, archived ones aside, as one row of platform.ci_jobs, written
+once. Not the release board's: what CI waits for is every repository's, on the board or not.
 
 Every ten minutes (k8s/ci-jobs.yaml) it lists each repository's runs created in the last
 LOOKBACK_DAYS, day by day (GitHub answers at most 1,000 runs to one query), and reads the
@@ -90,6 +91,13 @@ class GitHub:
 def board(state: dict) -> list[str]:
     """The repositories release-state's state.json puts on the board, OWNER/NAME."""
     return [f"{state['owner']}/{name}" for name, roles in sorted(state["repos"].items()) if roles.get("board")]
+
+
+def installed(github: GitHub) -> list[str]:
+    """Every repository the app's installation sees, OWNER/NAME, archived ones left out:
+    they run nothing."""
+    return sorted(r["full_name"] for r in github.pages("/installation/repositories", "repositories")
+                  if not r.get("archived"))
 
 
 @dataclass

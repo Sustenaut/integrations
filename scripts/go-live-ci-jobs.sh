@@ -6,6 +6,8 @@
 # over the tailnet:
 #
 #   scripts/go-live-ci-jobs.sh
+#   scripts/go-live-ci-jobs.sh --except-board   # the backfill of the repositories not on the
+#                                               # board, which 0.14.4's backfill left out
 #
 # It does, in order, asking before each step that changes anything:
 #   1. walks the deploy's needs with --fulfil, which shows its plan and asks before it makes
@@ -21,6 +23,8 @@
 # goes on where it was when run again; a row the regular pass writes too is the same job_id,
 # and a reader keeps one per job_id. It prints no secret and no repository name.
 set -euo pipefail
+backfill_args=(--since-days 90)
+[[ ${1:-} == --except-board ]] && backfill_args+=(--except-board)
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 server=${SUSTENAUT_SERVER:-sustenaut}
 on_server() { ssh -o BatchMode=yes "root@$server" "$@"; }
@@ -49,7 +53,7 @@ if on_server k3s kubectl -n integrations get job ci-jobs-backfill >/dev/null 2>&
   ask "Delete it and run the backfill again?" || exit 0
   on_server k3s kubectl -n integrations delete job ci-jobs-backfill --wait
 fi
-ask "Run the poller once over the last 90 days (about an hour and a half)?" || exit 0
+ask "Run the poller once over the last 90 days (${backfill_args[*]}; up to an hour and a half)?" || exit 0
 on_server k3s kubectl -n integrations get cronjob ci-jobs -o json | python3 -c '
 import json, sys
 cron = json.load(sys.stdin)
@@ -57,10 +61,10 @@ spec = cron["spec"]["jobTemplate"]["spec"]
 spec["activeDeadlineSeconds"] = 6 * 3600
 spec["ttlSecondsAfterFinished"] = 7 * 24 * 3600
 container = spec["template"]["spec"]["containers"][0]
-container["command"] = [*container["command"], "--since-days", "90"]
+container["command"] = [*container["command"], *sys.argv[1:]]
 json.dump({"apiVersion": "batch/v1", "kind": "Job",
            "metadata": {"name": "ci-jobs-backfill", "namespace": "integrations"}, "spec": spec}, sys.stdout)
-' | on_server k3s kubectl apply -f -
+' "${backfill_args[@]}" | on_server k3s kubectl apply -f -
 on_server k3s kubectl -n integrations wait --for=condition=complete --timeout=6h job/ci-jobs-backfill
 on_server k3s kubectl -n integrations logs job/ci-jobs-backfill | grep -v '^{' | tail -3
 echo "Done: the backfill's rows wait in the ci-usage buffer until INGEST_BUFFERS loads them."

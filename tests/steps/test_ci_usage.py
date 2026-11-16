@@ -13,7 +13,7 @@ from pytest_bdd import scenarios, then
 from integrations.avrofile import decode_ci_jobs, decode_cluster_usage, encode_ci_jobs, encode_cluster_usage
 from integrations.calls import Caller, MemorySink, Refused, Response
 from integrations.ci_usage.cluster import Cgroups, Sampler, millicores, octets
-from integrations.ci_usage.jobs import GitHub, Poller, board
+from integrations.ci_usage.jobs import GitHub, Poller, board, installed
 
 scenarios("ci-usage.feature")
 
@@ -52,6 +52,9 @@ class FakeGitHub:
         if url.path == "/repos/example-org/release-state/contents/state.json":
             state = {"owner": "example-org", "repos": {"app": {"board": True}, "notes": {"board": False}}}
             return Response(200, json.dumps({"content": base64.b64encode(json.dumps(state).encode()).decode()}).encode())
+        if url.path == "/installation/repositories":
+            names = [("example-org/app", False), ("example-org/infra", False), ("example-org/old", True)]
+            return Response(200, json.dumps({"repositories": [{"full_name": n, "archived": a} for n, a in names]}).encode())
         if url.path.endswith("/actions/runs"):
             begin, end = (datetime.fromisoformat(t.replace("Z", "+00:00")) for t in query["created"][0].split(".."))
             runs = [r for r in self.runs if begin <= datetime.fromisoformat(r["created_at"].replace("Z", "+00:00")) <= end]
@@ -292,3 +295,9 @@ def ci_jobs_and_cluster_usage_are_the_same_bytes_for_the_same_rows():
     decoded = decode_cluster_usage(encode_cluster_usage(usage))
     assert decoded[0]["cpu_millicores"] == 5 and decoded[0]["quota_cpu_hard"] is None
     assert encode_cluster_usage(usage) == encode_cluster_usage([dict(u) for u in usage])
+
+
+@then("the poller reads every repository the installation sees, archived ones aside")
+def the_poller_reads_every_repository_the_installation_sees():
+    caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=FakeGitHub())
+    assert installed(GitHub(caller, lambda: "app-token")) == ["example-org/app", "example-org/infra"]

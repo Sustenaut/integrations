@@ -27,6 +27,9 @@ Feature: CI's wait times and compute load
   Scenario: The board's repositories come from state.json
     Then the board's repositories come from state.json
 
+  Scenario: The poller reads every repository the installation sees, archived ones aside
+    Then the poller reads every repository the installation sees, archived ones aside
+
   Scenario: The sampler writes node, namespace, ci and runner rows
     Then the sampler writes node, namespace, ci and runner rows
 
