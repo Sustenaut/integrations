@@ -365,7 +365,9 @@ def a_refusal_that_is_no_conflict_is_not_tried_again():
 
 
 def wait_for_job(tmp_path, conditions: list[str]):
-    """Runs scripts/wait-for-job.sh with an ssh that answers each look with the next of
+    """Runs scripts/wait-for-job.sh with an ssh that does what the real one does with its
+    arguments: joins them into one line and runs that in a remote shell (bash -c), where a
+    k3s stand-in answers each look with the Job's JSON, its true conditions the next of
     `conditions`, and the log once asked."""
     import os
     import subprocess
@@ -375,12 +377,23 @@ def wait_for_job(tmp_path, conditions: list[str]):
     answers.write_text("\n".join(conditions) + "\n")
     ssh = tmp_path / "ssh"
     ssh.write_text("""#!/usr/bin/env bash
-case "$*" in
+while [[ $1 == -* ]]; do shift 2; done
+shift
+exec bash -c "$*"
+""")
+    k3s = tmp_path / "k3s"
+    k3s.write_text("""#!/usr/bin/env bash
+case " $* " in
   *" logs "*) printf '{"call":"record"}\\nsaved 40 jobs\\nstorage.api write: HTTP 412 written moved just now\\n' ;;
-  *) head -n 1 "$ANSWERS"; sed -i 1d "$ANSWERS" ;;
+  *" get job "*)
+    types=$(head -n 1 "$ANSWERS"); sed -i 1d "$ANSWERS"
+    items=$(for t in $types; do printf '{"type": "%s", "status": "True"},' "$t"; done)
+    printf '{"status": {"conditions": [%s {"type": "Suspended", "status": "False"}]}}' "$items" ;;
+  *) echo "k3s: unexpected $*" >&2; exit 2 ;;
 esac
 """)
-    ssh.chmod(0o755)
+    for tool in (ssh, k3s):
+        tool.chmod(0o755)
     script = Path(__file__).resolve().parents[2] / "scripts" / "wait-for-job.sh"
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "ANSWERS": str(answers), "WAIT_SECONDS": "0"}
     return subprocess.run([str(script), "integrations", "ci-jobs-backfill"], env=env, capture_output=True, text=True,
