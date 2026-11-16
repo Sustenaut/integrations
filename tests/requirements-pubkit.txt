@@ -8,5 +8,5 @@ pytest-xdist==3.8.0
 hypothesis==6.170.5
 pubkit @ https://github.com/Sustenaut/pubkit/releases/download/v0.37.0/pubkit-0.37.0-py3-none-any.whl
 # deploy.providers' packages, whose need types `pubkit sync --check` reads:
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl
-pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.1/pubdeploy-0.4.1-py3-none-any.whl
+pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.2.3/pubsec-0.2.3-py3-none-any.whl

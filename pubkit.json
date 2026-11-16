@@ -22,22 +22,19 @@
     {"path": "corpus/.publet/signing.key", "bitwarden": {"project": {"id": "377de170-5487-40f7-9a01-b4f50064e1c5", "name": "Pub"}, "name": "pub-signing-key-integrations"}}
   ],
   "deploy": {
-    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.3.0/pubdeploy-0.3.0-py3-none-any.whl", "sha256": "f569e8cbb50e869b8e856bd15d178ccacf2c62e40b1cf278fde807847706fb07"}, {"distribution": "pubsec", "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.1.2/pubsec-0.1.2-py3-none-any.whl", "sha256": "88a68ffd252b49289ae02d0a9f629f3e0f0832c921cb8ee0f1301f958527de17"}],
+    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.1/pubdeploy-0.4.1-py3-none-any.whl", "sha256": "c9c9b49b44b771c6f15219c186e3646203381c6a30570c0b2568951d3a53deb0"}, {"distribution": "pubsec", "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.2.3/pubsec-0.2.3-py3-none-any.whl", "sha256": "4a0b9435ff111565265f330fa3a1642b59562d77b5d1806c1bfecfe83e63b106"}],
     "namespace": "integrations",
     "host": "integrations.sustenaut.eu",
     "workflow": "deploy.yml",
     "gate": "DEPLOY_INTEGRATIONS",
     "needs": [
       {
-        "type": "gcp.service-account-key",
+        "type": "gcp.workload-identity",
         "account": "integrations-ingest",
         "project": "sustenaut",
-        "bitwarden": "integrations-calls-writer-key",
-        "secret": {
-          "name": "ingest-bigquery-key",
-          "key": "key.json",
-          "decode": "base64"
-        }
+        "serviceaccount": "ingest",
+        "pool": "projects/948171295184/locations/global/workloadIdentityPools/services",
+        "granted_in": "Sustenaut/shared-infra's infra/services-identity.tf"
       },
       {
         "type": "k8s.manifests",

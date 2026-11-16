@@ -1,7 +1,8 @@
 # The ingest pod: each project's buffer in storage, into BigQuery every two minutes. One
 # replica, as one writer per table keeps a table within BigQuery's daily load jobs; to
 # scale, more pods split by dataset. Nothing sends to it, so it has no Service; its
-# only routes are /healthz and /livez. Its key is the Secret the deploy walk puts in.
+# only routes are /healthz and /livez. It reaches BigQuery with no key, through Workload
+# Identity (google-credential.yaml).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,7 +36,7 @@ spec:
               containerPort: 8080
           env:
             - name: INGEST_KEY_FILE
-              value: /keys/key.json
+              value: /etc/google/credential.json
             - name: INGEST_STORAGE_URL
               value: https://storage.sustenaut.eu
             - name: INGEST_STORAGE_TOKEN_FILE
@@ -67,16 +68,26 @@ spec:
             limits:
               memory: 384Mi
           volumeMounts:
-            - name: key
-              mountPath: /keys
+            - name: google-token
+              mountPath: /var/run/secrets/google
+              readOnly: true
+            - name: google-credential
+              mountPath: /etc/google
               readOnly: true
             - name: storage-token
               mountPath: /var/run/secrets/storage.sustenaut.eu
               readOnly: true
       volumes:
-        - name: key
-          secret:
-            secretName: ingest-bigquery-key
+        - name: google-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: "//iam.googleapis.com/projects/948171295184/locations/global/workloadIdentityPools/services/providers/sustenaut-k3s"
+                  path: token
+                  expirationSeconds: 3600
+        - name: google-credential
+          configMap:
+            name: google-credential
         - name: storage-token
           projected:
             sources:

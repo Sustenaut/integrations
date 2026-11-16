@@ -6,6 +6,7 @@ kind: Kustomization
 namespace: integrations
 resources:
   - service-accounts.yaml
+  - google-credential.yaml
   - app.yaml
   - ingest.yaml
   - ingress.yaml
