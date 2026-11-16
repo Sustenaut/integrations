@@ -17,7 +17,7 @@ from pathlib import Path
 from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
-from .google_token import GoogleToken
+from .google_token import google_token, project_of
 from .inbox import INTERVAL_SECONDS, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Kind, Scanner
 
 
@@ -73,7 +73,8 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])
-    loader = BigQueryLoader(caller, GoogleToken(caller, key), key["project_id"])
+    # A key, or an external_account credential (Workload Identity): the same file either way.
+    loader = BigQueryLoader(caller, google_token(caller, key), project_of(key))
     inbox = Inbox(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(), os.environ["INGEST_STORAGE_URL"],
                   tenants)
     scanner = Scanner(inbox, loader, JobBudget(), report=lambda status: print(json.dumps(status), flush=True),

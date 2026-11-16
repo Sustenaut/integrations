@@ -155,3 +155,63 @@ def test_a_refused_google_token_is_a_refusal():
     from integrations.calls import Refused
     with pytest.raises(Refused):
         token()
+
+
+EXTERNAL = {"type": "external_account",
+            "audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/services/providers/k3s",
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "token_url": "https://sts.googleapis.com/v1/token",
+            "credential_source": {"file": "/var/run/secrets/google/token"},
+            "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+                                                 "reader@a-project.iam.gserviceaccount.com:generateAccessToken"}
+
+
+def test_a_federated_token_trades_the_pods_token_then_impersonates_and_is_reused():
+    from urllib.parse import parse_qs
+
+    from integrations.ingest.google_token import FederatedToken, google_token, project_of
+
+    sent = []
+
+    class Google:
+        def send(self, request, timeout):
+            sent.append(request)
+            if request.url.startswith("https://sts."):
+                return Response(200, json.dumps({"access_token": "federated"}).encode())
+            return Response(200, json.dumps({"accessToken": f"access-{len(sent)}"}).encode())
+
+    now, reads = [1000.0], []
+    token = FederatedToken(Caller("r", transport=Google()), EXTERNAL, clock=lambda: now[0],
+                           read=lambda path: reads.append(path) or "pod-token\n")
+    assert token() == "access-2" and token() == "access-2" and len(sent) == 2
+    exchange = parse_qs(sent[0].body.decode())
+    assert exchange["subject_token"] == ["pod-token"] and exchange["audience"] == [EXTERNAL["audience"]]
+    assert sent[1].headers["Authorization"] == "Bearer federated" and reads == ["/var/run/secrets/google/token"]
+    now[0] += 3400
+    assert token() == "access-4"
+    assert project_of(EXTERNAL) == "a-project" and project_of({"project_id": "p"}) == "p"
+    assert isinstance(google_token(Caller("r", transport=Google()), EXTERNAL), FederatedToken)
+    assert isinstance(google_token(Caller("r", transport=Google()), {"client_email": "w"}), GoogleToken)
+
+
+def test_a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credential_is_said():
+    from integrations.calls import Refused
+    from integrations.ingest.google_token import FederatedToken, project_of
+
+    class Refuses:
+        def __init__(self, at):
+            self.at = at
+
+        def send(self, request, timeout):
+            if request.url.startswith(self.at):
+                return Response(403, b"{}")
+            return Response(200, json.dumps({"access_token": "federated"}).encode())
+
+    for at in ("https://sts.", "https://iamcredentials."):
+        token = FederatedToken(Caller("r", transport=Refuses(at)), EXTERNAL, read=lambda path: "t")
+        with pytest.raises(Refused):
+            token()
+    with pytest.raises(ValueError):
+        FederatedToken(Caller("r"), {"type": "service_account"})
+    with pytest.raises(ValueError):
+        project_of({"type": "external_account"})
