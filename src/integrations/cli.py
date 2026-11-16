@@ -93,7 +93,7 @@ def slack_post(channel: str, text: str) -> int:
     return 0
 
 
-def ci_usage(action: str, since_days: int | None) -> int:  # pragma: no cover - the pods' wiring
+def ci_usage(action: str, since_days: int | None, except_board: bool = False) -> int:  # pragma: no cover - the pods' wiring
     from .ci_usage import main as ci  # noqa: PLC0415
     from .ci_usage.jobs import LOOKBACK_DAYS  # noqa: PLC0415
 
@@ -103,7 +103,7 @@ def ci_usage(action: str, since_days: int | None) -> int:  # pragma: no cover - 
     if not 1 <= days <= 90:
         print("integrations: --since-days is 1 to 90", file=sys.stderr)
         return 2
-    return ci.jobs(days)
+    return ci.jobs(days, except_board)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -120,13 +120,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--text", required=True)
     p = commands.add_parser("ci-usage", help="collect CI's wait times and compute load into storage's ci-usage buffer")
     actions = p.add_subparsers(dest="action", required=True)
-    p = actions.add_parser("jobs", help="write each finished GitHub Actions job of the board's repositories, once")
+    p = actions.add_parser("jobs", help="write each finished GitHub Actions job of the installation's repositories, once")
     p.add_argument("--since-days", type=int, default=None,
                    help="look back this many days instead of the usual few, for a backfill (at most 90: GitHub keeps no more)")
+    p.add_argument("--except-board", action="store_true",
+                   help="leave out the release board's repositories (release-state's state.json): a backfill of the others")
     actions.add_parser("cluster", help="write one sample of the k3s server's usage")
     args = parser.parse_args(argv)
     if args.command == "slack":
         return slack_post(args.channel, args.text)
     if args.command == "ci-usage":
-        return ci_usage(args.action, args.since_days if args.action == "jobs" else None)
+        return ci_usage(args.action, args.since_days if args.action == "jobs" else None,
+                        args.except_board if args.action == "jobs" else False)
     return scan(args.path, args.suggest)
