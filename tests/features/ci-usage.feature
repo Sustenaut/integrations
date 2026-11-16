@@ -21,6 +21,21 @@ Feature: CI's wait times and compute load
   Scenario: A refusal that is no rate limit stops the pass before anything is saved
     Then a refusal that is no rate limit stops the pass before anything is saved
 
+  Scenario: A save the CronJob got in first is merged with it and tried again
+    Then a save the CronJob got in first is merged with it and tried again
+
+  Scenario: A save refused every time stops after a few tries
+    Then a save refused every time stops after a few tries
+
+  Scenario: A refusal that is no conflict is not tried again
+    Then a refusal that is no conflict is not tried again
+
+  Scenario: The backfill's wait ends when the Job completes
+    Then the backfill's wait ends when the Job completes
+
+  Scenario: The backfill's wait fails with the end of its log when the Job fails
+    Then the backfill's wait fails with the end of its log when the Job fails
+
   Scenario: A backfill writes a file for each day of runs
     Then a backfill writes a file for each day of runs
 
