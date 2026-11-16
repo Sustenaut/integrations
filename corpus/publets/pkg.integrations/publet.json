@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.14.2 is released as v0.14.2 from commit a47adea4b9eaf43151564ed9836f6baf740b4739.",
+      "content": "integrations 0.14.3 is released as v0.14.3 from commit 39b30a836eec0e6962f0bc47f1fec1073abc42fc.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.14.2",
+            "0.14.3",
             "",
             "",
-            "v0.14.2",
-            "a47adea4b9eaf43151564ed9836f6baf740b4739"
+            "v0.14.3",
+            "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
           ]
         ]
       },
-      "scope": "the published release v0.14.2 of integrations",
+      "scope": "the published release v0.14.3 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "a47adea4b9eaf43151564ed9836f6baf740b4739"
+          "revision": "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.14.2 was released on 2026-11-13 from commit a47adea4b9eaf43151564ed9836f6baf740b4739 with these changes.",
+      "content": "integrations 0.14.3 was released on 2026-11-16 from commit 39b30a836eec0e6962f0bc47f1fec1073abc42fc with these changes.",
       "data": {
         "columns": [
           {
@@ -57,36 +57,24 @@
         ],
         "rows": [
           [
-            "fixed",
-            "The ingest pod scans as soon as it starts, then every two minutes, so a deploy leaves no gap in its reports longer than the restart"
-          ],
-          [
             "added",
-            "The ingest pod loads the convergence engine's need states: INGEST_NEED_STATES, {\"tenant\": ..., \"dataset\": ...} like INGEST_SIGNALS, from inbox/need-states/ into the dataset's need_states table; avrofile has encode_need_states and decode_need_states"
-          ],
-          [
-            "added",
-            "scan.yml takes a runs-on input, the runner label the scan runs on (ubuntu-latest by default), so a repository with self-hosted runners scans on them"
-          ],
-          [
-            "added",
-            "The ingest pod loads the platform's nightly pubkit checks: INGEST_PUBKIT_CHECKS, {\"tenant\": ..., \"dataset\": ...} like INGEST_NEED_STATES, from inbox/pubkit-checks/ into the dataset's pubkit_checks table; avrofile has encode_pubkit_checks and decode_pubkit_checks"
+            "ingest.google_token: FederatedToken, a Google access token with no key, from an external_account credential (Workload Identity Federation): the pod's projected token traded at STS, then the account impersonated; google_token() and project_of() take a key or such a credential alike, and the ingest reads either from INGEST_KEY_FILE"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.14.2 of integrations",
+      "scope": "the published release v0.14.3 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "a47adea4b9eaf43151564ed9836f6baf740b4739"
+          "revision": "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
         }
       ]
     }
   },
-  "created": "2026-11-13T00:00:00Z",
+  "created": "2026-11-16T00:00:00Z",
   "sections": [
     {
       "heading": "Identity",
