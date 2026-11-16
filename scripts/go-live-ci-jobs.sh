@@ -8,8 +8,11 @@
 #   scripts/go-live-ci-jobs.sh
 #
 # It does, in order, asking before each step that changes anything:
-#   1. walks the deploy's needs: the Secret ci-jobs-app from Bitwarden's release reader
-#      app values, and the storage tenants ci-usage and ci-jobs (Sustenaut/storage);
+#   1. walks the deploy's needs with --fulfil, which shows its plan and asks before it makes
+#      what is missing: the Secret ci-jobs-app from Bitwarden's release reader app values,
+#      the admin network policy where it drifted, then the deploy gate and the rollout. The
+#      storage tenants ci-usage and ci-jobs (Sustenaut/storage) and the variable
+#      INGEST_BUFFERS (Sustenaut/release-state) it only checks: merge those pull requests first;
 #   2. waits for the CronJob ci-jobs, which the deploy applies;
 #   3. runs the CronJob's job once with --since-days 90, as the Job ci-jobs-backfill: one
 #      file a day of runs into the ci-usage buffer, at the pace GitHub's rate limit allows
@@ -29,10 +32,9 @@ git fetch -q origin main
 [[ -f k8s/ci-jobs.yaml ]] || { echo "main has no ci-jobs poller yet: merge its pull request first" >&2; exit 1; }
 [[ -f ../shared-infra/pubkit.json ]] || { echo "no ../shared-infra checkout beside this one, for the zones" >&2; exit 1; }
 
-step "1/3 the deploy's needs: Secret ci-jobs-app, tenants ci-usage and ci-jobs"
-if ask "Walk integrations' needs (it makes the Secret from Bitwarden if it is missing)?"; then
-  ./with-secrets ./pubdeploy walk --server "$server" --zones ../shared-infra/pubkit.json
-fi
+step "1/3 the deploy's needs: Secret ci-jobs-app, tenants ci-usage and ci-jobs, INGEST_BUFFERS"
+# Without --fulfil the walk only checks; with it, it asks before making anything.
+./with-secrets ./pubdeploy walk --fulfil --server "$server" --zones ../shared-infra/pubkit.json
 
 step "2/3 the CronJob ci-jobs"
 for _ in $(seq 60); do
