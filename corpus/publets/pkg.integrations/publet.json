@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.14.3 is released as v0.14.3 from commit 39b30a836eec0e6962f0bc47f1fec1073abc42fc.",
+      "content": "integrations 0.14.4 is released as v0.14.4 from commit cd299d5b74c36c30fa5bac4685481306168257ce.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.14.3",
+            "0.14.4",
             "",
             "",
-            "v0.14.3",
-            "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
+            "v0.14.4",
+            "cd299d5b74c36c30fa5bac4685481306168257ce"
           ]
         ]
       },
-      "scope": "the published release v0.14.3 of integrations",
+      "scope": "the published release v0.14.4 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
+          "revision": "cd299d5b74c36c30fa5bac4685481306168257ce"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.14.3 was released on 2026-11-16 from commit 39b30a836eec0e6962f0bc47f1fec1073abc42fc with these changes.",
+      "content": "integrations 0.14.4 was released on 2026-11-16 from commit cd299d5b74c36c30fa5bac4685481306168257ce with these changes.",
       "data": {
         "columns": [
           {
@@ -58,18 +58,22 @@
         "rows": [
           [
             "added",
-            "ingest.google_token: FederatedToken, a Google access token with no key, from an external_account credential (Workload Identity Federation): the pod's projected token traded at STS, then the account impersonated; google_token() and project_of() take a key or such a credential alike, and the ingest reads either from INGEST_KEY_FILE"
+            "integrations ci-usage: CI's wait times and compute load for platform.ci_jobs and platform.cluster_usage, through storage's ci-usage buffer. `jobs` (k8s/ci-jobs.yaml, every ten minutes, as the release reader app) writes each finished GitHub Actions job of the board's repositories once, with wait_seconds and run_seconds, its state a head in the ci-jobs tenant; `--since-days 90` backfills. `cluster` writes the k3s server's node, namespace, ci (quota, runners) and runner rows, with each runner pod's cgroup memory.peak; avrofile has encode_ci_jobs, encode_cluster_usage and their decoders"
+          ],
+          [
+            "added",
+            "The ingest pod loads any number of buffers more: INGEST_BUFFERS, [{\"tenant\": ..., \"dataset\": ..., \"table\": ...}], so one dataset holds several Kinds (platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside pubkit_checks); Kinds sharing a tenant keep their batch records apart (batches/<table>-). INGEST_SIGNALS, INGEST_NEED_STATES and INGEST_PUBKIT_CHECKS work as before"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.14.3 of integrations",
+      "scope": "the published release v0.14.4 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "39b30a836eec0e6962f0bc47f1fec1073abc42fc"
+          "revision": "cd299d5b74c36c30fa5bac4685481306168257ce"
         }
       ]
     }
