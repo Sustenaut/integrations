@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.15.0 is released as v0.15.0 from commit 1dddb468b47ac3693609833d23649c75398c3907.",
+      "content": "integrations 0.15.1 is released as v0.15.1 from commit d15c1a33a496ede1db136e2bf05d140dd154ff15.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.15.0",
+            "0.15.1",
             "",
             "",
-            "v0.15.0",
-            "1dddb468b47ac3693609833d23649c75398c3907"
+            "v0.15.1",
+            "d15c1a33a496ede1db136e2bf05d140dd154ff15"
           ]
         ]
       },
-      "scope": "the published release v0.15.0 of integrations",
+      "scope": "the published release v0.15.1 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "1dddb468b47ac3693609833d23649c75398c3907"
+          "revision": "d15c1a33a496ede1db136e2bf05d140dd154ff15"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.15.0 was released on 2026-11-16 from commit 1dddb468b47ac3693609833d23649c75398c3907 with these changes.",
+      "content": "integrations 0.15.1 was released on 2026-11-16 from commit d15c1a33a496ede1db136e2bf05d140dd154ff15 with these changes.",
       "data": {
         "columns": [
           {
@@ -57,19 +57,19 @@
         ],
         "rows": [
           [
-            "changed",
-            "integrations ci-usage jobs polls every repository the release reader app's installation sees (GET /installation/repositories, archived ones left out), not the release board's alone, so repositories such as shared-infra are collected too; --except-board leaves the board's out, for a backfill of the repositories the first one missed"
+            "fixed",
+            "integrations ci-usage jobs: a save storage refuses because another pass moved the written head (412: a backfill beside the ten-minute CronJob) reads that pass's state back, merges the jobs both wrote, and tries again, five times in all; the 90-day backfill stopped on the first such refusal"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.15.0 of integrations",
+      "scope": "the published release v0.15.1 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "1dddb468b47ac3693609833d23649c75398c3907"
+          "revision": "d15c1a33a496ede1db136e2bf05d140dd154ff15"
         }
       ]
     }
