@@ -13,6 +13,9 @@ from integrations.calls import Caller, MemorySink, Replay
 from integrations.clients import storage as client
 from integrations.clients.storage import NotFound, Storage, StorageError, StorageUnavailable
 from integrations.clients.storage_routes import ROUTES, SPEC
+from pytest_bdd import scenarios, then
+
+scenarios("storage-client.feature")
 
 HERE = Path(__file__).resolve().parents[1]
 VECTORS = sorted((HERE / "vectors" / "storage").glob("*.json"))
@@ -43,8 +46,15 @@ def made(vector, **kw):
     return storage, sink, replay, naps
 
 
-@pytest.mark.parametrize("path", VECTORS, ids=lambda p: p.stem)
-def test_a_vector(path):
+@then("a vector")
+def a_vector():
+    """Every case of the parametrized test this was, in turn."""
+    for path in VECTORS:
+        path = path.values[0] if type(path).__name__ == "ParameterSet" else path
+        _case_a_vector(path=path)
+
+
+def _case_a_vector(path):
     vector = json.loads(path.read_text(encoding="utf-8"))
     storage, sink, replay, naps = made(vector)
     kwargs = {("for_" if k == "for" else k): v for k, v in vector["kwargs"].items()}
@@ -66,13 +76,15 @@ def test_a_vector(path):
     assert len(records) == len(expect["records"])
 
 
-def test_the_routes_are_the_pinned_specs():
+@then("the routes are the pinned specs")
+def the_routes_are_the_pinned_specs():
     lock = json.loads((HERE.parent / "openapi" / "storage.lock.json").read_text())
     assert SPEC == {k: lock[k] for k in ("repository", "commit", "sha256")}
     assert ROUTES["list"]["query"] == ["prefix", "limit", "cursor"]
 
 
-def test_an_upload_is_one_multipart_body_with_the_fields_given():
+@then("an upload is one multipart body with the fields given")
+def an_upload_is_one_multipart_body_with_the_fields_given():
     vector = {"client": {"tenant": "deals", "token": "t"},
               "responses": {f"POST {BASE}/deals/files": {"status": 200, "json": {}}}}
     storage, _, replay, _ = made(vector)
@@ -87,7 +99,8 @@ def test_an_upload_is_one_multipart_body_with_the_fields_given():
     assert 'name="label"' not in body and 'name="subject"' not in body
 
 
-def test_the_token_file_is_read_for_each_request_and_another_tenant_shares_it(tmp_path):
+@then("the token file is read for each request and another tenant shares it")
+def the_token_file_is_read_for_each_request_and_another_tenant_shares_it(tmp_path):
     token = tmp_path / "token"
     token.write_text("first\n")
     vector = {"client": {"tenant": "deals", "token": None},
@@ -101,7 +114,8 @@ def test_the_token_file_is_read_for_each_request_and_another_tenant_shares_it(tm
     assert replay.sent[1].url == f"{BASE}/other/head/board/log"
 
 
-def test_a_token_can_be_a_callable_and_one_is_needed():
+@then("a token can be a callable and one is needed")
+def a_token_can_be_a_callable_and_one_is_needed():
     vector = {"client": {"tenant": "deals", "token": lambda: "minted"},
               "responses": {f"GET {BASE}/deals/head/board/log": {"status": 200, "json": {"log": []}}}}
     storage, _, replay, _ = made(vector)
@@ -111,7 +125,8 @@ def test_a_token_can_be_a_callable_and_one_is_needed():
         Storage(Caller("a-repo"), "deals")
 
 
-def test_a_place_outside_the_buffers_folders_is_refused_here():
+@then("a place outside the buffers folders is refused here")
+def a_place_outside_the_buffers_folders_is_refused_here():
     storage, _, replay, _ = made({"client": {"tenant": "deals", "token": "t"}, "responses": {}})
     for place in ("f/x", "inbox", "other/a.avro"):
         with pytest.raises(ValueError, match="is not in inbox/, batches/ or rejected/"):
@@ -119,14 +134,16 @@ def test_a_place_outside_the_buffers_folders_is_refused_here():
     assert not replay.sent
 
 
-def test_errors_say_storages_reason_and_are_the_callers_kinds():
+@then("errors say storages reason and are the callers kinds")
+def errors_say_storages_reason_and_are_the_callers_kinds():
     error = NotFound("read", 404, "not found")
     assert isinstance(error, StorageError) and str(error) == "storage.api read: HTTP 404 not found"
     assert str(StorageError("write", 500, "")) == "storage.api write: HTTP 500"
     assert client.reason(None) == "" and client.reason(client.Response(500, b"<html>")) == ""
 
 
-def test_a_weak_etag_still_gives_the_hash():
+@then("a weak etag still gives the hash")
+def a_weak_etag_still_gives_the_hash():
     vector = {"client": {"tenant": "deals", "token": "t"},
               "responses": {f"GET {BASE}/deals/head/board": {"status": 200, "text": "{}", "headers": {"ETag": 'W/"abc"'}}}}
     storage, _, _, _ = made(vector)

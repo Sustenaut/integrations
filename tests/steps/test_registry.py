@@ -14,6 +14,9 @@ from hypothesis import strategies as st
 from integrations import registry
 from integrations.consumer import BadConsumer, glob_regex, parse
 from integrations.scan import compile_signature, host_regex
+from pytest_bdd import scenarios, then
+
+scenarios("registry.feature")
 
 HERE = Path(__file__).resolve().parent.parent
 PLUGIN_FILES = sorted(registry.PLUGINS.glob("*.json"))
@@ -22,28 +25,44 @@ CONSUMER_SCHEMA = registry.load(registry.SCHEMAS / "consumer.schema.json")
 KNOWN = {"linear.sync", "inwx.registrar"}
 
 
-@pytest.mark.parametrize("path", PLUGIN_FILES, ids=lambda p: p.stem)
-def test_plugin_meets_the_schema(path):
+@then("plugin meets the schema")
+def plugin_meets_the_schema():
+    """Every case of the parametrized test this was, in turn."""
+    for path in PLUGIN_FILES:
+        path = path.values[0] if type(path).__name__ == "ParameterSet" else path
+        _case_plugin_meets_the_schema(path=path)
+
+
+def _case_plugin_meets_the_schema(path):
     data = registry.load(path)
     jsonschema.validate(data, PLUGIN_SCHEMA)
     assert data["id"] == path.stem
 
 
-@pytest.mark.parametrize("path", PLUGIN_FILES, ids=lambda p: p.stem)
-def test_every_signature_compiles(path):
+@then("every signature compiles")
+def every_signature_compiles():
+    """Every case of the parametrized test this was, in turn."""
+    for path in PLUGIN_FILES:
+        path = path.values[0] if type(path).__name__ == "ParameterSet" else path
+        _case_every_signature_compiles(path=path)
+
+
+def _case_every_signature_compiles(path):
     for kind, texts in registry.load(path)["detect"].items():
         if kind != "files":
             for text in texts:
                 compile_signature(kind, text)
 
 
-def test_a_plugin_with_no_signatures_must_be_manual_only():
+@then("a plugin with no signatures must be manual only")
+def a_plugin_with_no_signatures_must_be_manual_only():
     data = registry.load(registry.PLUGINS / "linear.sync.json") | {"detect": {}}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(data, PLUGIN_SCHEMA)
 
 
-def test_every_inventory_row_has_its_plugins_and_every_plugin_a_row():
+@then("every inventory row has its plugins and every plugin a row")
+def every_inventory_row_has_its_plugins_and_every_plugin_a_row():
     inventory = json.loads((HERE / "inventory.json").read_text())
     rows = inventory["rows"]
     assert len(rows) == 33
@@ -51,7 +70,8 @@ def test_every_inventory_row_has_its_plugins_and_every_plugin_a_row():
     assert sorted(listed) == sorted(registry.plugins())
 
 
-def test_every_class_has_its_targets():
+@then("every class has its targets")
+def every_class_has_its_targets():
     classes = registry.classes()
     assert set(classes) == {"H", "E", "S", "M"}
     for target in classes.values():
@@ -60,7 +80,8 @@ def test_every_class_has_its_targets():
         assert target["timeout"] > 0 and isinstance(target["tries"], int) and target["tries"] >= 1
 
 
-def test_the_registry_names_no_consumer():
+@then("the registry names no consumer")
+def the_registry_names_no_consumer():
     """Consumers name themselves, in their own repositories."""
     consumers = re.compile(r"sustenaut|schryer|opportunity|visit-ee", re.IGNORECASE)
     for path in [*PLUGIN_FILES, registry.HERE / "not-providers.json"]:
@@ -97,21 +118,38 @@ BAD = [
 ]
 
 
-@pytest.mark.parametrize("data", GOOD)
-def test_the_loader_and_the_schema_accept_the_same(data):
+@then("the loader and the schema accept the same")
+def the_loader_and_the_schema_accept_the_same():
+    """Every case of the parametrized test this was, in turn."""
+    for data in GOOD:
+        data = data.values[0] if type(data).__name__ == "ParameterSet" else data
+        _case_the_loader_and_the_schema_accept_the_same(data=data)
+
+
+def _case_the_loader_and_the_schema_accept_the_same(data):
     jsonschema.validate(data, CONSUMER_SCHEMA)
     parse(data, KNOWN)
 
 
-@pytest.mark.parametrize("data", BAD)
-def test_the_loader_and_the_schema_refuse_the_same(data):
+@then("the loader and the schema refuse the same")
+def the_loader_and_the_schema_refuse_the_same():
+    """Every case of the parametrized test this was, in turn."""
+    for data in BAD:
+        data = data.values[0] if type(data).__name__ == "ParameterSet" else data
+        _case_the_loader_and_the_schema_refuse_the_same(data=data)
+
+
+def _case_the_loader_and_the_schema_refuse_the_same(data):
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(data, CONSUMER_SCHEMA)
     with pytest.raises(BadConsumer):
         parse(data, KNOWN)
 
 
-@pytest.mark.parametrize(("pattern", "path", "matches"), [
+@then("path patterns")
+def path_patterns():
+    """Every case of the parametrized test this was, in turn."""
+    for case0 in [
     ("a.py", "a.py", True),
     ("a.py", "b/a.py", False),
     ("tests/", "tests/x/y.py", True),
@@ -121,8 +159,12 @@ def test_the_loader_and_the_schema_refuse_the_same(data):
     ("**/*.py", "b/c/a.py", True),
     ("*.py", "b/a.py", False),
     ("a?.py", "ab.py", True),
-])
-def test_path_patterns(pattern, path, matches):
+]:
+        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
+        _case_path_patterns(pattern=case0[0], path=case0[1], matches=case0[2])
+
+
+def _case_path_patterns(pattern, path, matches):
     assert bool(glob_regex(pattern).match(path)) is matches
 
 

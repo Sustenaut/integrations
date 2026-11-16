@@ -16,6 +16,9 @@ from integrations.ingest.inbox import MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STA
 from integrations.ingest.main import named_buffers, need_states, pubkit_checks, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
+from pytest_bdd import scenarios, then
+
+scenarios("inbox.feature")
 
 DATASET = "ds"
 AVRO = b"Obj\x01"
@@ -156,7 +159,8 @@ def ids(bigquery):
     return sorted(r["request_id"] for r in bigquery.rows)
 
 
-def test_waiting_files_load_as_one_job_and_leave(world):
+@then("waiting files load as one job and leave")
+def waiting_files_load_as_one_job_and_leave(world):
     scanner, buffer, bigquery, statuses = world
     for n in (1, 2, 3):
         waiting(buffer, n)
@@ -168,20 +172,23 @@ def test_waiting_files_load_as_one_job_and_leave(world):
     assert status["inbox_files"] == 0 and status["inbox_oldest_seconds"] is None and status["storage_ok"]
 
 
-def test_an_empty_inbox_spends_no_job_and_still_reports(world):
+@then("an empty inbox spends no job and still reports")
+def an_empty_inbox_spends_no_job_and_still_reports(world):
     scanner, _, bigquery, statuses = world
     scanner.tick([DATASET])
     assert bigquery.posts == 0 and len(statuses) == 1 and statuses[0]["inbox_files"] == 0
 
 
-def test_a_file_with_no_records_just_leaves(world):
+@then("a file with no records just leaves")
+def a_file_with_no_records_just_leaves(world):
     scanner, buffer, bigquery, _ = world
     buffer.files["inbox/calls/2027-01-15/empty.avro"] = encode([])
     scanner.tick([DATASET])
     assert bigquery.posts == 0 and not left(buffer)
 
 
-def test_a_crash_after_the_load_doesnt_load_again(world):
+@then("a crash after the load doesnt load again")
+def a_crash_after_the_load_doesnt_load_again(world):
     scanner, buffer, bigquery, _ = world
     waiting(buffer, 1)
     waiting(buffer, 2)
@@ -193,7 +200,8 @@ def test_a_crash_after_the_load_doesnt_load_again(world):
     assert ids(bigquery) == ["r1", "r2"] and not left(buffer)
 
 
-def test_a_crash_partway_through_deleting_finishes_with_what_is_left(world):
+@then("a crash partway through deleting finishes with what is left")
+def a_crash_partway_through_deleting_finishes_with_what_is_left(world):
     scanner, buffer, bigquery, _ = world
     first = waiting(buffer, 1)
     waiting(buffer, 2)
@@ -205,7 +213,8 @@ def test_a_crash_partway_through_deleting_finishes_with_what_is_left(world):
     assert ids(bigquery) == ["r1", "r2"] and not left(buffer)
 
 
-def test_a_crash_while_splitting_a_rejected_batch_loads_nothing_twice(world):
+@then("a crash while splitting a rejected batch loads nothing twice")
+def a_crash_while_splitting_a_rejected_batch_loads_nothing_twice(world):
     scanner, buffer, bigquery, _ = world
     for n in (1, 2, 3):
         waiting(buffer, n)
@@ -218,14 +227,16 @@ def test_a_crash_while_splitting_a_rejected_batch_loads_nothing_twice(world):
     assert buffer.under("batches/") == [] and bad.replace("inbox/", "rejected/") in buffer.files
 
 
-def test_a_batch_whose_files_have_all_gone_only_loses_its_record(world):
+@then("a batch whose files have all gone only loses its record")
+def a_batch_whose_files_have_all_gone_only_loses_its_record(world):
     scanner, buffer, bigquery, _ = world
     buffer.files["batches/old.json"] = json.dumps({"files": ["inbox/calls/gone.avro"], "attempt": 0}).encode()
     scanner.tick([DATASET])
     assert bigquery.posts == 0 and not left(buffer)
 
 
-def test_new_files_wait_while_an_unfinished_batch_does(world):
+@then("new files wait while an unfinished batch does")
+def new_files_wait_while_an_unfinished_batch_does(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     bigquery.answer = "running"
@@ -238,7 +249,8 @@ def test_new_files_wait_while_an_unfinished_batch_does(world):
     assert "did not finish" in statuses[-1]["problems"] and statuses[-1]["inbox_files"] == 3  # the pod's own last report waits too
 
 
-def test_a_job_that_failed_in_a_way_that_may_pass_goes_again_as_a_new_job(world):
+@then("a job that failed in a way that may pass goes again as a new job")
+def a_job_that_failed_in_a_way_that_may_pass_goes_again_as_a_new_job(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     bigquery.fail_jobs = 1
@@ -250,7 +262,8 @@ def test_a_job_that_failed_in_a_way_that_may_pass_goes_again_as_a_new_job(world)
     assert ids(bigquery) == ["r1"] and not left(buffer) and len(bigquery.call_jobs) == 2
 
 
-def test_bad_files_alone_move_to_rejected(world):
+@then("bad files alone move to rejected")
+def bad_files_alone_move_to_rejected(world):
     scanner, buffer, bigquery, statuses = world
     for n in (1, 2, 4):
         waiting(buffer, n)
@@ -264,7 +277,8 @@ def test_bad_files_alone_move_to_rejected(world):
     assert statuses[0]["rejected_oldest_seconds"] > 0 and "invalid" in statuses[0]["problems"]
 
 
-def test_finding_a_bad_file_takes_few_jobs(world):
+@then("finding a bad file takes few jobs")
+def finding_a_bad_file_takes_few_jobs(world):
     scanner, buffer, bigquery, _ = world
     for n in range(1, 17):
         waiting(buffer, n)
@@ -273,7 +287,8 @@ def test_finding_a_bad_file_takes_few_jobs(world):
     assert len(ids(bigquery)) == 16 and bigquery.posts <= 12
 
 
-def test_a_file_that_isnt_avro_or_isnt_call_records_is_rejected_without_a_job(world):
+@then("a file that isnt avro or isnt call records is rejected without a job")
+def a_file_that_isnt_avro_or_isnt_call_records_is_rejected_without_a_job(world):
     scanner, buffer, bigquery, statuses = world
     buffer.files["inbox/calls/2027-01-15/broken.avro"] = AVRO + b"junk"
     scanner.tick([DATASET])
@@ -281,7 +296,8 @@ def test_a_file_that_isnt_avro_or_isnt_call_records_is_rejected_without_a_job(wo
     assert "can't be read" in statuses[0]["problems"]
 
 
-def test_rows_that_cant_be_call_records_are_rejected(world, monkeypatch):
+@then("rows that cant be call records are rejected")
+def rows_that_cant_be_call_records_are_rejected(world, monkeypatch):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     monkeypatch.setattr("integrations.ingest.inbox.encode", lambda rows, status=None: (_ for _ in ()).throw(ValueError("no")))
@@ -290,7 +306,8 @@ def test_rows_that_cant_be_call_records_are_rejected(world, monkeypatch):
     assert "not call records" in statuses[0]["problems"]
 
 
-def test_the_days_job_limit_keeps_files_waiting(world):
+@then("the days job limit keeps files waiting")
+def the_days_job_limit_keeps_files_waiting(world):
     scanner, buffer, bigquery, statuses = world
     for _ in range(JOBS_PER_TABLE_PER_DAY):
         scanner.jobs.spend(DATASET)
@@ -300,7 +317,8 @@ def test_the_days_job_limit_keeps_files_waiting(world):
     assert statuses[0]["jobs_today"] == JOBS_PER_TABLE_PER_DAY and "load jobs" in statuses[0]["problems"]
 
 
-def test_a_batch_is_kept_to_what_fits_in_memory(world):
+@then("a batch is kept to what fits in memory")
+def a_batch_is_kept_to_what_fits_in_memory(world):
     scanner, _, _, _ = world
     many = [Waiting(f"f{n}", 1, 0.0) for n in range(MAX_BATCH_FILES + 5)]
     assert len(scanner._choose(many)) == MAX_BATCH_FILES
@@ -309,7 +327,8 @@ def test_a_batch_is_kept_to_what_fits_in_memory(world):
     assert scanner._choose([Waiting("huge", MAX_BATCH_BYTES + 1, 0.0)]) == ["huge"]
 
 
-def test_storage_down_leaves_everything_and_says_so(world):
+@then("storage down leaves everything and says so")
+def storage_down_leaves_everything_and_says_so(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     buffer.down_for = {"GET"}
@@ -318,7 +337,8 @@ def test_storage_down_leaves_everything_and_says_so(world):
     assert statuses[0]["storage_ok"] is False and "no answer" in statuses[0]["problems"]
 
 
-def test_a_batch_record_that_cant_be_written_means_no_load(world):
+@then("a batch record that cant be written means no load")
+def a_batch_record_that_cant_be_written_means_no_load(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     buffer.down_for = {"PUT"}
@@ -327,7 +347,8 @@ def test_a_batch_record_that_cant_be_written_means_no_load(world):
     assert "no answer" in statuses[0]["problems"]
 
 
-def test_a_refusal_says_what_was_refused():
+@then("a refusal says what was refused")
+def a_refusal_says_what_was_refused():
     class Refusing:
         def send(self, request, timeout):
             return Response(403, b"{}")
@@ -335,7 +356,8 @@ def test_a_refusal_says_what_was_refused():
         Inbox(Refusing(), lambda: "pod-token", BASE).put(DATASET, "inbox/calls/a.avro", AVRO)
 
 
-def test_one_projects_bad_day_doesnt_stop_the_next(world):
+@then("one projects bad day doesnt stop the next")
+def one_projects_bad_day_doesnt_stop_the_next(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     real = scanner._work
@@ -349,7 +371,8 @@ def test_one_projects_bad_day_doesnt_stop_the_next(world):
     assert ids(bigquery) == ["r1"] and statuses[1]["dataset"] == DATASET
 
 
-def test_backlog_is_reported_with_its_age(world):
+@then("backlog is reported with its age")
+def backlog_is_reported_with_its_age(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1)
     waiting(buffer, 2)
@@ -360,7 +383,8 @@ def test_backlog_is_reported_with_its_age(world):
     assert status["inbox_oldest_seconds"] == 600
 
 
-def test_a_senders_report_reaches_the_status_table_and_not_calls(world):
+@then("a senders report reaches the status table and not calls")
+def a_senders_report_reaches_the_status_table_and_not_calls(world):
     scanner, buffer, bigquery, _ = world
     waiting(buffer, 1, report(calls=1, drops=3))
     scanner.tick([DATASET])
@@ -369,7 +393,8 @@ def test_a_senders_report_reaches_the_status_table_and_not_calls(world):
     assert scanner.jobs.used(DATASET) == 1 and scanner.jobs.used(DATASET, STATUS_TABLE) == 1
 
 
-def test_an_idle_senders_file_has_a_report_and_spends_no_calls_job(world):
+@then("an idle senders file has a report and spends no calls job")
+def an_idle_senders_file_has_a_report_and_spends_no_calls_job(world):
     scanner, buffer, bigquery, _ = world
     buffer.files["inbox/calls/2027-01-15/075000-web-idle.avro"] = encode([], report(calls=0))
     scanner.tick([DATASET])
@@ -377,7 +402,8 @@ def test_an_idle_senders_file_has_a_report_and_spends_no_calls_job(world):
     assert [r["calls"] for r in bigquery.status_rows] == [0]
 
 
-def test_many_reports_are_one_job(world):
+@then("many reports are one job")
+def many_reports_are_one_job(world):
     scanner, buffer, bigquery, _ = world
     for n in (1, 2, 3):
         waiting(buffer, n, report(sender=f"web-{n}"))
@@ -385,7 +411,8 @@ def test_many_reports_are_one_job(world):
     assert len(bigquery.status_jobs) == 1 and len(bigquery.status_rows) == 3
 
 
-def test_the_pod_reports_each_cycle_and_it_loads_on_the_next(world):
+@then("the pod reports each cycle and it loads on the next")
+def the_pod_reports_each_cycle_and_it_loads_on_the_next(world):
     scanner, buffer, bigquery, _ = world
     scanner.tick([DATASET])
     own = [n for n in buffer.files if "-ingest-" in n]
@@ -397,7 +424,8 @@ def test_the_pod_reports_each_cycle_and_it_loads_on_the_next(world):
     assert own[0] not in buffer.files and bigquery.posts == 0
 
 
-def test_the_pods_report_says_what_went_wrong(world):
+@then("the pods report says what went wrong")
+def the_pods_report_says_what_went_wrong(world):
     scanner, buffer, _, statuses = world
     buffer.files["inbox/calls/2027-01-15/broken.avro"] = AVRO + b"junk"
     scanner.tick([DATASET])
@@ -406,7 +434,8 @@ def test_the_pods_report_says_what_went_wrong(world):
     assert "can't be read" in statuses[0]["problems"]
 
 
-def test_reports_arent_loaded_twice_when_the_calls_go_again(world):
+@then("reports arent loaded twice when the calls go again")
+def reports_arent_loaded_twice_when_the_calls_go_again(world):
     scanner, buffer, bigquery, _ = world
     waiting(buffer, 1, report())
     bigquery.fail_jobs = 1
@@ -416,7 +445,8 @@ def test_reports_arent_loaded_twice_when_the_calls_go_again(world):
     assert ids(bigquery) == ["r1"] and [r["sender"] for r in bigquery.status_rows if r["kind"] == "sender"] == ["web-1"]
 
 
-def test_a_crash_after_the_reports_loaded_doesnt_load_them_again(world):
+@then("a crash after the reports loaded doesnt load them again")
+def a_crash_after_the_reports_loaded_doesnt_load_them_again(world):
     scanner, buffer, bigquery, _ = world
     waiting(buffer, 1, report())
     buffer.down_for = {"DELETE"}
@@ -427,7 +457,8 @@ def test_a_crash_after_the_reports_loaded_doesnt_load_them_again(world):
     assert ids(bigquery) == ["r1"] and not left(buffer)
 
 
-def test_a_report_job_that_failed_goes_again_before_the_calls(world):
+@then("a report job that failed goes again before the calls")
+def a_report_job_that_failed_goes_again_before_the_calls(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1, report())
     bigquery.fail_status = 1
@@ -438,7 +469,8 @@ def test_a_report_job_that_failed_goes_again_before_the_calls(world):
     assert len([r for r in bigquery.status_rows if r["kind"] == "sender"]) == 1
 
 
-def test_rejected_reports_dont_hold_up_the_calls(world):
+@then("rejected reports dont hold up the calls")
+def rejected_reports_dont_hold_up_the_calls(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1, report())
     bigquery.refuse_status = True
@@ -446,14 +478,16 @@ def test_rejected_reports_dont_hold_up_the_calls(world):
     assert ids(bigquery) == ["r1"] and not left(buffer) and "reports rejected" in statuses[0]["problems"]
 
 
-def test_a_report_that_isnt_one_only_loses_the_report(world):
+@then("a report that isnt one only loses the report")
+def a_report_that_isnt_one_only_loses_the_report(world):
     scanner, buffer, bigquery, statuses = world
     waiting(buffer, 1, {"kind": "sender"})
     scanner.tick([DATASET])
     assert ids(bigquery) == ["r1"] and bigquery.status_rows == [] and "bad report" in statuses[0]["problems"]
 
 
-def test_the_status_table_has_its_own_days_jobs(world):
+@then("the status table has its own days jobs")
+def the_status_table_has_its_own_days_jobs(world):
     scanner, buffer, bigquery, statuses = world
     for _ in range(JOBS_PER_TABLE_PER_DAY):
         scanner.jobs.spend(DATASET, STATUS_TABLE)
@@ -483,7 +517,8 @@ def signals_world():
     return scanner, buffer, bigquery, statuses
 
 
-def test_signals_load_into_their_own_table_from_their_own_tenant_and_leave(signals_world):
+@then("signals load into their own table from their own tenant and leave")
+def signals_load_into_their_own_table_from_their_own_tenant_and_leave(signals_world):
     scanner, buffer, bigquery, statuses = signals_world
     for n in (1, 2):
         buffer.files[f"inbox/signals/2027-01-15/0750{n:02d}-evaluator-{n}.avro"] = encode_signals([signal(n)])
@@ -498,7 +533,8 @@ def test_signals_load_into_their_own_table_from_their_own_tenant_and_leave(signa
     assert all(path.startswith(("list", "inbox/", "batches/")) for _, path in buffer.sent)
 
 
-def test_a_file_in_the_signals_inbox_that_isnt_signals_is_rejected(signals_world):
+@then("a file in the signals inbox that isnt signals is rejected")
+def a_file_in_the_signals_inbox_that_isnt_signals_is_rejected(signals_world):
     scanner, buffer, bigquery, statuses = signals_world
     name = "inbox/signals/2027-01-15/075000-evaluator-x.avro"
     buffer.files[name] = encode([record(1)])
@@ -508,22 +544,37 @@ def test_a_file_in_the_signals_inbox_that_isnt_signals_is_rejected(signals_world
     assert "not signals" in statuses[0]["problems"]
 
 
-def test_signals_are_the_same_bytes_for_the_same_rows():
+@then("signals are the same bytes for the same rows")
+def signals_are_the_same_bytes_for_the_same_rows():
     rows = [signal(1), signal(2, ended_at=datetime(2027, 1, 15, 8, 0, tzinfo=timezone.utc))]
     assert encode_signals(rows) == encode_signals([dict(r) for r in rows])
     assert decode_signals(encode_signals(rows)) == rows
 
 
-@pytest.mark.parametrize(("text", "tenants"), [
-    ("", {}), ("  ", {}), ('{"tenant": "signals", "dataset": "observability"}', {"observability": "signals"})])
-def test_ingest_signals_names_the_tenant_and_dataset(text, tenants):
+@then("ingest signals names the tenant and dataset")
+def ingest_signals_names_the_tenant_and_dataset():
+    """Every case of the parametrized test this was, in turn."""
+    for case0 in [
+    ("", {}), ("  ", {}), ('{"tenant": "signals", "dataset": "observability"}', {"observability": "signals"})]:
+        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
+        _case_ingest_signals_names_the_tenant_and_dataset(text=case0[0], tenants=case0[1])
+
+
+def _case_ingest_signals_names_the_tenant_and_dataset(text, tenants):
     found, kinds = signals(text)
     assert found == tenants
     assert kinds == {dataset: SIGNALS for dataset in tenants}
 
 
-@pytest.mark.parametrize("text", ['["signals"]', '{"tenant": "signals"}', '{"tenant": "", "dataset": "observability"}'])
-def test_a_wrong_ingest_signals_is_refused(text):
+@then("a wrong ingest signals is refused")
+def a_wrong_ingest_signals_is_refused():
+    """Every case of the parametrized test this was, in turn."""
+    for text in ['["signals"]', '{"tenant": "signals"}', '{"tenant": "", "dataset": "observability"}']:
+        text = text.values[0] if type(text).__name__ == "ParameterSet" else text
+        _case_a_wrong_ingest_signals_is_refused(text=text)
+
+
+def _case_a_wrong_ingest_signals_is_refused(text):
     with pytest.raises(ValueError, match="INGEST_SIGNALS is"):
         signals(text)
 
@@ -535,7 +586,8 @@ def need_state(n: int, **fields) -> dict:
             "walk_started_at": moment, **fields}
 
 
-def test_need_states_load_into_their_own_table_from_their_own_tenant_and_leave():
+@then("need states load into their own table from their own tenant and leave")
+def need_states_load_into_their_own_table_from_their_own_tenant_and_leave():
     buffer, bigquery = FakeBuffer(), PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
     statuses: list[dict] = []
@@ -555,13 +607,15 @@ def test_need_states_load_into_their_own_table_from_their_own_tenant_and_leave()
     assert "can't be read" in statuses[0]["problems"]
 
 
-def test_need_states_are_the_same_bytes_for_the_same_rows():
+@then("need states are the same bytes for the same rows")
+def need_states_are_the_same_bytes_for_the_same_rows():
     rows = [need_state(1), need_state(2, state="drift")]
     assert encode_need_states(rows) == encode_need_states([dict(r) for r in rows])
     assert decode_need_states(encode_need_states(rows)) == rows
 
 
-def test_ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
+@then("ingest need states names its tenant and dataset beside the signals")
+def ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
     tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                              '{"tenant": "need-states", "dataset": "convergence"}')
     assert tenants == {"observability": "signals", "convergence": "need-states"}
@@ -580,7 +634,8 @@ def pubkit_check(n: int, **fields) -> dict:
             "run_started_at": moment, **fields}
 
 
-def test_pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
+@then("pubkit checks load into their own table from their own tenant and leave")
+def pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
     buffer, bigquery = FakeBuffer(), PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
     statuses: list[dict] = []
@@ -600,13 +655,15 @@ def test_pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave
     assert "can't be read" in statuses[0]["problems"]
 
 
-def test_pubkit_checks_are_the_same_bytes_for_the_same_rows():
+@then("pubkit checks are the same bytes for the same rows")
+def pubkit_checks_are_the_same_bytes_for_the_same_rows():
     rows = [pubkit_check(1), pubkit_check(2, check="sync", status="fail")]
     assert encode_pubkit_checks(rows) == encode_pubkit_checks([dict(r) for r in rows])
     assert decode_pubkit_checks(encode_pubkit_checks(rows)) == rows
 
 
-def test_ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
+@then("ingest pubkit checks names its tenant and dataset beside the others")
+def ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
     tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                                    '{"tenant": "need-states", "dataset": "convergence"}',
                                    '{"tenant": "pubkit-checks", "dataset": "platform"}')
@@ -618,7 +675,8 @@ def test_ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
         named_buffers("", '{"tenant": "need-states", "dataset": "x"}', '{"tenant": "pubkit-checks", "dataset": "x"}')
 
 
-def test_the_scan_passes_once_at_start_and_then_each_interval():
+@then("the scan passes once at start and then each interval")
+def the_scan_passes_once_at_start_and_then_each_interval():
     events: list[str] = []
 
     class Stop(Exception):

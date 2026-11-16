@@ -17,6 +17,9 @@ from integrations.ingest.app import create_app
 from integrations.avrofile import decode, encode
 from integrations.ingest.bigquery import BigQueryLoader, Outcome
 from integrations.ingest.google_token import GoogleToken
+from pytest_bdd import scenarios, then
+
+scenarios("ingest.feature")
 
 BASE = "https://storage.example"
 
@@ -68,17 +71,25 @@ class FakeBigQuery:
         return Response(200, json.dumps({"status": state}).encode())
 
 
-def test_avro_is_the_same_bytes_for_the_same_records_and_keeps_every_field():
+@then("avro is the same bytes for the same records and keeps every field")
+def avro_is_the_same_bytes_for_the_same_records_and_keeps_every_field():
     rows = [record(1), record(2, status=None)]
     first, again = encode(rows), encode([dict(r) for r in rows])
     assert first == again
     assert decode(encode(rows)) == rows
 
 
-@pytest.mark.parametrize(("answer", "outcome"), [
+@then("a load says whether another try may work")
+def a_load_says_whether_another_try_may_work():
+    """Every case of the parametrized test this was, in turn."""
+    for case0 in [
     ("silent", Outcome.RETRY), ("busy", Outcome.RETRY), ("job-busy", Outcome.RETRY), ("running", Outcome.RETRY),
-    ("forbidden", Outcome.RETRY), ("bad-request", Outcome.REJECTED), ("invalid", Outcome.REJECTED), ("ok", Outcome.LOADED)])
-def test_a_load_says_whether_another_try_may_work(answer, outcome):
+    ("forbidden", Outcome.RETRY), ("bad-request", Outcome.REJECTED), ("invalid", Outcome.REJECTED), ("ok", Outcome.LOADED)]:
+        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
+        _case_a_load_says_whether_another_try_may_work(answer=case0[0], outcome=case0[1])
+
+
+def _case_a_load_says_whether_another_try_may_work(answer, outcome):
     bigquery = FakeBigQuery()
     bigquery.answer = answer
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
@@ -88,7 +99,8 @@ def test_a_load_says_whether_another_try_may_work(answer, outcome):
     assert result.ended == (answer in ("job-busy", "invalid"))
 
 
-def test_a_lost_answer_finds_the_job_already_there():
+@then("a lost answer finds the job already there")
+def a_lost_answer_finds_the_job_already_there():
     bigquery = FakeBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
     loader = BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2)
@@ -97,7 +109,8 @@ def test_a_lost_answer_finds_the_job_already_there():
     assert loader.load("ds", data, "calls_x").outcome is Outcome.LOADED and len(bigquery.rows) == 1
 
 
-def test_ingest_answers_health_and_has_no_public_docs():
+@then("ingest answers health and has no public docs")
+def ingest_answers_health_and_has_no_public_docs():
     http = TestClient(create_app())
     assert http.get("/healthz").json() == {"status": "ok", "unhealthy": []}
     assert http.get("/livez").json() == {"status": "ok"}
@@ -105,7 +118,8 @@ def test_ingest_answers_health_and_has_no_public_docs():
     assert http.post("/records", json={}).status_code in (404, 405)
 
 
-def test_a_scanner_that_stops_makes_the_pod_unready_but_not_dead():
+@then("a scanner that stops makes the pod unready but not dead")
+def a_scanner_that_stops_makes_the_pod_unready_but_not_dead():
     from integrations.ingest.main import scanning
     from integrations.ingest.inbox import INTERVAL_SECONDS
     assert scanning(3 * INTERVAL_SECONDS - 1).ok and not scanning(3 * INTERVAL_SECONDS).ok
@@ -115,14 +129,16 @@ def test_a_scanner_that_stops_makes_the_pod_unready_but_not_dead():
     assert http.get("/livez").status_code == 200
 
 
-def test_the_record_fields_are_the_schemas():
+@then("the record fields are the schemas")
+def the_record_fields_are_the_schemas():
     schema = json.loads((Path(__file__).parents[2] / "src/integrations/schemas/call-record.schema.json").read_text())
     from integrations.avrofile import SCHEMA
     from integrations.calls import CallRecord
     assert set(schema["required"]) == set(CallRecord.__dataclass_fields__) == {f["name"] for f in SCHEMA["fields"]}
 
 
-def test_a_google_token_is_traded_in_once_and_reused():
+@then("a google token is traded in once and reused")
+def a_google_token_is_traded_in_once_and_reused():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
@@ -144,7 +160,8 @@ def test_a_google_token_is_traded_in_once_and_reused():
     assert token() == "second"
 
 
-def test_a_refused_google_token_is_a_refusal():
+@then("a refused google token is a refusal")
+def a_refused_google_token_is_a_refusal():
     class Refused401:
         def send(self, request, timeout):
             return Response(401, b"{}")
@@ -166,7 +183,8 @@ EXTERNAL = {"type": "external_account",
                                                  "reader@a-project.iam.gserviceaccount.com:generateAccessToken"}
 
 
-def test_a_federated_token_trades_the_pods_token_then_impersonates_and_is_reused():
+@then("a federated token trades the pods token then impersonates and is reused")
+def a_federated_token_trades_the_pods_token_then_impersonates_and_is_reused():
     from urllib.parse import parse_qs
 
     from integrations.ingest.google_token import FederatedToken, google_token, project_of
@@ -194,7 +212,8 @@ def test_a_federated_token_trades_the_pods_token_then_impersonates_and_is_reused
     assert isinstance(google_token(Caller("r", transport=Google()), {"client_email": "w"}), GoogleToken)
 
 
-def test_a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credential_is_said():
+@then("a federated token refused at either step is a refusal and a bad credential is said")
+def a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credential_is_said():
     from integrations.calls import Refused
     from integrations.ingest.google_token import FederatedToken, project_of
 
@@ -217,7 +236,8 @@ def test_a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credent
         project_of({"type": "external_account"})
 
 
-def test_the_ingests_token_its_credential_and_the_provider_name_one_audience():
+@then("the ingests token its credential and the provider name one audience")
+def the_ingests_token_its_credential_and_the_provider_name_one_audience():
     """A mismatch fails only at run time, as Google's STS refusing the token."""
     import yaml
 
