@@ -9,6 +9,9 @@ import pytest
 from integrations import cli
 from integrations.calls import Caller, Check, MemorySink, Refused, Replay, Unavailable
 from integrations.clients.slack import (FakeSlackChannels, FakeSlackPost, SlackChannel, SlackChannels, SlackPost)
+from pytest_bdd import scenarios, then
+
+scenarios("slack.feature")
 
 API = "https://slack.com/api"
 
@@ -26,7 +29,8 @@ def params(request):
     return {k: v[0] for k, v in parse_qs(request.body.decode()).items()}
 
 
-def test_a_post_uses_the_bot_token_and_is_recorded():
+@then("a post uses the bot token and is recorded")
+def a_post_uses_the_bot_token_and_is_recorded():
     made, sink, transport = caller({f"POST {API}/chat.postMessage": ok()})
     SlackPost(made, lambda: "bot").post("C1", "hello")
     request = transport.sent[0]
@@ -35,27 +39,31 @@ def test_a_post_uses_the_bot_token_and_is_recorded():
     assert (sink.records[0].plugin, sink.records[0].operation) == ("slack.post", "post")
 
 
-def test_slacks_refusal_in_a_200_is_a_refusal():
+@then("slacks refusal in a 200 is a refusal")
+def slacks_refusal_in_a_200_is_a_refusal():
     made, sink, _ = caller({f"POST {API}/chat.postMessage": {"status": 200, "json": {"ok": False, "error": "no_channel"}}})
     with pytest.raises(Refused, match="no_channel"):
         SlackPost(made, lambda: "bot").post("C1", "hello")
     assert sink.records[0].outcome == "refused"
 
 
-def test_an_http_refusal_is_a_refusal():
+@then("an http refusal is a refusal")
+def an_http_refusal_is_a_refusal():
     made, _, _ = caller({f"POST {API}/chat.postMessage": {"status": 403, "json": {}}})
     with pytest.raises(Refused, match="HTTP 403"):
         SlackPost(made, lambda: "bot").post("C1", "hello")
 
 
-def test_a_post_is_not_repeated_as_it_could_be_seen_twice():
+@then("a post is not repeated as it could be seen twice")
+def a_post_is_not_repeated_as_it_could_be_seen_twice():
     made, _, transport = caller({f"POST {API}/chat.postMessage": {"status": 503, "json": {}}})
     with pytest.raises(Unavailable):
         SlackPost(made, lambda: "bot").post("C1", "hello")
     assert len(transport.sent) == 1
 
 
-def test_check_says_whether_the_token_works():
+@then("check says whether the token works")
+def check_says_whether_the_token_works():
     made, _, transport = caller({f"POST {API}/auth.test": ok(user_id="U1")})
     assert SlackPost(made, lambda: "bot").check() == Check("slack.post", True)
     assert SlackChannels(made, lambda: "owner", lambda: "bot").check() == Check("slack.channel-heal", True)
@@ -66,7 +74,8 @@ def test_check_says_whether_the_token_works():
     assert not SlackChannels(made, lambda: "owner", lambda: "bot").check().ok
 
 
-def test_channels_follow_every_page():
+@then("channels follow every page")
+def channels_follow_every_page():
     pages = [ok(channels=[{"id": "C1", "name": "one", "is_archived": True, "creator": "U1",
                            "purpose": {"value": "why"}}], response_metadata={"next_cursor": "more"}),
              ok(channels=[{"id": "C2", "name": "two"}], response_metadata={"next_cursor": ""})]
@@ -77,7 +86,8 @@ def test_channels_follow_every_page():
     assert params(transport.sent[0])["exclude_archived"] == "false"
 
 
-def test_a_new_channel_invites_the_bot_with_the_owners_token():
+@then("a new channel invites the bot with the owners token")
+def a_new_channel_invites_the_bot_with_the_owners_token():
     made, _, transport = caller({
         f"POST {API}/conversations.create": ok(channel={"id": "C9", "name": "new"}),
         f"POST {API}/auth.test": ok(user_id="U-bot"),
@@ -89,13 +99,20 @@ def test_a_new_channel_invites_the_bot_with_the_owners_token():
     assert params(by_url["conversations.invite"]) == {"channel": "C9", "users": "U-bot"}
 
 
-@pytest.mark.parametrize(("method", "args", "called", "sent"), [
+@then("each change uses the owners token")
+def each_change_uses_the_owners_token():
+    """Every case of the parametrized test this was, in turn."""
+    for case0 in [
     ("rename", ("C1", "n"), "conversations.rename", {"channel": "C1", "name": "n"}),
     ("archive", ("C1",), "conversations.archive", {"channel": "C1"}),
     ("unarchive", ("C1",), "conversations.unarchive", {"channel": "C1"}),
     ("set_purpose", ("C1", "why"), "conversations.setPurpose", {"channel": "C1", "purpose": "why"}),
-])
-def test_each_change_uses_the_owners_token(method, args, called, sent):
+]:
+        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
+        _case_each_change_uses_the_owners_token(method=case0[0], args=case0[1], called=case0[2], sent=case0[3])
+
+
+def _case_each_change_uses_the_owners_token(method, args, called, sent):
     made, sink, transport = caller({f"POST {API}/{called}": ok()})
     getattr(SlackChannels(made, lambda: "owner", lambda: "bot"), method)(*args)
     assert params(transport.sent[0]) == sent
@@ -103,7 +120,8 @@ def test_each_change_uses_the_owners_token(method, args, called, sent):
     assert (sink.records[0].plugin, sink.records[0].operation) == ("slack.channel-heal", "change")
 
 
-def test_the_fakes_answer_as_the_clients_do():
+@then("the fakes answer as the clients do")
+def the_fakes_answer_as_the_clients_do():
     post = FakeSlackPost()
     post.post("C1", "hi")
     assert post.posted == [("C1", "hi")] and post.check().ok
@@ -124,7 +142,8 @@ def test_the_fakes_answer_as_the_clients_do():
     assert channels.check().ok and not FakeSlackChannels(working=False).check().ok
 
 
-def test_the_command_posts_with_the_token_from_the_environment(monkeypatch, capsys):
+@then("the command posts with the token from the environment")
+def the_command_posts_with_the_token_from_the_environment(monkeypatch, capsys):
     transport = Replay({f"POST {API}/chat.postMessage": ok()})
     monkeypatch.setenv("SLACK_TOKEN", "from-env")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
@@ -133,7 +152,8 @@ def test_the_command_posts_with_the_token_from_the_environment(monkeypatch, caps
     assert transport.sent[0].headers["Authorization"] == "Bearer from-env"
 
 
-def test_the_command_says_when_slack_refuses(monkeypatch, capsys):
+@then("the command says when slack refuses")
+def the_command_says_when_slack_refuses(monkeypatch, capsys):
     transport = Replay({f"POST {API}/chat.postMessage": {"status": 200, "json": {"ok": False, "error": "nope"}}})
     monkeypatch.setenv("SLACK_TOKEN", "t")
     monkeypatch.setattr(cli, "Caller", lambda repo, app: Caller(repo, app, transport=transport))

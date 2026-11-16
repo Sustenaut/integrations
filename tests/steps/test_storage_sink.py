@@ -15,6 +15,9 @@ from integrations.storage_sink import StorageSink, first_wait
 
 from .test_inbox import FakeBuffer, PickyBigQuery
 from .test_ingest import BASE, record
+from pytest_bdd import scenarios, then
+
+scenarios("storage-sink.feature")
 
 START = 1_800_000_000.0
 
@@ -36,7 +39,8 @@ def files(buffer):
     return buffer.under("inbox/")
 
 
-def test_an_idle_cycle_still_writes_a_report(world):
+@then("an idle cycle still writes a report")
+def an_idle_cycle_still_writes_a_report(world):
     sink, buffer, now = world
     now[0] += 120
     sink.flush()
@@ -50,7 +54,8 @@ def test_an_idle_cycle_still_writes_a_report(world):
         "page_ms_high": None, "cold_start": True}
 
 
-def test_a_cycles_calls_are_one_file(world):
+@then("a cycles calls are one file")
+def a_cycles_calls_are_one_file(world):
     sink, buffer, now = world
     sink.write(call(1))
     sink.write(call(2, repo="b-repo"))
@@ -66,7 +71,8 @@ def test_a_cycles_calls_are_one_file(world):
     assert file_status(buffer.files[files(buffer)[1]])["cycle_start"] == "2027-01-15T08:02:00Z"
 
 
-def test_each_project_has_its_own_tenant():
+@then("each project has its own tenant")
+def each_project_has_its_own_tenant():
     sent = []
 
     class Taking:
@@ -80,7 +86,8 @@ def test_each_project_has_its_own_tenant():
     assert sorted(p.split("/")[1] for p in sent) == ["calls-one", "calls-two"]
 
 
-def test_past_the_limit_the_oldest_go_and_are_counted(world):
+@then("past the limit the oldest go and are counted")
+def past_the_limit_the_oldest_go_and_are_counted(world):
     sink, buffer, _ = world
     for n in range(1, 6):
         sink.write(call(n))
@@ -90,20 +97,23 @@ def test_past_the_limit_the_oldest_go_and_are_counted(world):
     assert file_status(data)["drops"] == 2 and file_status(data)["buffer_size"] == 3
 
 
-def test_a_record_for_a_project_with_no_buffer_is_counted(world):
+@then("a record for a project with no buffer is counted")
+def a_record_for_a_project_with_no_buffer_is_counted(world):
     sink, buffer, _ = world
     sink.write(call(1, repo="elsewhere"))
     sink.flush()
     assert file_status(buffer.files[files(buffer)[0]])["drops"] == 1
 
 
-def test_writing_a_record_never_fails_with_no_projects():
+@then("writing a record never fails with no projects")
+def writing_a_record_never_fails_with_no_projects():
     sink = StorageSink({}, transport=FakeBuffer(), token=lambda: "t", base_url=BASE, sender="s", start=False)
     sink.write(call(1))
     sink.flush()
 
 
-def test_a_refused_file_goes_again_as_it_was_and_the_failures_are_reported(world):
+@then("a refused file goes again as it was and the failures are reported")
+def a_refused_file_goes_again_as_it_was_and_the_failures_are_reported(world):
     sink, buffer, now = world
     sink.write(call(1))
     buffer.down_for = {"PUT"}
@@ -125,7 +135,8 @@ def test_a_refused_file_goes_again_as_it_was_and_the_failures_are_reported(world
     assert file_status(buffer.files[newer])["storage_failures"] == 2
 
 
-def test_a_lost_answer_cant_double_a_files_calls(world):
+@then("a lost answer cant double a files calls")
+def a_lost_answer_cant_double_a_files_calls(world):
     sink, buffer, now = world
     real = buffer.send
     lost = [True]
@@ -147,7 +158,8 @@ def test_a_lost_answer_cant_double_a_files_calls(world):
     assert rows == ["r1"]
 
 
-def test_a_token_that_cant_be_read_is_a_failed_write(world):
+@then("a token that cant be read is a failed write")
+def a_token_that_cant_be_read_is_a_failed_write(world):
     sink, buffer, _ = world
 
     def no_token():
@@ -159,7 +171,8 @@ def test_a_token_that_cant_be_read_is_a_failed_write(world):
     assert sink.failures["ds"] == 1 and "ds" in sink.held
 
 
-def test_from_a_call_to_the_tables(world):
+@then("from a call to the tables")
+def from_a_call_to_the_tables(world):
     sink, buffer, now = world
     bigquery = PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
@@ -175,7 +188,8 @@ def test_from_a_call_to_the_tables(world):
     assert buffer.inbox() == []
 
 
-def test_with_flush_on_write_a_request_that_finds_the_file_overdue_writes_it():
+@then("with flush on write a request that finds the file overdue writes it")
+def with_flush_on_write_a_request_that_finds_the_file_overdue_writes_it():
     buffer = FakeBuffer()
     now = [START]
     sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
@@ -192,14 +206,16 @@ def test_with_flush_on_write_a_request_that_finds_the_file_overdue_writes_it():
     assert file_status(buffer.files[name])["cycle_start"] == "2027-01-15T08:00:00Z"
 
 
-def test_without_it_writing_never_waits_on_storage(world):
+@then("without it writing never waits on storage")
+def without_it_writing_never_waits_on_storage(world):
     sink, buffer, now = world
     now[0] += 600
     sink.write(call(1))
     assert files(buffer) == []
 
 
-def test_a_write_doesnt_flush_while_another_flush_is_under_way():
+@then("a write doesnt flush while another flush is under way")
+def a_write_doesnt_flush_while_another_flush_is_under_way():
     buffer = FakeBuffer()
     now = [START + 200]
     sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
@@ -213,14 +229,16 @@ def test_a_write_doesnt_flush_while_another_flush_is_under_way():
     assert len(files(buffer)) == 1
 
 
-def test_a_write_storage_didnt_take_is_said_in_the_log(world, capsys):
+@then("a write storage didnt take is said in the log")
+def a_write_storage_didnt_take_is_said_in_the_log(world, capsys):
     sink, buffer, _ = world
     buffer.down_for = {"PUT"}
     sink.flush()
     assert "storage didn't take inbox/calls/" in capsys.readouterr().err
 
 
-def test_a_refusal_says_storages_reason_and_a_missing_token_says_why(world, capsys):
+@then("a refusal says storages reason and a missing token says why")
+def a_refusal_says_storages_reason_and_a_missing_token_says_why(world, capsys):
     sink, buffer, _ = world
     buffer.send = lambda request, timeout: Response(401, b'{"error": "refused: a token for another audience"}')
 
@@ -233,14 +251,16 @@ def test_a_refusal_says_storages_reason_and_a_missing_token_says_why(world, caps
     assert "HTTP 401 refused: a token for another audience" in err and "no token to send: metadata server: timed out" in err
 
 
-def test_a_refusal_without_a_reason_still_says_its_status(world, capsys):
+@then("a refusal without a reason still says its status")
+def a_refusal_without_a_reason_still_says_its_status(world, capsys):
     sink, buffer, _ = world
     buffer.send = lambda request, timeout: Response(500, b"not json")
     sink.flush()
     assert "HTTP 500\n" in capsys.readouterr().err
 
 
-def test_page_times_become_the_windows_low_median_and_high(world):
+@then("page times become the windows low median and high")
+def page_times_become_the_windows_low_median_and_high(world):
     sink, buffer, now = world
     for ms in (120.4, 80, 3400, 95.6, 101):
         sink.page(ms)
@@ -250,7 +270,8 @@ def test_page_times_become_the_windows_low_median_and_high(world):
     assert (report["page_count"], report["page_ms_low"], report["page_ms_median"], report["page_ms_high"]) == (5, 80, 101, 3400)
 
 
-def test_only_the_first_window_is_a_cold_start_and_a_quiet_one_has_no_times(world):
+@then("only the first window is a cold start and a quiet one has no times")
+def only_the_first_window_is_a_cold_start_and_a_quiet_one_has_no_times(world):
     sink, buffer, now = world
     sink.page(50)
     now[0] += 120
@@ -262,7 +283,8 @@ def test_only_the_first_window_is_a_cold_start_and_a_quiet_one_has_no_times(worl
     assert second["page_count"] == 0 and second["page_ms_median"] is None
 
 
-def test_past_the_limit_page_times_are_still_counted(world, monkeypatch):
+@then("past the limit page times are still counted")
+def past_the_limit_page_times_are_still_counted(world, monkeypatch):
     import integrations.storage_sink as storage_sink
     monkeypatch.setattr(storage_sink, "PAGE_LIMIT", 3)
     sink, buffer, _ = world
@@ -273,7 +295,8 @@ def test_past_the_limit_page_times_are_still_counted(world, monkeypatch):
     assert report["page_count"] == 5 and report["page_ms_high"] == 30
 
 
-def test_page_times_reach_the_status_table(world):
+@then("page times reach the status table")
+def page_times_reach_the_status_table(world):
     sink, buffer, now = world
     bigquery = PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
@@ -288,6 +311,7 @@ def test_page_times_reach_the_status_table(world):
     assert (row["page_count"], row["page_ms_median"], row["cold_start"]) == (1, 250, True)
 
 
-def test_the_threads_first_file_comes_a_random_part_of_a_cycle_in():
+@then("the threads first file comes a random part of a cycle in")
+def the_threads_first_file_comes_a_random_part_of_a_cycle_in():
     assert first_wait(120, lambda: 0.25) == 30
     assert 0 <= first_wait(120) < 120

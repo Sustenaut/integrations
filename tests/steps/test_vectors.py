@@ -13,6 +13,9 @@ import pytest
 from integrations import registry
 from integrations.avrofile import decode, file_name, file_status
 from integrations.calls import Caller, MemorySink, Replay, Request, Unavailable
+from pytest_bdd import scenarios, then
+
+scenarios("vectors.feature")
 
 VECTORS = Path(__file__).resolve().parents[1] / "vectors"
 RECORD_SCHEMA = registry.load(registry.SCHEMAS / "call-record.schema.json")
@@ -24,9 +27,15 @@ def refusal(rule):
     return lambda response: response.json().get(rule["key"]) == rule["equals"]
 
 
-@pytest.mark.parametrize("path", [p for p in sorted(VECTORS.glob("*.json")) if p.name != "sink.json"],
-                         ids=lambda p: p.stem)
-def test_a_vector(path):
+@then("a vector")
+def a_vector():
+    """Every case of the parametrized test this was, in turn."""
+    for path in [p for p in sorted(VECTORS.glob("*.json")) if p.name != "sink.json"]:
+        path = path.values[0] if type(path).__name__ == "ParameterSet" else path
+        _case_a_vector(path=path)
+
+
+def _case_a_vector(path):
     vector = json.loads(path.read_text(encoding="utf-8"))
     sink, naps = MemorySink(), []
     transport = Replay(vector["responses"])
@@ -50,7 +59,8 @@ def test_a_vector(path):
     assert {k: record[k] for k in expect["record"]} == expect["record"]
 
 
-def test_a_file_the_js_sink_wrote_reads_as_its_records_and_report():
+@then("a file the js sink wrote reads as its records and report")
+def a_file_the_js_sink_wrote_reads_as_its_records_and_report():
     expected = json.loads((VECTORS / "sink.json").read_text(encoding="utf-8"))
     data = (VECTORS / "sink.avro").read_bytes()
     assert decode(data) == expected["records"]
