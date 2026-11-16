@@ -91,7 +91,7 @@ Then("an idle cycle still writes a report", function () {
   assert.equal(buffer.sent[0].init.headers.Authorization, "Bearer pod-token");
   assert.equal(buffer.sent[0].init.method, "PUT");
   assert.ok(buffer.sent[0].init.signal instanceof AbortSignal);
-})(scenarioContext);
+})();
 });
 
 Then("each dataset is its own tenant, and a cycle's calls are one file", function () {
@@ -105,7 +105,7 @@ Then("each dataset is its own tenant, and a cycle's calls are one file", functio
   const names = [...buffer.files.keys()];
   assert.deepEqual(names.map((n) => n.split("/")[0]), ["proj-a", "proj-b"]);
   assert.deepEqual([report(buffer.files.get(names[0])).calls, report(buffer.files.get(names[1])).calls], [2, 1]);
-})(scenarioContext);
+})();
 });
 
 Then("past the limit the oldest go and are counted, as are a project's with no buffer", function () {
@@ -120,7 +120,7 @@ Then("past the limit the oldest go and are counted, as are a project's with no b
   const none = new StorageSink({}, { sender: "s", bucket: { put: async () => {} } });
   none.write(record());
   await none.flush();
-})(scenarioContext);
+})();
 });
 
 Then("a refused file goes again as it was, under its name, and the failures are reported", function () {
@@ -186,7 +186,7 @@ Then("the token file is read for each request", function () {
   await sink.flush();
   assert.deepEqual(buffer.sent.map((s) => s.init.headers.Authorization), ["Bearer first", "Bearer second"]);
   assert.deepEqual(reads[0], ["/var/run/token", "utf8"]);
-})(scenarioContext);
+})();
 });
 
 Then("into an R2 bucket binding, under its prefix, for the storage Worker", function () {
@@ -206,7 +206,7 @@ Then("into an R2 bucket binding, under its prefix, for the storage Worker", func
   const prefixed = new StorageSink({ "a-repo": "ds" }, { sender: "s", bucket, prefix: "x/", flushOnWrite: false });
   await prefixed.flush();
   assert.match(put[2][0], /^x\/ds\/inbox\//);
-})(scenarioContext);
+})();
 });
 
 Then("a write that finds the file overdue sends it, and hands that to waitUntil", function () {
@@ -223,7 +223,7 @@ Then("a write that finds the file overdue sends it, and hands that to waitUntil"
   assert.equal(buffer.files.size, 1);
   assert.equal(report([...buffer.files.values()][0]).calls, 2);
   assert.deepEqual(sink.waiting.ds.map((r) => r.request_id), ["r3"]);
-})(scenarioContext);
+})();
 });
 
 Then("by default, a Worker's way: flush from write, with no timer", function () {
@@ -236,7 +236,7 @@ Then("by default, a Worker's way: flush from write, with no timer", function () 
   sink.write(record());
   await sink.flushing;
   assert.equal(buffer.files.size, 1);
-})(scenarioContext);
+})();
 });
 
 Then("in Node, start: true sends on a timer, first a random part of a cycle in, and close\\(\\) stops it", function () {
@@ -262,7 +262,7 @@ Then("a sink needs a sender and somewhere to send", function () {
   return (() => {
   assert.throws(() => new StorageSink({}, { url: "https://s", token: "t" }), /needs a sender/);
   assert.throws(() => new StorageSink({}, { sender: "s", url: "https://s" }), /needs a url and a token/);
-})(scenarioContext);
+})();
 });
 
 Then("page times become the window's low, median and high, rounded as Python rounds", function () {
@@ -279,7 +279,7 @@ Then("page times become the window's low, median and high, rounded as Python rou
   assert.deepEqual([first.page_count, first.page_ms_low, first.page_ms_median, first.page_ms_high, first.cold_start], [4, 1, 2, 9, true]);
   assert.deepEqual([second.page_ms_low, second.page_ms_median, second.page_ms_high, second.cold_start], [0, 2, 2, false]);
   assert.deepEqual([third.page_count, third.page_ms_median], [0, null]);
-})(scenarioContext);
+})();
 });
 
 Then("past the limit page times are still counted", function () {
@@ -289,7 +289,7 @@ Then("past the limit page times are still counted", function () {
   assert.equal(sink.pages.length, 10_000);
   await sink.flush();
   assert.equal(report([...buffer.files.values()][0]).page_count, 10_005);
-})(scenarioContext);
+})();
 });
 
 Then("the same records give the same bytes, and the name holds their hash", function () {
@@ -299,7 +299,7 @@ Then("the same records give the same bytes, and the name holds their hash", func
   assert.notDeepEqual(a, await encode([record(1)], { kind: "sender" }));
   assert.match(await fileName(START, "a b/c", a), /^inbox\/calls\/2027-01-15\/080000-a-b-c-[0-9a-f]{16}\.avro$/);
   assert.equal(metadata(await encode([]))["integrations.status"], undefined);
-})(scenarioContext);
+})();
 });
 
 // tests/vectors/sink.avro, which test_vectors.py reads with avrofile.decode and file_status.
@@ -327,5 +327,5 @@ Then("the file in tests\\/vectors\\/ is what the sink writes", function () {
   }
   assert.deepEqual(new Uint8Array(await readFile(new URL("sink.avro", VECTORS))), data);
   assert.deepEqual(JSON.parse(await readFile(new URL("sink.json", VECTORS), "utf8")), expected);
-})(scenarioContext);
+})();
 });

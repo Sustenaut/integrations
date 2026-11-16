@@ -97,7 +97,7 @@ Then("records are kept the moment they come, and the first sets the two-minute a
   assert.deepEqual([...(await storage.list({ prefix: "r:" })).values()].map((r) => r.request_id), ["r1", "r2"]);
   await post({ sender: "storage", records: [record(3)] });
   assert.equal(storage.alarm, START + 120_000, "a set alarm isn't moved");
-})(scenarioContext);
+})();
 });
 
 Then("the alarm writes one file of the cycle's records into the sender's buffer, and re-arms", function () {
@@ -114,7 +114,7 @@ Then("the alarm writes one file of the cycle's records into the sender's buffer,
   });
   assert.equal((await storage.list({ prefix: "r:" })).size, 0, "sent records are gone");
   assert.equal(storage.alarm, START + 240_000);
-})(scenarioContext);
+})();
 });
 
 Then("an idle cycle still writes a report, so a quiet sender can be told from a stopped one", function () {
@@ -127,7 +127,7 @@ Then("an idle cycle still writes a report, so a quiet sender can be told from a 
   }
   assert.equal(calls.files.size, 3);
   assert.deepEqual([...calls.files.values()].map((d) => metadata(d).calls), [0, 0, 0]);
-})(scenarioContext);
+})();
 });
 
 Then("a file R2 didn't take goes again as it was, under its name, and nothing is sent twice", function () {
@@ -160,7 +160,7 @@ Then("past the limit the oldest records go and are counted", function () {
   await object.alarm();
   const status = metadata([...calls.files.values()][0]);
   assert.deepEqual([status.calls, status.drops, status.buffer_size], [10_000, 3, 10_000]);
-})(scenarioContext);
+})();
 });
 
 Then("an instance is one sender's, and only a sender SENDERS names may use it", function () {
@@ -175,7 +175,7 @@ Then("an instance is one sender's, and only a sender SENDERS names may use it", 
   assert.equal((await post({}, "GET")).status, 404);
   const bad = await made().object.fetch(new Request("https://call-log/records", { method: "POST", body: "{" }));
   assert.equal(bad.status, 400);
-})(scenarioContext);
+})();
 });
 
 Then("an instance nobody has sent to does nothing on an alarm, and the Worker answers nothing itself", function () {
@@ -185,7 +185,7 @@ Then("an instance nobody has sent to does nothing on an alarm, and the Worker an
   assert.equal(calls.files.size, 0);
   assert.equal(storage.alarm, START + 120_000, "it re-arms, harmlessly");
   assert.equal((await worker.fetch(new Request("https://call-log/"))).status, 404);
-})(scenarioContext);
+})();
 });
 
 Then("the report is where health checks and statistics can join, as StorageSink's is", function () {
@@ -194,7 +194,7 @@ Then("the report is where health checks and statistics can join, as StorageSink'
     kind: "sender", sender: "s", version: "call-log", at: "2027-01-15T08:02:00Z", cycle_start: "2027-01-15T08:00:00Z",
     cycle_end: "2027-01-15T08:02:00Z", calls: 1, drops: 1, buffer_size: 4, storage_failures: 2,
   });
-})(scenarioContext);
+})();
 });
 
 // The binding a Worker gets for the object's namespace, here backed by a real CallLog.
@@ -221,7 +221,7 @@ Then("a sink keeps a request's records and sends them to its sender's object in 
   assert.deepEqual(b.names, ["storage"]);
   assert.deepEqual([...(await b.storage.list({ prefix: "r:" })).values()].map((r) => r.request_id), ["r1", "r2"]);
   assert.deepEqual(sink.pending, []);
-})(scenarioContext);
+})();
 });
 
 Then("a sink that can't send says so and lets the records go, never failing the request", function () {

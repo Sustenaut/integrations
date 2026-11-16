@@ -42,10 +42,10 @@ Then("caller.js gives every vector in tests\\/vectors\\/ what it expects", async
     assert.deepEqual([raised, status, replay.sent.length, naps], [expect.raises, expect.status, expect.sent, expect.sleeps]);
     const [record] = sink.records;
     assert.deepEqual(Object.fromEntries(Object.keys(expect.record).map((k) => [k, record[k]])), expect.record);
-  })(scenarioContext);
+  })();
 }
 });
 
 Then("there are vectors to run, in tests\\/vectors\\/", function () {
-  return (() => assert.ok(names.length >= 10))(scenarioContext);
+  return (() => assert.ok(names.length >= 10))();
 });

@@ -33,7 +33,7 @@ Then("the tables are classes.json's and the plugins'", function () {
   const ops = JSON.parse(await readFile(new URL("plugins/github.repo-ops.json", REGISTRY), "utf8")).operations;
   for (const o of ops) assert.deepEqual(OPERATIONS["github.repo-ops"][o.name], { class: o.class, route: o.route });
   assert.ok(Object.isFrozen(POLICIES) && Object.isFrozen(OPERATIONS));
-})(scenarioContext);
+})();
 });
 
 Then("a record has CallRecord's fields, in its order, and no body, URL or token", function () {
@@ -46,7 +46,7 @@ Then("a record has CallRecord's fields, in its order, and no body, URL or token"
   assert.ok(Number.isInteger(record.latency_ms) && record.latency_ms >= 0);
   const text = JSON.stringify(record);
   for (const leak of ["secret", "api.example"]) assert.ok(!text.includes(leak), leak);
-})(scenarioContext);
+})();
 });
 
 Then("an operation not in the registry is refused, for a call and a note", function () {
@@ -55,7 +55,7 @@ Then("an operation not in the registry is refused, for a call and a note", funct
   await assert.rejects(made.call(PLUGIN, "nope", { method: "GET", url: URL_ }), /github.edit-pr nope is not a registered operation/);
   assert.throws(() => made.note(PLUGIN, "nope", { requestId: "r", latencyMs: 1, status: null, outcome: "ok" }), RangeError);
   assert.equal(sink.records.length, 0);
-})(scenarioContext);
+})();
 });
 
 Then("the answer can be read as the client needs it", function () {
@@ -66,7 +66,7 @@ Then("the answer can be read as the client needs it", function () {
   assert.deepEqual(await answer.json(), { permissions: { push: true } });
   assert.equal(new Answer(204).json(), null);
   assert.equal(new Answer(null).ok, false);
-})(scenarioContext);
+})();
 });
 
 Then("the call is sent with its method, headers, body, a User-Agent and a class timeout", function () {
@@ -85,7 +85,7 @@ Then("the call is sent with its method, headers, body, a User-Agent and a class 
   assert.deepEqual(init.headers, { "User-Agent": "integrations-caller.js", Authorization: "t" });
   assert.deepEqual(init.body, new Uint8Array([1, 2]));
   assert.ok(init.signal instanceof AbortSignal && !init.signal.aborted);
-})(scenarioContext);
+})();
 });
 
 Then("a provider that doesn't answer within its class's timeout is no answer", function () {
@@ -102,7 +102,7 @@ Then("a provider that doesn't answer within its class's timeout is no answer", f
     return true;
   });
   assert.equal(sink.records[0].status, null);
-})(scenarioContext);
+})();
 });
 
 Then("only https goes out", function () {
@@ -111,7 +111,7 @@ Then("only https goes out", function () {
   const made = new Caller("a-repo", "", { fetch: async () => (asked = true) });
   await assert.rejects(made.call(PLUGIN, "open-pr", { method: "GET", url: "http://api.example/x" }), /not https/);
   assert.equal(asked, false);
-})(scenarioContext);
+})();
 });
 
 Then("the backoff sleeps by default, in seconds", function () {
@@ -120,7 +120,7 @@ Then("the backoff sleeps by default, in seconds", function () {
   const started = Date.now();
   assert.ok((await made.call(PLUGIN, "check", { method: "GET", url: URL_ })).ok);
   assert.ok(Date.now() - started >= 990);
-})(scenarioContext);
+})();
 });
 
 Then("a note is a record of time that wasn't a call", function () {
@@ -130,7 +130,7 @@ Then("a note is a record of time that wasn't a call", function () {
   const [record] = sink.records;
   assert.deepEqual([record.operation, record.latency_ms, record.route, record.bytes_in, record.request_id], ["service-total", 9, "none", 0, "r"]);
   assert.equal(replay.sent.length, 0);
-})(scenarioContext);
+})();
 });
 
 Then("forRepo is the same caller for another project", function () {
@@ -141,7 +141,7 @@ Then("forRepo is the same caller for another project", function () {
   assert.deepEqual([sink.records[0].repo, sink.records[0].app, sink.records[0].mode], ["b-repo", "web", "advisory"]);
   assert.equal(made.repo, "a-repo");
   assert.ok(other instanceof Caller);
-})(scenarioContext);
+})();
 });
 
 Then("a sink that fails loses the record, not the call", function () {
@@ -171,7 +171,7 @@ Then("Refused is for clients, as in Python", function () {
   const err = new Refused(PLUGIN, "open-pr", "no");
   assert.ok(err instanceof IntegrationError && !(err instanceof Unavailable));
   assert.equal(err.message, "github.edit-pr open-pr: no");
-})(scenarioContext);
+})();
 });
 
 Then("modes come from integrations.json, required winning", function () {
@@ -183,7 +183,7 @@ Then("modes come from integrations.json, required winning", function () {
   });
   assert.deepEqual(modes, { [PLUGIN]: "advisory", "slack.post": "required", "linear.sync": "required", "terraform.hetzner": "advisory" });
   assert.deepEqual(readModes({}), {});
-})(scenarioContext);
+})();
 });
 
 Then("a replay answers in turn, keeps its last answer, and a null-body status has none", function () {
@@ -193,7 +193,7 @@ Then("a replay answers in turn, keeps its last answer, and a null-body status ha
   assert.equal((await replay.fetch(URL_)).status, 204);
   assert.equal((await replay.fetch(URL_)).status, 204);
   await assert.rejects(replay.fetch("https://other.example/"), /not recorded/);
-})(scenarioContext);
+})();
 });
 
 Then("json is written as Python's json.dumps writes it", function () {
@@ -201,7 +201,7 @@ Then("json is written as Python's json.dumps writes it", function () {
   assert.equal(pythonJson({ a: [1, true, null], "é": "x \n" }), '{"a": [1, true, null], "\\u00e9": "x\\u2028\\n"}');
   assert.equal(pythonJson([]), "[]");
   assert.equal(pythonJson({}), "{}");
-})(scenarioContext);
+})();
 });
 
 Then("a Retry-After date is waited for up to the timeout, and one in the past not at all", function () {
@@ -214,7 +214,7 @@ Then("a Retry-After date is waited for up to the timeout, and one in the past no
     assert.equal(naps.length, 1);
     assert.ok(Math.abs(naps[0] - waited) < 1, `${naps[0]} for ${waited}`);
   }
-})(scenarioContext);
+})();
 });
 
 Then("a call never runs past its timeout times its tries", function () {
@@ -239,7 +239,7 @@ Then("a call never runs past its timeout times its tries", function () {
   }
   assert.deepEqual(given, [60_000, 60_000, 60_000, 53_000]);
   assert.equal(now, 240_000);
-})(scenarioContext);
+})();
 });
 
 Then("no try starts that the deadline leaves no time for", function () {
@@ -254,7 +254,7 @@ Then("no try starts that the deadline leaves no time for", function () {
   const made = new Caller("a-repo", "", { fetch, clock: () => now, sleep: async (s) => (now += s * 1000) });
   await assert.rejects(made.call(PLUGIN, "check", { method: "GET", url: URL_ }), Unavailable);
   assert.equal(tries, 2, "the third would start at 89 s, with no time left to wait 30");
-})(scenarioContext);
+})();
 });
 
 Then("the jitter's random source is the caller's, and forRepo keeps it", function () {
@@ -264,5 +264,5 @@ Then("the jitter's random source is the caller's, and forRepo keeps it", functio
   const { made } = caller(responses, { sleep: async (s) => naps.push(s), random: () => 0.5 });
   await made.forRepo("b-repo").call(PLUGIN, "check", { method: "GET", url: URL_ });
   assert.deepEqual(naps, [0.5, 1]);
-})(scenarioContext);
+})();
 });

@@ -68,12 +68,12 @@ Then("storage.js gives every vector in tests\\/vectors\\/storage\\/ what it expe
     });
     assert.equal(sink.records.length, expect.records.length);
     expect.records.forEach((want, i) => assert.deepEqual(Object.fromEntries(Object.keys(want).map((k) => [k, sink.records[i][k]])), want));
-  })(scenarioContext);
+  })();
 }
 });
 
 Then("there are vectors to run", function () {
-  return (() => assert.ok(names.length >= 10))(scenarioContext);
+  return (() => assert.ok(names.length >= 10))();
 });
 
 Then("the routes are the pinned spec's", function () {
@@ -82,7 +82,7 @@ Then("the routes are the pinned spec's", function () {
   assert.deepEqual(SPEC, { repository: lock.repository, commit: lock.commit, sha256: lock.sha256 });
   assert.deepEqual(ROUTES.list.query, ["prefix", "limit", "cursor"]);
   assert.ok(Object.isFrozen(ROUTES));
-})(scenarioContext);
+})();
 });
 
 Then("an upload is one form with the fields given", function () {
@@ -95,7 +95,7 @@ Then("an upload is one form with the fields given", function () {
   assert.equal(await form.get("file").text(), "%PDF-1.7");
   assert.deepEqual([form.get("name"), form.get("kept"), form.get("for"), form.get("label"), form.get("subject")], ["a.pdf", "false", "someone", null, null]);
   await assert.rejects(storage.uploadFile(new Uint8Array([1])), /needs the file's name/);
-})(scenarioContext);
+})();
 });
 
 Then("the token file is read for each request, and another tenant shares it", function () {
@@ -111,7 +111,7 @@ Then("the token file is read for each request, and another tenant shares it", fu
   assert.deepEqual(replay.sent.map((s) => s.headers.Authorization), ["Bearer first", "Bearer second"]);
   assert.equal(replay.sent[1].url, `${BASE}/other/head/board/log`);
   assert.deepEqual(reads[0], ["/var/run/token", "utf8"]);
-})(scenarioContext);
+})();
 });
 
 Then("a token can be a function, and one is needed, as is a tenant", function () {
@@ -122,7 +122,7 @@ Then("a token can be a function, and one is needed, as is a tenant", function ()
   assert.throws(() => new Storage({ tenant: "deals" }), /a token or a tokenFile/);
   assert.throws(() => new Storage({ token: "t" }), /needs a tenant/);
   assert.equal(new Storage({ tenant: "d", token: "t" }).baseUrl, "https://storage.sustenaut.eu");
-})(scenarioContext);
+})();
 });
 
 Then("a place outside the buffers' folders is refused here", function () {
@@ -130,7 +130,7 @@ Then("a place outside the buffers' folders is refused here", function () {
   const { storage, replay } = made({ client: { tenant: "deals", token: "t" }, responses: {} });
   for (const place of ["f/x", "inbox", "other/a.avro"]) await assert.rejects(storage.getBuffer(place), /is not in inbox\/, batches\/ or rejected\//);
   assert.equal(replay.sent.length, 0);
-})(scenarioContext);
+})();
 });
 
 Then("a batch's JSON goes as it is, and the errors are the caller's kinds", function () {
@@ -146,5 +146,5 @@ Then("a batch's JSON goes as it is, and the errors are the caller's kinds", func
   assert.equal(error.message, "storage.api read: HTTP 404 not found");
   assert.equal(new StorageError("write", 500, "").message, "storage.api write: HTTP 500");
   assert.ok(new StorageUnavailable(new Unavailable("storage.api", "read", "no answer")) instanceof Unavailable);
-})(scenarioContext);
+})();
 });
