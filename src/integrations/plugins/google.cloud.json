@@ -31,6 +31,8 @@
       "*.pkg.dev",
       "www.googleapis.com",
       "oauth2.googleapis.com",
+      "iamcredentials.googleapis.com",
+      "sts.googleapis.com",
       "accounts.google.com",
       "storage.googleapis.com",
       "cloud.google.com",

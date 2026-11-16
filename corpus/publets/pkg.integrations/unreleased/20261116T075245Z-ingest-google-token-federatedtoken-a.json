@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "ingest.google_token: FederatedToken, a Google access token with no key, from an external_account credential (Workload Identity Federation): the pod's projected token traded at STS, then the account impersonated; google_token() and project_of() take a key or such a credential alike, and the ingest reads either from INGEST_KEY_FILE"
+}
