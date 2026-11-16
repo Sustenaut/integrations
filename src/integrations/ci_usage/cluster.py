@@ -44,7 +44,9 @@ RUNNER, DIND = "runner", "dind"
 
 _CPU = {"n": 1e-6, "u": 1e-3, "m": 1, "": 1000}
 _MEMORY = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40, "k": 10**3, "M": 10**6, "G": 10**9, "T": 10**12, "": 1}
-_QUANTITY = re.compile(r"^([0-9.eE+-]+?)([a-zA-Z]*)$")
+# A number, with an exponent only as e or E followed by digits, then its unit: no part of
+# it can be read two ways, so it never backtracks.
+_QUANTITY = re.compile(r"^([+-]?[0-9.]+(?:[eE][+-]?[0-9]+)?)([a-zA-Z]*)$")
 
 
 def millicores(quantity: str | None) -> int | None:
