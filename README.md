@@ -303,16 +303,16 @@ gets no reports: the pod's report on it goes to its log. `INGEST_NEED_STATES`, i
 same shape (`{"tenant": "need-states", "dataset": "convergence"}`), loads the
 convergence engine's need states the same way, from `inbox/need-states/` into that
 dataset's `need_states` table, for observability's `need_drift` rule. A file there that
-isn't need states is set aside alone, in `rejected/`. `INGEST_PUBKIT_CHECKS`
-(`{"tenant": "pubkit-checks", "dataset": "platform"}`) loads the platform's nightly
+isn't need states is set aside alone, in `rejected/`. `INGEST_PUBRULES_CHECKS`
+(`{"tenant": "pubrules-checks", "dataset": "platform"}`) loads the platform's nightly
 checks of each repository against pubrules, passes and failures, from
-`inbox/pubkit-checks/` into that dataset's `pubkit_checks` table, for observability's
-`pubkit_drift` rule and for audits; it too sets aside what isn't pubrules checks.
+`inbox/pubrules-checks/` into that dataset's `pubrules_checks` table, for observability's
+`pubrules_drift` rule and for audits; it too sets aside what isn't pubrules checks.
 `INGEST_BUFFERS` names any number more, as a list of `{"tenant": ..., "dataset": ...,
 "table": ...}`, each the buffer whose table it names, so one dataset may hold several:
 `[{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"}, {"tenant":
 "ci-usage", "dataset": "platform", "table": "cluster_usage"}]` loads CI's wait times and
-compute load (below) beside `pubkit_checks`. Buffers that share a tenant keep their
+compute load (below) beside `pubrules_checks`. Buffers that share a tenant keep their
 batch records apart, under `batches/<table>-`. The three variables before it work as
 they did.
 
@@ -369,7 +369,7 @@ Every run can run again: what is ready is left alone. In order:
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
 | `gcp.workload-identity` `ingest` | that the ingest's ServiceAccount may act as `integrations-ingest` (Terraform's, in shared-infra) through the `services` Workload Identity pool: the ingest reads BigQuery with no key, its `INGEST_KEY_FILE` being `k8s/google-credential.yaml`'s external_account credential. The grant is Terraform's (`infra/services-identity.tf`), so a missing one is proposed |
 | `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
-| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBKIT_CHECKS`, `INGEST_BUFFERS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBRULES_CHECKS`, `INGEST_BUFFERS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
 | `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
 

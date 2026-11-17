@@ -165,11 +165,11 @@ def decode_need_states(data: bytes) -> list[dict]:
 
 
 # The platform's checks of each repository against pubrules, as release-controlplane's nightly
-# writes them to the pubkit-checks tenant: one row per repository per check per night,
-# passes as well as failures, the columns of platform.pubkit_checks, for observability's
-# pubkit_drift rule and for audits.
+# writes them to the pubrules-checks tenant: one row per repository per check per night,
+# passes as well as failures, the columns of platform.pubrules_checks, for observability's
+# pubrules_drift rule and for audits.
 PUBRULES_CHECK_SCHEMA = fastavro.parse_schema({
-    "type": "record", "name": "pubkit_check", "fields": [
+    "type": "record", "name": "pubrules_check", "fields": [
         {"name": "observed_at", "type": _TIME},
         {"name": "repository", "type": "string"},
         {"name": "check", "type": "string"},
@@ -183,7 +183,7 @@ PUBRULES_CHECK_SCHEMA = fastavro.parse_schema({
     ]})
 
 
-def encode_pubkit_checks(rows: list[dict]) -> bytes:
+def encode_pubrules_checks(rows: list[dict]) -> bytes:
     """pubrules checks as one file to load; the same rows always give the same bytes."""
     out = io.BytesIO()
     marker = hashlib.sha256(repr(sorted(map(repr, rows))).encode()).digest()[:16]
@@ -191,7 +191,7 @@ def encode_pubkit_checks(rows: list[dict]) -> bytes:
     return out.getvalue()
 
 
-def decode_pubkit_checks(data: bytes) -> list[dict]:
+def decode_pubrules_checks(data: bytes) -> list[dict]:
     return list(fastavro.reader(io.BytesIO(data), PUBRULES_CHECK_SCHEMA))
 
 

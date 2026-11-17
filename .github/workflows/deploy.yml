@@ -5,7 +5,7 @@
 #
 # What a deployment serves is in repository variables, so nothing here names a
 # consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS, INGEST_DATASETS and
-# INGEST_SIGNALS, INGEST_NEED_STATES, INGEST_PUBKIT_CHECKS and INGEST_BUFFERS (unset: none are loaded), which pubrules.json declares. Their
+# INGEST_SIGNALS, INGEST_NEED_STATES, INGEST_PUBRULES_CHECKS and INGEST_BUFFERS (unset: none are loaded), which pubrules.json declares. Their
 # values are kept in the owner's state repository: a change there sets them with
 # `pubfleet variables --apply` and runs this workflow. Without SUSTENAUT_SERVER the image
 # is built and pushed, and nothing is deployed. It deploys only once DEPLOY_INTEGRATIONS
@@ -47,6 +47,6 @@ jobs:
         kustomize edit add configmap ingest-settings --from-literal="INGEST_DATASETS=$(var INGEST_DATASETS)" \
           --from-literal="INGEST_SIGNALS=$(var INGEST_SIGNALS)" \
           --from-literal="INGEST_NEED_STATES=$(var INGEST_NEED_STATES)" \
-          --from-literal="INGEST_PUBKIT_CHECKS=$(var INGEST_PUBKIT_CHECKS)" \
+          --from-literal="INGEST_PUBRULES_CHECKS=$(var INGEST_PUBRULES_CHECKS)" \
           --from-literal="INGEST_BUFFERS=$(var INGEST_BUFFERS)"
     secrets: inherit

@@ -4,12 +4,12 @@ INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
 "dataset": ...}, the tenant its evaluator writes them to and the dataset whose
 signals table they load into. INGEST_NEED_STATES, in the same shape, loads the
 convergence engine's need states into that dataset's need_states table, and
-INGEST_PUBKIT_CHECKS the platform's nightly pubrules checks into its pubkit_checks table.
+INGEST_PUBRULES_CHECKS the platform's nightly pubrules checks into its pubrules_checks table.
 
 INGEST_BUFFERS names any number more, as a list: [{"tenant": ..., "dataset": ..., "table":
 ...}], each the Kind whose table it names (inbox.KINDS), so one dataset may hold several
 (platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside its
-pubkit_checks). The three variables above keep working as they are."""
+pubrules_checks). The three variables above keep working as they are."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import google_token, project_of
-from .inbox import INTERVAL_SECONDS, KINDS, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Kind, Scanner, dataset_of
+from .inbox import INTERVAL_SECONDS, KINDS, NEED_STATES, PUBRULES_CHECKS, SIGNALS, Inbox, Kind, Scanner, dataset_of
 
 
 def buffer(text: str, variable: str, kind: Kind) -> tuple[dict[str, str], dict[str, Kind]]:
@@ -48,9 +48,9 @@ def need_states(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     return buffer(text, "INGEST_NEED_STATES", NEED_STATES)
 
 
-def pubkit_checks(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
-    """INGEST_PUBKIT_CHECKS: the platform's nightly checks of each repository against pubrules."""
-    return buffer(text, "INGEST_PUBKIT_CHECKS", PUBKIT_CHECKS)
+def pubrules_checks(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
+    """INGEST_PUBRULES_CHECKS: the platform's nightly checks of each repository against pubrules."""
+    return buffer(text, "INGEST_PUBRULES_CHECKS", PUBRULES_CHECKS)
 
 
 def buffers(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
@@ -78,7 +78,7 @@ def buffers(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
     return tenants, kinds
 
 
-def named_buffers(signals_text: str, need_states_text: str, pubkit_checks_text: str = "",
+def named_buffers(signals_text: str, need_states_text: str, pubrules_checks_text: str = "",
                   buffers_text: str = "") -> tuple[dict[str, str], dict[str, Kind]]:
     """All of them. No two may load into the same table of the same dataset, and each of the
     three single variables takes its dataset for its one Kind."""
@@ -88,7 +88,7 @@ def named_buffers(signals_text: str, need_states_text: str, pubkit_checks_text: 
     tables: dict[tuple[str, str], str] = {}
     for variable, (more_tenants, more_kinds) in (
             ("INGEST_SIGNALS", signals(signals_text)), ("INGEST_NEED_STATES", need_states(need_states_text)),
-            ("INGEST_PUBKIT_CHECKS", pubkit_checks(pubkit_checks_text)), ("INGEST_BUFFERS", buffers(buffers_text))):
+            ("INGEST_PUBRULES_CHECKS", pubrules_checks(pubrules_checks_text)), ("INGEST_BUFFERS", buffers(buffers_text))):
         for key, kind in more_kinds.items():
             if variable != "INGEST_BUFFERS":
                 if key in named:
@@ -106,7 +106,7 @@ def named_buffers(signals_text: str, need_states_text: str, pubkit_checks_text: 
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
     tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""),
-                                   os.environ.get("INGEST_PUBKIT_CHECKS", ""), os.environ.get("INGEST_BUFFERS", ""))
+                                   os.environ.get("INGEST_PUBRULES_CHECKS", ""), os.environ.get("INGEST_BUFFERS", ""))
     caller = Caller("integrations", "ingest", sink=StdoutSink())
     key = json.loads(Path(os.environ["INGEST_KEY_FILE"]).read_text(encoding="utf-8"))
     storage_token = Path(os.environ["INGEST_STORAGE_TOKEN_FILE"])

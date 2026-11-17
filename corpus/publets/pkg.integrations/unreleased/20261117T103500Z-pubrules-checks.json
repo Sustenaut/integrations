@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "The platform's nightly pubrules checks move to their new names: INGEST_PUBRULES_CHECKS (was INGEST_PUBKIT_CHECKS) names the pubrules-checks tenant, whose files load into platform.pubrules_checks (was pubkit_checks)"
+}
