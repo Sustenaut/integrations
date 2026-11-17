@@ -1,4 +1,0 @@
-{
-  "category": "fixed",
-  "change": "integrations ci-usage jobs: a save storage refuses because another pass moved the written head (412: a backfill beside the ten-minute CronJob) reads that pass's state back, merges the jobs both wrote, and tries again, five times in all; the 90-day backfill stopped on the first such refusal"
-}
