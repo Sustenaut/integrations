@@ -9,11 +9,11 @@ import pytest
 
 from datetime import datetime, timezone
 
-from integrations.avrofile import decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubkit_checks, decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states, encode_pubkit_checks, encode_signals, file_status
+from integrations.avrofile import decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubrules_checks, decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states, encode_pubrules_checks, encode_signals, file_status
 from integrations.calls import Caller, MemorySink, Response
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import CI_JOBS, CLUSTER_USAGE, MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBKIT_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
-from integrations.ingest.main import buffers, named_buffers, need_states, pubkit_checks, scan, signals
+from integrations.ingest.inbox import CI_JOBS, CLUSTER_USAGE, MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBRULES_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.main import buffers, named_buffers, need_states, pubrules_checks, scan, signals
 
 from .test_ingest import BASE, FakeBigQuery, record
 from pytest_bdd import scenarios, then
@@ -106,8 +106,8 @@ class PickyBigQuery(FakeBigQuery):
             if table == "cluster_usage":
                 self.cluster_usage_rows += decode_cluster_usage(data)
                 return Response(200, b"{}")
-            if table == "pubkit_checks":
-                self.pubrules_check_rows += decode_pubkit_checks(data)
+            if table == "pubrules_checks":
+                self.pubrules_check_rows += decode_pubrules_checks(data)
                 return Response(200, b"{}")
             rows = decode(data)
             if table == STATUS_TABLE:
@@ -645,44 +645,44 @@ def pubrules_check(n: int, **fields) -> dict:
 
 
 @then("pubrules checks load into their own table from their own tenant and leave")
-def pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
+def pubrules_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
     buffer, bigquery = FakeBuffer(), PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
     statuses: list[dict] = []
     clock = lambda: 1_800_000_000.0  # noqa: E731
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"platform": "pubkit-checks"}),
+    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"platform": "pubrules-checks"}),
                       BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock, kinds={"platform": PUBKIT_CHECKS})
-    buffer.files["inbox/pubkit-checks/2027-01-15/024100-nightly-1.avro"] = encode_pubkit_checks(
+                      JobBudget(clock), statuses.append, clock, kinds={"platform": PUBRULES_CHECKS})
+    buffer.files["inbox/pubrules-checks/2027-01-15/024100-nightly-1.avro"] = encode_pubrules_checks(
         [pubrules_check(1), pubrules_check(2, status="fail", pinned="0.35.1",
                                        fix="`git latest && ./pubrules bump`, then open its PR")])
-    buffer.files["inbox/pubkit-checks/2027-01-15/024101-nightly-2.avro"] = encode_signals([signal(1)])
+    buffer.files["inbox/pubrules-checks/2027-01-15/024101-nightly-2.avro"] = encode_signals([signal(1)])
     scanner.tick(["platform"])
-    assert bigquery.tables == ["pubkit_checks"]
+    assert bigquery.tables == ["pubrules_checks"]
     assert sorted((r["repository"], r["status"]) for r in bigquery.pubrules_check_rows) == [
         ("example-org/repo1", "pass"), ("example-org/repo2", "fail")]
-    assert buffer.under("rejected/") == ["rejected/pubkit-checks/2027-01-15/024101-nightly-2.avro"]
+    assert buffer.under("rejected/") == ["rejected/pubrules-checks/2027-01-15/024101-nightly-2.avro"]
     assert "can't be read" in statuses[0]["problems"]
 
 
 @then("pubrules checks are the same bytes for the same rows")
-def pubkit_checks_are_the_same_bytes_for_the_same_rows():
+def pubrules_checks_are_the_same_bytes_for_the_same_rows():
     rows = [pubrules_check(1), pubrules_check(2, check="sync", status="fail")]
-    assert encode_pubkit_checks(rows) == encode_pubkit_checks([dict(r) for r in rows])
-    assert decode_pubkit_checks(encode_pubkit_checks(rows)) == rows
+    assert encode_pubrules_checks(rows) == encode_pubrules_checks([dict(r) for r in rows])
+    assert decode_pubrules_checks(encode_pubrules_checks(rows)) == rows
 
 
 @then("ingest pubrules checks names its tenant and dataset beside the others")
-def ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
+def ingest_pubrules_checks_names_its_tenant_and_dataset_beside_the_others():
     tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                                    '{"tenant": "need-states", "dataset": "convergence"}',
-                                   '{"tenant": "pubkit-checks", "dataset": "platform"}')
-    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubkit-checks"}
-    assert kinds["platform"] == PUBKIT_CHECKS
-    with pytest.raises(ValueError, match="INGEST_PUBKIT_CHECKS is"):
-        pubkit_checks('{"dataset": "platform"}')
-    with pytest.raises(ValueError, match="INGEST_NEED_STATES and INGEST_PUBKIT_CHECKS name the same dataset"):
-        named_buffers("", '{"tenant": "need-states", "dataset": "x"}', '{"tenant": "pubkit-checks", "dataset": "x"}')
+                                   '{"tenant": "pubrules-checks", "dataset": "platform"}')
+    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubrules-checks"}
+    assert kinds["platform"] == PUBRULES_CHECKS
+    with pytest.raises(ValueError, match="INGEST_PUBRULES_CHECKS is"):
+        pubrules_checks('{"dataset": "platform"}')
+    with pytest.raises(ValueError, match="INGEST_NEED_STATES and INGEST_PUBRULES_CHECKS name the same dataset"):
+        named_buffers("", '{"tenant": "need-states", "dataset": "x"}', '{"tenant": "pubrules-checks", "dataset": "x"}')
 
 
 @then("the scan passes once at start and then each interval")
@@ -716,7 +716,7 @@ def ci_jobs_and_cluster_usage_share_a_tenant_and_load_into_their_own_tables():
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
     statuses: list[dict] = []
     clock = lambda: 1_800_000_000.0  # noqa: E731
-    tenants, kinds = named_buffers("", "", '{"tenant": "pubkit-checks", "dataset": "platform"}', json.dumps([
+    tenants, kinds = named_buffers("", "", '{"tenant": "pubrules-checks", "dataset": "platform"}', json.dumps([
         {"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
         {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]))
     scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, tenants),
@@ -741,7 +741,7 @@ def ci_jobs_and_cluster_usage_share_a_tenant_and_load_into_their_own_tables():
     assert bigquery.tables == ["ci_jobs", "cluster_usage"] and [r["cpu_millicores"] for r in bigquery.cluster_usage_rows] == [400]
     assert not buffer.inbox() and not buffer.under("batches/")
     assert {(s["dataset"], s["table"]) for s in statuses} == {
-        ("platform", "ci_jobs"), ("platform", "cluster_usage"), ("platform", "pubkit_checks")}
+        ("platform", "ci_jobs"), ("platform", "cluster_usage"), ("platform", "pubrules_checks")}
 
 
 @then("INGEST_BUFFERS names more buffers beside the three single variables")
@@ -750,11 +750,11 @@ def ingest_buffers_names_more_buffers_beside_the_three_single_variables():
              {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]
     tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                                    '{"tenant": "need-states", "dataset": "convergence"}',
-                                   '{"tenant": "pubkit-checks", "dataset": "platform"}', json.dumps(given))
-    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubkit-checks",
+                                   '{"tenant": "pubrules-checks", "dataset": "platform"}', json.dumps(given))
+    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubrules-checks",
                        "platform.ci_jobs": "ci-usage", "platform.cluster_usage": "ci-usage"}
     assert kinds["platform.ci_jobs"] == CI_JOBS and kinds["platform.cluster_usage"] == CLUSTER_USAGE
-    assert kinds["platform"] == PUBKIT_CHECKS
+    assert kinds["platform"] == PUBRULES_CHECKS
     assert buffers("") == ({}, {})
     for bad, says in (('{"tenant": "x"}', "INGEST_BUFFERS is"), ('[{"tenant": "x", "dataset": "d"}]', "INGEST_BUFFERS is"),
                       ('[{"tenant": "x", "dataset": "d", "table": "calls"}]', "names table calls"),
@@ -762,6 +762,6 @@ def ingest_buffers_names_more_buffers_beside_the_three_single_variables():
                       (json.dumps(given + given[:1]), "names platform.ci_jobs twice")):
         with pytest.raises(ValueError, match=says):
             buffers(bad)
-    with pytest.raises(ValueError, match="INGEST_PUBKIT_CHECKS and INGEST_BUFFERS both load platform.pubkit_checks"):
-        named_buffers("", "", '{"tenant": "pubkit-checks", "dataset": "platform"}',
-                      '[{"tenant": "p", "dataset": "platform", "table": "pubkit_checks"}]')
+    with pytest.raises(ValueError, match="INGEST_PUBRULES_CHECKS and INGEST_BUFFERS both load platform.pubrules_checks"):
+        named_buffers("", "", '{"tenant": "pubrules-checks", "dataset": "platform"}',
+                      '[{"tenant": "p", "dataset": "platform", "table": "pubrules_checks"}]')

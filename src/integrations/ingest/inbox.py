@@ -19,7 +19,7 @@ leaves them in a tenant of their own, and they load into a table of their own.
 
 The scanner names each buffer by a key: a call log's or a named buffer's dataset, or, for
 the buffers INGEST_BUFFERS names, `<dataset>.<table>`, so that one dataset can hold
-several Kinds (platform holds pubkit_checks, ci_jobs and cluster_usage). Kinds that share
+several Kinds (platform holds pubrules_checks, ci_jobs and cluster_usage). Kinds that share
 a tenant keep their batch records apart by a prefix of their own (`batches/<table>-`).
 """
 
@@ -33,9 +33,9 @@ from datetime import datetime
 from typing import Callable
 
 from .. import __version__
-from ..avrofile import (decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubkit_checks,
+from ..avrofile import (decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubrules_checks,
                         decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states,
-                        encode_pubkit_checks, encode_signals, encode_status, file_name, file_status, timestamp)
+                        encode_pubrules_checks, encode_signals, encode_status, file_name, file_status, timestamp)
 from ..calls import Request, Response, Transport
 from .bigquery import STATUS_TABLE, TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
 
@@ -76,7 +76,7 @@ CALLS = Kind(INBOX, TABLE, lambda data: decode(data), lambda rows: encode(rows),
 SIGNALS = Kind("inbox/signals/", "signals", decode_signals, encode_signals, reports=False, what="signals")
 NEED_STATES = Kind("inbox/need-states/", "need_states", decode_need_states, encode_need_states, reports=False,
                    what="need states")
-PUBKIT_CHECKS = Kind("inbox/pubkit-checks/", "pubkit_checks", decode_pubkit_checks, encode_pubkit_checks,
+PUBRULES_CHECKS = Kind("inbox/pubrules-checks/", "pubrules_checks", decode_pubrules_checks, encode_pubrules_checks,
                      reports=False, what="pubrules checks")
 # CI's wait times and compute load: two Kinds in the one tenant ci-usage.
 CI_JOBS = Kind("inbox/ci-jobs/", "ci_jobs", decode_ci_jobs, encode_ci_jobs, reports=False, what="CI jobs",
@@ -84,7 +84,7 @@ CI_JOBS = Kind("inbox/ci-jobs/", "ci_jobs", decode_ci_jobs, encode_ci_jobs, repo
 CLUSTER_USAGE = Kind("inbox/cluster-usage/", "cluster_usage", decode_cluster_usage, encode_cluster_usage,
                      reports=False, what="cluster usage", batches=f"{BATCHES}cluster_usage-")
 # The Kinds INGEST_BUFFERS may name, by their tables.
-KINDS = {kind.table: kind for kind in (SIGNALS, NEED_STATES, PUBKIT_CHECKS, CI_JOBS, CLUSTER_USAGE)}
+KINDS = {kind.table: kind for kind in (SIGNALS, NEED_STATES, PUBRULES_CHECKS, CI_JOBS, CLUSTER_USAGE)}
 
 
 def dataset_of(key: str) -> str:
