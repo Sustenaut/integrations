@@ -1,7 +1,7 @@
 # The ci-jobs poller (src/integrations/ci_usage/jobs.py): every ten minutes, each finished
 # GitHub Actions job of every repository the release reader app sees, once, into storage's ci-usage
 # buffer, for platform.ci_jobs. It reads GitHub as the release reader app, whose id, key and
-# installation id the deploy walk puts in the Secret ci-jobs-app (pubkit.json's needs), and
+# installation id the deploy walk puts in the Secret ci-jobs-app (pubrules.json's needs), and
 # writes to storage as its service account, k8s:integrations/ci-jobs. A pass that is still
 # running when the next is due goes on alone (Forbid); its state's head moves with If-Match
 # besides.

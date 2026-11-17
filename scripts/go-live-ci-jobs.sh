@@ -34,11 +34,11 @@ ask() { read -r -p "$1 [y/N] " answer; [[ $answer == y ]]; }
 git fetch -q origin main
 [[ $(git rev-parse HEAD) == $(git rev-parse origin/main) ]] || { echo "check out main first (git latest)" >&2; exit 1; }
 [[ -f k8s/ci-jobs.yaml ]] || { echo "main has no ci-jobs poller yet: merge its pull request first" >&2; exit 1; }
-[[ -f ../shared-infra/pubkit.json ]] || { echo "no ../shared-infra checkout beside this one, for the zones" >&2; exit 1; }
+[[ -f ../shared-infra/pubrules.json ]] || { echo "no ../shared-infra checkout beside this one, for the zones" >&2; exit 1; }
 
 step "1/3 the deploy's needs: Secret ci-jobs-app, tenants ci-usage and ci-jobs, INGEST_BUFFERS"
 # Without --fulfil the walk only checks; with it, it asks before making anything.
-./with-secrets ./pubdeploy walk --fulfil --server "$server" --zones ../shared-infra/pubkit.json
+./with-secrets ./pubdeploy walk --fulfil --server "$server" --zones ../shared-infra/pubrules.json
 
 step "2/3 the CronJob ci-jobs"
 for _ in $(seq 60); do
