@@ -1,4 +1,4 @@
-"""cloudflare.dns: only `check()`. Terraform manages the records and `pubkit dns
+"""cloudflare.dns: only `check()`. Terraform manages the records and `pubrules dns
 check` reads them with dig, so no code here changes DNS. This says whether the
 API token still works, which Terraform would otherwise find out on its next run."""
 

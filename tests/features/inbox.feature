@@ -117,14 +117,14 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
   Scenario: Ingest need states names its tenant and dataset beside the signals
     Then ingest need states names its tenant and dataset beside the signals
 
-  Scenario: Pubkit checks load into their own table from their own tenant and leave
-    Then pubkit checks load into their own table from their own tenant and leave
+  Scenario: Pubrules checks load into their own table from their own tenant and leave
+    Then pubrules checks load into their own table from their own tenant and leave
 
-  Scenario: Pubkit checks are the same bytes for the same rows
-    Then pubkit checks are the same bytes for the same rows
+  Scenario: Pubrules checks are the same bytes for the same rows
+    Then pubrules checks are the same bytes for the same rows
 
-  Scenario: Ingest pubkit checks names its tenant and dataset beside the others
-    Then ingest pubkit checks names its tenant and dataset beside the others
+  Scenario: Ingest pubrules checks names its tenant and dataset beside the others
+    Then ingest pubrules checks names its tenant and dataset beside the others
 
   Scenario: The scan passes once at start and then each interval
     Then the scan passes once at start and then each interval

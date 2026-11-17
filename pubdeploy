@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Managed by pubkit 0.37.0: `pubkit sync` rewrites this file, and
-# `pubkit sync --check` fails when it differs.
+# Managed by pubrules 0.43.0: `pubrules sync` rewrites this file, and
+# `pubrules sync --check` fails when it differs.
 #
-# Run this repository's pinned pubdeploy, the deploy walk: what pubkit.json's
+# Run this repository's pinned pubdeploy, the deploy walk: what pubrules.json's
 # deploy block says the service needs, whether it has it, and making it.
 #
 #   ./with-secrets ./pubdeploy walk --fulfil
 #   ./pubdeploy check --offline
 #   ./pubdeploy types
 #
-# The release is deploy.providers' pubdeploy, or the oldest pubkit 0.37.0
+# The release is deploy.providers' pubdeploy, or the oldest pubrules 0.43.0
 # works with where it lists none, or an older one, and it runs with every
 # other deploy.providers wheel, so their need types load. Each wheel is
 # fetched once into the user's cache (from the wheel mirror, when
-# pubkit.json names one and GitHub fails) and checked against its sha256 on
+# pubrules.json names one and GitHub fails) and checked against its sha256 on
 # every run, and uvx runs that file; nothing is installed into the
 # repository or the system. pubdeploy runs in the repository's root, where
-# pubkit.json is, from whichever directory this is called.
+# pubrules.json is, from whichever directory this is called.
 set -euo pipefail
 
 if ! command -v uvx >/dev/null 2>&1; then
@@ -27,30 +27,30 @@ fi
 cd "$(dirname "$0")"
 # A wheel, fetched once into the user's cache, checked against its sha256 on every run.
 fetch() {
-  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/pubkit/$3/$2" sum
+  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/pubrules/$3/$2" sum
   fetched="$dir/${1##*/}"
   if [ ! -f "$fetched" ]; then
     mkdir -p "$dir"
     curl -fsSL -o "$fetched.part" "$1" \
       || curl -fsSL -o "$fetched.part" "https://storage.sustenaut.eu/wheels/f/$2/${1##*/}" \
-      || { rm -f "$fetched.part"; echo "pubkit: could not fetch $1" >&2; exit 1; }
+      || { rm -f "$fetched.part"; echo "pubrules: could not fetch $1" >&2; exit 1; }
     mv "$fetched.part" "$fetched"
   fi
   if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$fetched"); else sum=$(shasum -a 256 "$fetched"); fi
   if [ "${sum%% *}" != "$2" ]; then
     rm -f "$fetched"
-    echo "pubkit: $1 is not the wheel $4 pins (sha256 $2)" >&2
+    echo "pubrules: $1 is not the wheel $4 pins (sha256 $2)" >&2
     exit 1
   fi
 }
 
-# The packages pubkit.json's deploy.providers names, each wheel checked against its sha256.
+# The packages pubrules.json's deploy.providers names, each wheel checked against its sha256.
 with=()
 provider() {
   fetch "$1" "$2" providers deploy.providers
   with+=(--with "$fetched")
 }
-provider https://github.com/Sustenaut/pubsec/releases/download/v0.2.5/pubsec-0.2.5-py3-none-any.whl f2848e19df169c91d504c11b145e54ffa7f837215e18323a9b3554aabcbf3569
+provider https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18
 
-fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.4/pubdeploy-0.4.4-py3-none-any.whl 79cfec6197f4e4b632bec05b685e45ecaac896e15a8de6df44d860a53ec800d0 providers deploy.providers
+fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl 320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd providers deploy.providers
 exec uvx --from "$fetched" ${with[@]+"${with[@]}"} pubdeploy "$@"

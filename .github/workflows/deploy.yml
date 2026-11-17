@@ -1,11 +1,11 @@
 # Builds the service's image once CI passes on a merge to main, and sends it to the
-# shared k3s server over SSH and the tailnet, with pubkit's k8s-deploy.yml (pubkit's
+# shared k3s server over SSH and the tailnet, with pubrules's k8s-deploy.yml (pubrules's
 # README, "Deploying a service to k3s"), where the deploy key can only run
 # sustenaut-deploy.
 #
 # What a deployment serves is in repository variables, so nothing here names a
 # consumer: INTEGRATIONS_EDIT_PR_REPOS, INTEGRATIONS_ORIGINS, INGEST_DATASETS and
-# INGEST_SIGNALS, INGEST_NEED_STATES, INGEST_PUBKIT_CHECKS and INGEST_BUFFERS (unset: none are loaded), which pubkit.json declares. Their
+# INGEST_SIGNALS, INGEST_NEED_STATES, INGEST_PUBKIT_CHECKS and INGEST_BUFFERS (unset: none are loaded), which pubrules.json declares. Their
 # values are kept in the owner's state repository: a change there sets them with
 # `pubfleet variables --apply` and runs this workflow. Without SUSTENAUT_SERVER the image
 # is built and pushed, and nothing is deployed. It deploys only once DEPLOY_INTEGRATIONS
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@4d44dcdf46f86da3ed459d2ee34afc72ebe6ddb1 # v0.4.4
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@fc34f05c790732a1ea831d896e557e9f816cba50 # v0.5.0
     with:
       image: ghcr.io/sustenaut/sustenaut-integrations
       deploys: k8s integrations DEPLOY_INTEGRATIONS
