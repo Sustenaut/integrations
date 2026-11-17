@@ -2,6 +2,7 @@
 # the review job leaves these out of its license check, and no other.
 pkg:githubactions/Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml
 pkg:githubactions/Sustenaut/pubrel/.github/workflows/release.yml
+pkg:githubactions/Sustenaut/pubrules/.github/workflows/go-live.yml
 pkg:githubactions/Sustenaut/pubrules/.github/workflows/job-osv.yml
 pkg:githubactions/Sustenaut/pubrules/.github/workflows/job-python-audit.yml
 pkg:githubactions/Sustenaut/pubrules/.github/workflows/job-python-functional.yml
