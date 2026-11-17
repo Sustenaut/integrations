@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@9d13c3fca915b386742565895d67d9a831492cfa # v0.4.1
+    uses: Sustenaut/pubdeploy/.github/workflows/k8s-deploy.yml@4d44dcdf46f86da3ed459d2ee34afc72ebe6ddb1 # v0.4.4
     with:
       image: ghcr.io/sustenaut/sustenaut-integrations
       deploys: k8s integrations DEPLOY_INTEGRATIONS

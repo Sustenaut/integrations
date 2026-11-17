@@ -50,7 +50,7 @@ provider() {
   fetch "$1" "$2" providers deploy.providers
   with+=(--with "$fetched")
 }
-provider https://github.com/Sustenaut/pubsec/releases/download/v0.2.3/pubsec-0.2.3-py3-none-any.whl 4a0b9435ff111565265f330fa3a1642b59562d77b5d1806c1bfecfe83e63b106
+provider https://github.com/Sustenaut/pubsec/releases/download/v0.2.5/pubsec-0.2.5-py3-none-any.whl f2848e19df169c91d504c11b145e54ffa7f837215e18323a9b3554aabcbf3569
 
-fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.1/pubdeploy-0.4.1-py3-none-any.whl c9c9b49b44b771c6f15219c186e3646203381c6a30570c0b2568951d3a53deb0 providers deploy.providers
+fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.4/pubdeploy-0.4.4-py3-none-any.whl 79cfec6197f4e4b632bec05b685e45ecaac896e15a8de6df44d860a53ec800d0 providers deploy.providers
 exec uvx --from "$fetched" ${with[@]+"${with[@]}"} pubdeploy "$@"
