@@ -98,6 +98,15 @@
         "write": ["k8s:integrations/ci-jobs"],
         "private": true,
         "heads": true
+      },
+      {
+        "type": "k8s.job-once",
+        "name": "ci-jobs-backfill",
+        "cronjob": "ci-jobs",
+        "args": ["--since-days", "90"],
+        "timeout": "6h",
+        "rerun": "never",
+        "after": ["k8s.secret:ci-jobs-app", "storage.tenant:ci-usage", "storage.tenant:ci-jobs"]
       }
     ]
   },

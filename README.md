@@ -328,9 +328,12 @@ Nothing reads them as a rule yet: they are the history a rule will be designed f
   runners and `sustenaut-ci` alike, written once, with `wait_seconds` (started minus queued)
   and `run_seconds`. It reads as the release reader app, from the Secret `ci-jobs-app`, and
   keeps which jobs it has written in a head of the `ci-jobs` tenant. `--since-days 90`
-  backfills, once, by `scripts/go-live-ci-jobs.sh`; `--except-board` leaves out the
-  board's repositories, for a backfill of those the first one, which read the board alone,
-  missed (`scripts/go-live-ci-jobs.sh --except-board`).
+  backfills, once: the deploy block's `k8s.job-once` need `ci-jobs-backfill` (pubdeploy
+  0.4.4) makes that Job from the CronJob's template, and the walk then shows it running,
+  completed or failed. A failed one is not run again by itself (`rerun: never`): delete the
+  Job and walk with `--fulfil`. A backfill stopped partway goes on where it was. The first
+  backfills ran by hand in November 2026, the second with `--except-board` for the
+  repositories the first, which read the board alone, missed.
 - `integrations ci-usage cluster`, the CronJob beside the runners in shared-infra's
   `infra/ci-runners/`, every two minutes: node, namespace, `ci` (quota and runners) and
   runner rows, each runner pod with its runner's and Docker's cgroup `memory.peak`, its
