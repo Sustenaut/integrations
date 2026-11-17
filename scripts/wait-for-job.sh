@@ -11,8 +11,13 @@ namespace=${1:?usage: wait-for-job.sh NAMESPACE JOB} job=${2:?usage: wait-for-jo
 server=${SUSTENAUT_SERVER:-sustenaut}
 on_server() { ssh -o BatchMode=yes "root@$server" "$@"; }
 while :; do
-  state=$(on_server k3s kubectl -n "$namespace" get job "$job" \
-    -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{" "}{end}')
+  # ssh hands the remote shell one line, so nothing it must quote goes over: the Job's
+  # JSON comes back, and its true conditions are read here.
+  state=$(on_server k3s kubectl -n "$namespace" get job "$job" -o json | python3 -c '
+import json, sys
+conditions = json.load(sys.stdin).get("status", {}).get("conditions") or []
+print(" ".join(c["type"] for c in conditions if c.get("status") == "True"))
+')
   case " $state " in
     *" Complete "*) exit 0 ;;
     *" Failed "*)
