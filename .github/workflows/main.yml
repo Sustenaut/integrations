@@ -13,7 +13,7 @@ jobs:
   # jobs it ran are skipped, and nothing here tests less than it did.
   tested:
     name: ci
-    uses: Sustenaut/pubrules/.github/workflows/job-tested.yml@2fe559caa00c029d9be864faa7f7cc20cd234d0e # v0.43.0
+    uses: Sustenaut/pubrules/.github/workflows/job-tested.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
     with: {"workflow": ".github/workflows/pr.yml"}
     permissions:
       actions: read
@@ -23,25 +23,25 @@ jobs:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubrules/.github/workflows/job-python-functional.yml@2fe559caa00c029d9be864faa7f7cc20cd234d0e # v0.43.0
+    uses: Sustenaut/pubrules/.github/workflows/job-python-functional.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
 
   audit:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubrules/.github/workflows/job-python-audit.yml@2fe559caa00c029d9be864faa7f7cc20cd234d0e # v0.43.0
+    uses: Sustenaut/pubrules/.github/workflows/job-python-audit.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
 
   osv:
     name: ci
     needs: [tested]
     if: ${{ needs.tested.outputs.tested != 'true' }}
-    uses: Sustenaut/pubrules/.github/workflows/job-osv.yml@2fe559caa00c029d9be864faa7f7cc20cd234d0e # v0.43.0
+    uses: Sustenaut/pubrules/.github/workflows/job-osv.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
 
   sonar:
     name: ci
     needs: [tested, functional]
     if: ${{ !failure() && !cancelled() }}
-    uses: Sustenaut/pubrules/.github/workflows/job-sonar.yml@2fe559caa00c029d9be864faa7f7cc20cd234d0e # v0.43.0
+    uses: Sustenaut/pubrules/.github/workflows/job-sonar.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
     permissions:
       actions: read
       contents: read

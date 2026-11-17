@@ -1,0 +1,23 @@
+# Written by `pubrules sync` from pubrules.json's deploy block. Do not edit:
+# change pubrules.json and run `pubrules sync`.
+name: go-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      unit:
+        description: The deploy unit the convergence engine fulfils, once a person approves its plan
+        type: choice
+        required: true
+        options: ["integrations"]
+
+permissions:
+  contents: read
+
+jobs:
+  go-live:
+    uses: Sustenaut/pubrules/.github/workflows/go-live.yml@8954535c23300afb6629055d55f2e3bda907b7d9 # v0.43.2
+    with: {"unit": "${{ inputs.unit }}"}
+    permissions:
+      contents: read
+      id-token: write
