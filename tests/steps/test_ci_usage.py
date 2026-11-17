@@ -85,6 +85,10 @@ class FakeStore:
         return self.files[self.head], self.head
 
     def upload_file(self, data, *, name):
+        from integrations.clients.storage import StorageError
+
+        if len(data) > 1048576:
+            raise StorageError("write", 413, f"{name} is over 1048576 bytes")
         key = f"h{len(self.files)}"
         self.files[key] = data
         return {"id": key}
@@ -412,3 +416,46 @@ def the_backfills_wait_fails_when_the_job_fails(tmp_path):
     assert ran.returncode == 1
     assert "Job ci-jobs-backfill failed" in ran.stderr and "HTTP 412" in ran.stderr
     assert '{"call"' not in ran.stderr, "call records stay out"
+
+
+@then("a state of 90 days of jobs is pruned to the look back when it is saved")
+def a_state_of_90_days_of_jobs_is_pruned_when_saved():
+    from integrations.ci_usage.jobs import State
+
+    store = FakeStore()
+    old = State({str(n): (NOW - timedelta(minutes=10 * n)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                 for n in range(90 * 144 * 3)})
+    assert len(old.encode()) > 1048576, "too big to store as it is"
+    seeded = store.upload_file(json.dumps({"written": {}, "finished": {}}).encode(), name="written.json")
+    store.head = seeded["id"]
+    store.files[seeded["id"]] = old.encode()  # as a backfill left it, before the limit
+    github = FakeGitHub()
+    github.run()
+    github.jobs[7] = [job(999_999)]
+    assert poller(github, store).poll() == 1
+    saved = store.files[store.head]
+    kept = json.loads(saved)["written"]
+    assert len(saved) < 1048576 and "999999" in kept and "1" in kept, "the look back's ids stay"
+    assert all(datetime.fromisoformat(t.replace("Z", "+00:00")) >= NOW - timedelta(days=4) for t in kept.values())
+
+
+@then("a job listed again inside the look back is not written twice")
+def a_job_listed_again_inside_the_look_back_is_not_written_twice():
+    github, store = FakeGitHub(), FakeStore()
+    github.run(created=-2 * 24 * 60, updated=-2 * 24 * 60 + 30)
+    github.jobs[7] = [job(1, queued=-2 * 24 * 60 + 1, started=-2 * 24 * 60 + 2, done=-2 * 24 * 60 + 20)]
+    poller(github, store).poll()
+    github.runs[0]["updated_at"] = at(5)  # re-run: listed and read again
+    github.jobs[7].append(job(2, queued=1, started=2, done=4))
+    assert poller(github, store, now=NOW + timedelta(minutes=10)).poll() == 1
+    assert sorted(r["job_id"] for r in store.rows()) == [1, 2]
+
+
+@then("a backfill writes a run two days' queries list only once")
+def a_backfill_writes_a_run_two_days_queries_list_only_once():
+    github, store = FakeGitHub(), FakeStore()
+    midnight = (NOW - timedelta(days=30)).replace(hour=0, minute=0, second=0)
+    minutes = int((midnight - NOW).total_seconds() // 60)
+    github.run(9, created=minutes, updated=minutes + 30)
+    github.jobs[9] = [job(9, queued=minutes, started=minutes + 1, done=minutes + 20)]
+    assert poller(github, store).poll(since_days=90) == 1

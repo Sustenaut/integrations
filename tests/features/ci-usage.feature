@@ -36,6 +36,15 @@ Feature: CI's wait times and compute load
   Scenario: The backfill's wait fails with the end of its log when the Job fails
     Then the backfill's wait fails with the end of its log when the Job fails
 
+  Scenario: A state of 90 days of jobs is pruned to the look back when it is saved
+    Then a state of 90 days of jobs is pruned to the look back when it is saved
+
+  Scenario: A job listed again inside the look back is not written twice
+    Then a job listed again inside the look back is not written twice
+
+  Scenario: A backfill writes a run two days' queries list only once
+    Then a backfill writes a run two days' queries list only once
+
   Scenario: A backfill writes a file for each day of runs
     Then a backfill writes a file for each day of runs
 

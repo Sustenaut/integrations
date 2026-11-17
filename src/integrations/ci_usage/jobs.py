@@ -163,6 +163,8 @@ class Poller:
     repositories: list[str]
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     report: Callable[[str], None] = print
+    # The jobs this pass wrote, older ones too.
+    _seen: set[str] = field(default_factory=set, init=False, repr=False)
 
     def load(self) -> tuple[State, str | None]:
         from ..clients.storage import NotFound  # noqa: PLC0415
@@ -173,7 +175,7 @@ class Poller:
             return State(), None
         return State.decode(data), etag
 
-    def save(self, state: State, read: str | None) -> str:
+    def save(self, state: State, read: str | None, keep_since: datetime | None = None) -> str:
         """Saves it, and gives the head's new hash, for the next save's If-Match. When another
         pass moved the head since it was read (a backfill and the ten-minute CronJob run side
         by side), storage refuses the move (412): what that pass saved is read back and merged
@@ -181,7 +183,14 @@ class Poller:
         times in all."""
         from ..clients.storage import StorageError  # noqa: PLC0415
 
+        def prune() -> None:
+            # Storage keeps a state file to 1 MiB, and only what the next pass can list again is
+            # worth keeping: without this, a 90-day backfill's ids outgrew it (413).
+            if keep_since is not None:
+                state.forget_before(keep_since)
+
         for _ in range(SAVE_TRIES - 1):
+            prune()
             stored = self.store.upload_file(state.encode(), name="written.json")
             try:
                 self.store.move_head(HEAD, stored["id"], if_match=read)
@@ -191,6 +200,7 @@ class Poller:
                     raise
             theirs, read = self.load()
             state.merge(theirs)
+        prune()
         stored = self.store.upload_file(state.encode(), name="written.json")
         self.store.move_head(HEAD, stored["id"], if_match=read)
         return stored["id"]
@@ -202,6 +212,12 @@ class Poller:
         start = (now - timedelta(days=since_days)).replace(microsecond=0)
         state, read = self.load()
         saved = state.encode()
+        # What the next pass can list again: runs created in its look back, so jobs that
+        # completed since, with a day's margin. A backfill's older ids go as it passes them.
+        keep_since = now - timedelta(days=LOOKBACK_DAYS + 1)
+        # Jobs written in this pass, older ones too: a run created at midnight is listed by
+        # two days' queries.
+        self._seen = set()
         written = 0
         for begin, end in days(start, now + timedelta(seconds=1)):
             rows = [r for repository in self.repositories for r in self._rows(repository, begin, end, state, now)]
@@ -211,12 +227,14 @@ class Poller:
             self.buffer.put_buffer(place(FOLDER, f"ci-jobs-{begin:%Y%m%d}", now, data), data)
             for r in rows:
                 state.written[str(r["job_id"])] = stamp(r["completed_at"])
+                self._seen.add(str(r["job_id"]))
             written += len(rows)
-            # Saved day by day, so a backfill stopped partway goes on where it was.
-            read, saved = self.save(state, read), state.encode()
-        state.forget_before(now - timedelta(days=LOOKBACK_DAYS + 1))
+            # Saved day by day, so a pass stopped partway keeps what it wrote in the look back.
+            read = self.save(state, read, keep_since)
+            saved = state.encode()
+        state.forget_before(keep_since)
         if state.encode() != saved:
-            self.save(state, read)
+            self.save(state, read, keep_since)
         self.report(f"{written} jobs written from {len(self.repositories)} repositories")
         return written
 
@@ -230,7 +248,8 @@ class Poller:
                 continue
             jobs = self.github.pages(f"/repos/{repository}/actions/runs/{run['id']}/jobs?filter=all", "jobs")
             done = [j for j in jobs if j.get("status") == "completed" and j.get("completed_at")]
-            rows += [row(repository, run, j, now) for j in done if str(j["id"]) not in state.written]
+            rows += [row(repository, run, j, now) for j in done
+                     if str(j["id"]) not in state.written and str(j["id"]) not in self._seen]
             if run.get("status") == "completed" and len(done) == len(jobs):
                 state.finished[key] = changed
         return rows
