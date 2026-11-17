@@ -4,7 +4,7 @@ INGEST_SIGNALS, when set, also loads observability's signals: {"tenant": ...,
 "dataset": ...}, the tenant its evaluator writes them to and the dataset whose
 signals table they load into. INGEST_NEED_STATES, in the same shape, loads the
 convergence engine's need states into that dataset's need_states table, and
-INGEST_PUBKIT_CHECKS the platform's nightly pubkit checks into its pubkit_checks table.
+INGEST_PUBKIT_CHECKS the platform's nightly pubrules checks into its pubkit_checks table.
 
 INGEST_BUFFERS names any number more, as a list: [{"tenant": ..., "dataset": ..., "table":
 ...}], each the Kind whose table it names (inbox.KINDS), so one dataset may hold several
@@ -49,7 +49,7 @@ def need_states(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
 
 
 def pubkit_checks(text: str) -> tuple[dict[str, str], dict[str, Kind]]:
-    """INGEST_PUBKIT_CHECKS: the platform's nightly checks of each repository against pubkit."""
+    """INGEST_PUBKIT_CHECKS: the platform's nightly checks of each repository against pubrules."""
     return buffer(text, "INGEST_PUBKIT_CHECKS", PUBKIT_CHECKS)
 
 

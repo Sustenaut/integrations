@@ -77,7 +77,7 @@ SIGNALS = Kind("inbox/signals/", "signals", decode_signals, encode_signals, repo
 NEED_STATES = Kind("inbox/need-states/", "need_states", decode_need_states, encode_need_states, reports=False,
                    what="need states")
 PUBKIT_CHECKS = Kind("inbox/pubkit-checks/", "pubkit_checks", decode_pubkit_checks, encode_pubkit_checks,
-                     reports=False, what="pubkit checks")
+                     reports=False, what="pubrules checks")
 # CI's wait times and compute load: two Kinds in the one tenant ci-usage.
 CI_JOBS = Kind("inbox/ci-jobs/", "ci_jobs", decode_ci_jobs, encode_ci_jobs, reports=False, what="CI jobs",
                batches=f"{BATCHES}ci_jobs-")

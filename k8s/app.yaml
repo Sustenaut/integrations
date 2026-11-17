@@ -26,7 +26,7 @@ spec:
         app: integrations
     spec:
       serviceAccountName: app
-      # Its hardening and probes come from pubkit's app component (kustomization.yaml).
+      # Its hardening and probes come from pubrules's app component (kustomization.yaml).
       containers:
         - name: app
           image: ghcr.io/sustenaut/sustenaut-integrations

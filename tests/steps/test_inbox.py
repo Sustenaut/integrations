@@ -76,7 +76,7 @@ class PickyBigQuery(FakeBigQuery):
         self.status_rows: list[dict] = []
         self.signal_rows: list[dict] = []
         self.need_state_rows: list[dict] = []
-        self.pubkit_check_rows: list[dict] = []
+        self.pubrules_check_rows: list[dict] = []
         self.ci_job_rows: list[dict] = []
         self.cluster_usage_rows: list[dict] = []
         self.datasets: list[str] = []
@@ -107,7 +107,7 @@ class PickyBigQuery(FakeBigQuery):
                 self.cluster_usage_rows += decode_cluster_usage(data)
                 return Response(200, b"{}")
             if table == "pubkit_checks":
-                self.pubkit_check_rows += decode_pubkit_checks(data)
+                self.pubrules_check_rows += decode_pubkit_checks(data)
                 return Response(200, b"{}")
             rows = decode(data)
             if table == STATUS_TABLE:
@@ -637,14 +637,14 @@ def ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
         named_buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
 
 
-def pubkit_check(n: int, **fields) -> dict:
+def pubrules_check(n: int, **fields) -> dict:
     moment = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
     return {"observed_at": moment, "repository": f"example-org/repo{n}", "check": "pin", "status": "pass",
             "pinned": "0.37.0", "latest": "0.37.0", "main_commit": "abc123", "run_url": "", "fix": "",
             "run_started_at": moment, **fields}
 
 
-@then("pubkit checks load into their own table from their own tenant and leave")
+@then("pubrules checks load into their own table from their own tenant and leave")
 def pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
     buffer, bigquery = FakeBuffer(), PickyBigQuery()
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
@@ -654,25 +654,25 @@ def pubkit_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
                       BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
                       JobBudget(clock), statuses.append, clock, kinds={"platform": PUBKIT_CHECKS})
     buffer.files["inbox/pubkit-checks/2027-01-15/024100-nightly-1.avro"] = encode_pubkit_checks(
-        [pubkit_check(1), pubkit_check(2, status="fail", pinned="0.35.1",
-                                       fix="`git latest && ./pubkit bump`, then open its PR")])
+        [pubrules_check(1), pubrules_check(2, status="fail", pinned="0.35.1",
+                                       fix="`git latest && ./pubrules bump`, then open its PR")])
     buffer.files["inbox/pubkit-checks/2027-01-15/024101-nightly-2.avro"] = encode_signals([signal(1)])
     scanner.tick(["platform"])
     assert bigquery.tables == ["pubkit_checks"]
-    assert sorted((r["repository"], r["status"]) for r in bigquery.pubkit_check_rows) == [
+    assert sorted((r["repository"], r["status"]) for r in bigquery.pubrules_check_rows) == [
         ("example-org/repo1", "pass"), ("example-org/repo2", "fail")]
     assert buffer.under("rejected/") == ["rejected/pubkit-checks/2027-01-15/024101-nightly-2.avro"]
     assert "can't be read" in statuses[0]["problems"]
 
 
-@then("pubkit checks are the same bytes for the same rows")
+@then("pubrules checks are the same bytes for the same rows")
 def pubkit_checks_are_the_same_bytes_for_the_same_rows():
-    rows = [pubkit_check(1), pubkit_check(2, check="sync", status="fail")]
+    rows = [pubrules_check(1), pubrules_check(2, check="sync", status="fail")]
     assert encode_pubkit_checks(rows) == encode_pubkit_checks([dict(r) for r in rows])
     assert decode_pubkit_checks(encode_pubkit_checks(rows)) == rows
 
 
-@then("ingest pubkit checks names its tenant and dataset beside the others")
+@then("ingest pubrules checks names its tenant and dataset beside the others")
 def ingest_pubkit_checks_names_its_tenant_and_dataset_beside_the_others():
     tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
                                    '{"tenant": "need-states", "dataset": "convergence"}',

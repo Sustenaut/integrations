@@ -305,9 +305,9 @@ convergence engine's need states the same way, from `inbox/need-states/` into th
 dataset's `need_states` table, for observability's `need_drift` rule. A file there that
 isn't need states is set aside alone, in `rejected/`. `INGEST_PUBKIT_CHECKS`
 (`{"tenant": "pubkit-checks", "dataset": "platform"}`) loads the platform's nightly
-checks of each repository against pubkit, passes and failures, from
+checks of each repository against pubrules, passes and failures, from
 `inbox/pubkit-checks/` into that dataset's `pubkit_checks` table, for observability's
-`pubkit_drift` rule and for audits; it too sets aside what isn't pubkit checks.
+`pubkit_drift` rule and for audits; it too sets aside what isn't pubrules checks.
 `INGEST_BUFFERS` names any number more, as a list of `{"tenant": ..., "dataset": ...,
 "table": ...}`, each the buffer whose table it names, so one dataset may hold several:
 `[{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"}, {"tenant":
@@ -342,19 +342,19 @@ To add a use case: add its route, regenerate the spec, and add it to `USE_CASES`
 ### Deploying
 
 `.github/workflows/deploy.yml` builds the image on each merge to main, once CI has
-passed, and applies `k8s/` with pubkit's `k8s-deploy.yml`, once `DEPLOY_INTEGRATIONS` is
+passed, and applies `k8s/` with pubrules's `k8s-deploy.yml`, once `DEPLOY_INTEGRATIONS` is
 `on`. The variables become the ConfigMaps `settings` and `ingest-settings`.
 
 What it needs elsewhere: shared-infra's `integrations-ingest` account and the call log
 datasets (`infra/call_log.tf`), storage's `calls-integrations` tenant and the buffers of
 the projects it loads, and its variables on this repository.
-pubkit.json's `deploy` block lists them with everything else it needs, and pubkit's
+pubrules.json's `deploy` block lists them with everything else it needs, and pubrules's
 deploy walk checks each and makes what it can. To take it live, or bring it back in
 step, from a checkout of this repository with Sustenaut/shared-infra checked out beside
 it, on a machine on the admin tailnet, signed in to `gh` and `gcloud`:
 
 ```sh
-./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubkit.json
+./with-secrets ./pubdeploy walk --fulfil --server sustenaut --zones ../shared-infra/pubrules.json
 ```
 
 It checks every need, prints the plan, and waits for a typed `yes`; then it makes each

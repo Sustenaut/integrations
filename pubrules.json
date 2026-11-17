@@ -22,7 +22,7 @@
     {"path": "corpus/.publet/signing.key", "bitwarden": {"project": {"id": "377de170-5487-40f7-9a01-b4f50064e1c5", "name": "Pub"}, "name": "pub-signing-key-integrations"}}
   ],
   "deploy": {
-    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.4.1/pubdeploy-0.4.1-py3-none-any.whl", "sha256": "c9c9b49b44b771c6f15219c186e3646203381c6a30570c0b2568951d3a53deb0"}, {"distribution": "pubsec", "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.2.3/pubsec-0.2.3-py3-none-any.whl", "sha256": "4a0b9435ff111565265f330fa3a1642b59562d77b5d1806c1bfecfe83e63b106"}],
+    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl", "sha256": "320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd"}, {"distribution": "pubsec", "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl", "sha256": "a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18"}],
     "namespace": "integrations",
     "host": "integrations.sustenaut.eu",
     "workflow": "deploy.yml",
