@@ -32,7 +32,7 @@
     {
       "plugin": "github.actions-oidc",
       "paths": [
-        ".github/workflows/go-live.yml"
+        ".github/workflows/service-needs.yml"
       ],
       "mode": "required"
     },

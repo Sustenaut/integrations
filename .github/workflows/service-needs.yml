@@ -1,0 +1,29 @@
+# Written by `pubrules sync` from pubrules.json's deploy block. Do not edit:
+# change pubrules.json and run `pubrules sync`.
+name: service-needs
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "check: each need's state, read-only; fulfil: the engine makes what is missing, once a person approves its plan"
+        type: choice
+        required: true
+        default: check
+        options: ["check", "fulfil"]
+      unit:
+        description: The deploy unit whose needs the convergence engine checks or fulfils
+        type: choice
+        required: true
+        options: ["integrations"]
+
+permissions:
+  contents: read
+
+jobs:
+  service-needs:
+    uses: Sustenaut/pubrules/.github/workflows/service-needs.yml@0549ea5347f79c2bc41b3316abb7a01270a652f4 # v0.44.0
+    with: {"unit": "${{ inputs.unit }}", "kind": "${{ inputs.action }}"}
+    permissions:
+      contents: read
+      id-token: write

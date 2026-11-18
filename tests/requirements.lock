@@ -630,8 +630,8 @@ pluggy==1.7.0 \
     --hash=sha256:d1eaa46ebb595891b860ab086b4d09c8588af65ebd4361b8e8f4bb8920b90ba8
 pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl \
     --hash=sha256:320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd
-pubrules @ https://github.com/Sustenaut/pubrules/releases/download/v0.43.2/pubrules-0.43.2-py3-none-any.whl \
-    --hash=sha256:732f117fd8f26b1e43e6060de4688c702963c4b1ba01fa0149157bc0fee269f8
+pubrules @ https://github.com/Sustenaut/pubrules/releases/download/v0.44.0/pubrules-0.44.0-py3-none-any.whl \
+    --hash=sha256:8aa488703c38a5c0b0dea9ba549189b585c0a72e77e6495834e58573bfa0dc8d
 pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl \
     --hash=sha256:a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18
 pubtest @ https://github.com/Sustenaut/pubtest/releases/download/v0.2.0/pubtest-0.2.0-py3-none-any.whl \

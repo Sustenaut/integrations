@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by pubrules 0.43.2: `pubrules sync` rewrites this file, and
+# Managed by pubrules 0.44.0: `pubrules sync` rewrites this file, and
 # `pubrules sync --check` fails when it differs.
 #
 # Run this repository's pinned pubsec, which holds what pubrules does not: a
@@ -9,7 +9,7 @@
 #   ./pubsec run -- terraform plan
 #   ./pubsec --version
 #
-# The release is deploy.providers' pubsec, or the oldest pubrules 0.43.2
+# The release is deploy.providers' pubsec, or the oldest pubrules 0.44.0
 # works with where it lists none, or an older one.
 # Its wheel is fetched once into the user's cache (from the wheel mirror,
 # when pubrules.json names one and GitHub fails) and checked against its
