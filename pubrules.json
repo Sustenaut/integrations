@@ -15,14 +15,42 @@
     "release_app": 5529889
   },
   "variables": {
-    "names": ["INGEST_DATASETS", "INGEST_SIGNALS", "INGEST_NEED_STATES", "INGEST_PUBRULES_CHECKS", "INGEST_BUFFERS", "INTEGRATIONS_ORIGINS", "INTEGRATIONS_EDIT_PR_REPOS"],
+    "names": [
+      "INGEST_DATASETS",
+      "INGEST_SIGNALS",
+      "INGEST_NEED_STATES",
+      "INGEST_PUBRULES_CHECKS",
+      "INGEST_BUFFERS",
+      "INTEGRATIONS_ORIGINS",
+      "INTEGRATIONS_EDIT_PR_REPOS"
+    ],
     "deploy": "deploy.yml"
   },
   "signing_keys": [
-    {"path": "corpus/.publet/signing.key", "bitwarden": {"project": {"id": "377de170-5487-40f7-9a01-b4f50064e1c5", "name": "Pub"}, "name": "pub-signing-key-integrations"}}
+    {
+      "path": "corpus/.publet/signing.key",
+      "bitwarden": {
+        "project": {
+          "id": "377de170-5487-40f7-9a01-b4f50064e1c5",
+          "name": "Pub"
+        },
+        "name": "pub-signing-key-integrations"
+      }
+    }
   ],
   "deploy": {
-    "providers": [{"distribution": "pubdeploy", "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl", "sha256": "320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd"}, {"distribution": "pubsec", "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl", "sha256": "a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18"}],
+    "providers": [
+      {
+        "distribution": "pubdeploy",
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl",
+        "sha256": "320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd"
+      },
+      {
+        "distribution": "pubsec",
+        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl",
+        "sha256": "a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18"
+      }
+    ],
     "namespace": "integrations",
     "host": "integrations.sustenaut.eu",
     "workflow": "deploy.yml",
@@ -66,26 +94,42 @@
       {
         "type": "bitwarden.secret",
         "name": "github-release-reader-id",
-        "secret": {"name": "ci-jobs-app", "key": "app-id"}
+        "secret": {
+          "name": "ci-jobs-app",
+          "key": "app-id"
+        }
       },
       {
         "type": "bitwarden.secret",
         "name": "github-release-reader-key",
-        "secret": {"name": "ci-jobs-app", "key": "app-key"}
+        "secret": {
+          "name": "ci-jobs-app",
+          "key": "app-key"
+        }
       },
       {
         "type": "bitwarden.secret",
         "name": "github-release-reader-installation-id",
-        "secret": {"name": "ci-jobs-app", "key": "installation-id"}
+        "secret": {
+          "name": "ci-jobs-app",
+          "key": "installation-id"
+        }
       },
       {
         "type": "storage.tenant",
         "name": "ci-usage",
         "storage": "Sustenaut/storage",
         "url": "https://storage.sustenaut.eu",
-        "read": ["k8s:integrations/ingest"],
-        "write": ["k8s:integrations/ci-jobs", "k8s:integrations/ingest"],
-        "delete": ["k8s:integrations/ingest"],
+        "read": [
+          "k8s:integrations/ingest"
+        ],
+        "write": [
+          "k8s:integrations/ci-jobs",
+          "k8s:integrations/ingest"
+        ],
+        "delete": [
+          "k8s:integrations/ingest"
+        ],
         "private": true,
         "inbox": true
       },
@@ -94,8 +138,12 @@
         "name": "ci-jobs",
         "storage": "Sustenaut/storage",
         "url": "https://storage.sustenaut.eu",
-        "read": ["k8s:integrations/ci-jobs"],
-        "write": ["k8s:integrations/ci-jobs"],
+        "read": [
+          "k8s:integrations/ci-jobs"
+        ],
+        "write": [
+          "k8s:integrations/ci-jobs"
+        ],
         "private": true,
         "heads": true
       },
@@ -103,10 +151,17 @@
         "type": "k8s.job-once",
         "name": "ci-jobs-backfill",
         "cronjob": "ci-jobs",
-        "args": ["--since-days", "90"],
+        "args": [
+          "--since-days",
+          "90"
+        ],
         "timeout": "6h",
         "rerun": "never",
-        "after": ["k8s.secret:ci-jobs-app", "storage.tenant:ci-usage", "storage.tenant:ci-jobs"]
+        "after": [
+          "k8s.secret:ci-jobs-app",
+          "storage.tenant:ci-usage",
+          "storage.tenant:ci-jobs"
+        ]
       }
     ]
   },
@@ -114,5 +169,12 @@
     "wheels": "https://storage.sustenaut.eu/wheels",
     "terraform": "https://storage.sustenaut.eu/terraform",
     "pypi": "https://storage.sustenaut.eu/pypi"
-  }
+  },
+  "exceptions": [
+    {
+      "rule": "TEST-04",
+      "reason": "289 scenarios had no When on the move from pubrules 0.43.2, before the rule; give each its one action, on pubtest's steps",
+      "until": "2026-12-31"
+    }
+  ]
 }
