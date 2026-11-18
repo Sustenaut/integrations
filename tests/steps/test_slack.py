@@ -1,161 +1,139 @@
-"""The Slack clients, against recorded answers."""
+"""The Slack clients, against a fake Slack (providers.py); their fakes, in memory."""
 
 from __future__ import annotations
 
+import shlex
+from dataclasses import asdict
 from urllib.parse import parse_qs
 
-import pytest
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from integrations import cli
-from integrations.calls import Caller, Check, MemorySink, Refused, Replay, Unavailable
-from integrations.clients.slack import (FakeSlackChannels, FakeSlackPost, SlackChannel, SlackChannels, SlackPost)
-from pytest_bdd import scenarios, then
+from integrations.calls import Caller
+from integrations.clients.slack import FakeSlackChannels, FakeSlackPost, SlackChannels, SlackPost
+
+from .providers import caller, providers
 
 scenarios("slack.feature")
 
-API = "https://slack.com/api"
+
+@given(parsers.parse('the bot\'s Slack token "{bot}" and the owner\'s "{owner}"'))
+def tokens(ctx, bot, owner):
+    ctx.bot, ctx.owner = bot, owner
 
 
-def caller(responses):
-    sink, transport = MemorySink(), Replay(responses)
-    return Caller("a-repo", sink=sink, transport=transport, sleep=lambda _: None), sink, transport
+def channels(ctx) -> SlackChannels:
+    return SlackChannels(caller(ctx), lambda: ctx.owner, lambda: ctx.bot)
 
 
-def ok(**fields):
-    return {"status": 200, "json": {"ok": True, **fields}}
+@when(parsers.parse('the bot posts "{text}" to "{channel}"'))
+def bot_posts(ctx, text, channel):
+    ctx.attempt(lambda: SlackPost(caller(ctx), lambda: ctx.bot).post(channel, text))
 
 
-def params(request):
-    return {k: v[0] for k, v in parse_qs(request.body.decode()).items()}
+@when("the post client is checked")
+def post_checked(ctx):
+    ctx.attempt(lambda: asdict(SlackPost(caller(ctx), lambda: ctx.bot).check()))
 
 
-@then("a post uses the bot token and is recorded")
-def a_post_uses_the_bot_token_and_is_recorded():
-    made, sink, transport = caller({f"POST {API}/chat.postMessage": ok()})
-    SlackPost(made, lambda: "bot").post("C1", "hello")
-    request = transport.sent[0]
-    assert request.headers["Authorization"] == "Bearer bot"
-    assert params(request) == {"channel": "C1", "text": "hello"}
-    assert (sink.records[0].plugin, sink.records[0].operation) == ("slack.post", "post")
+@when("the channels client is checked")
+def channels_checked(ctx):
+    ctx.attempt(lambda: asdict(channels(ctx).check()))
 
 
-@then("slacks refusal in a 200 is a refusal")
-def slacks_refusal_in_a_200_is_a_refusal():
-    made, sink, _ = caller({f"POST {API}/chat.postMessage": {"status": 200, "json": {"ok": False, "error": "no_channel"}}})
-    with pytest.raises(Refused, match="no_channel"):
-        SlackPost(made, lambda: "bot").post("C1", "hello")
-    assert sink.records[0].outcome == "refused"
+@when("the channels are listed")
+def listed(ctx):
+    ctx.attempt(lambda: [asdict(c) for c in channels(ctx).channels()])
 
 
-@then("an http refusal is a refusal")
-def an_http_refusal_is_a_refusal():
-    made, _, _ = caller({f"POST {API}/chat.postMessage": {"status": 403, "json": {}}})
-    with pytest.raises(Refused, match="HTTP 403"):
-        SlackPost(made, lambda: "bot").post("C1", "hello")
+@when(parsers.parse('the channel "{name}" is created'))
+def created(ctx, name):
+    ctx.attempt(lambda: asdict(channels(ctx).create(name)))
 
 
-@then("a post is not repeated as it could be seen twice")
-def a_post_is_not_repeated_as_it_could_be_seen_twice():
-    made, _, transport = caller({f"POST {API}/chat.postMessage": {"status": 503, "json": {}}})
-    with pytest.raises(Unavailable):
-        SlackPost(made, lambda: "bot").post("C1", "hello")
-    assert len(transport.sent) == 1
+@when(parsers.parse('the channels client calls "{method}" with "{args}"'))
+def channels_call(ctx, method, args):
+    ctx.attempt(lambda: getattr(channels(ctx), method)(*args.split(",")))
 
 
-@then("check says whether the token works")
-def check_says_whether_the_token_works():
-    made, _, transport = caller({f"POST {API}/auth.test": ok(user_id="U1")})
-    assert SlackPost(made, lambda: "bot").check() == Check("slack.post", True)
-    assert SlackChannels(made, lambda: "owner", lambda: "bot").check() == Check("slack.channel-heal", True)
-    assert transport.sent[1].headers["Authorization"] == "Bearer owner"
-    refused = {f"POST {API}/auth.test": {"status": 200, "json": {"ok": False, "error": "invalid_auth"}}}
-    made, _, _ = caller(refused)
-    assert not SlackPost(made, lambda: "bot").check().ok
-    assert not SlackChannels(made, lambda: "owner", lambda: "bot").check().ok
+@then(parsers.parse('the "{name}" service was asked "{request}" with the form:'))
+def asked_with_form(ctx, name, request, datatable):
+    """Some such request's form body was exactly these fields."""
+    want = {field: value for field, value in datatable[1:]}
+    method, path = request.split(" ", 1)
+    forms = [{k: v[0] for k, v in parse_qs(r["body"], keep_blank_values=True).items()}
+             for r in ctx.fakes[name].requests if (r["method"], r["path"]) == (method, path)]
+    assert want in forms, f"{name} was asked {request} with {forms}"
 
 
-@then("channels follow every page")
-def channels_follow_every_page():
-    pages = [ok(channels=[{"id": "C1", "name": "one", "is_archived": True, "creator": "U1",
-                           "purpose": {"value": "why"}}], response_metadata={"next_cursor": "more"}),
-             ok(channels=[{"id": "C2", "name": "two"}], response_metadata={"next_cursor": ""})]
-    made, _, transport = caller({f"POST {API}/conversations.list": pages})
-    channels = SlackChannels(made, lambda: "owner", lambda: "bot").channels()
-    assert channels == [SlackChannel("C1", "one", True, "U1", "why"), SlackChannel("C2", "two")]
-    assert params(transport.sent[1])["cursor"] == "more"
-    assert params(transport.sent[0])["exclude_archived"] == "false"
+# --- the fakes -------------------------------------------------------------------
+
+@when(parsers.parse('the post fake posts "{text}" to "{channel}"'))
+def post_fake_posts(ctx, text, channel):
+    fake = FakeSlackPost()
+
+    def post():
+        fake.post(channel, text)
+        return {"posted": [list(p) for p in fake.posted], "check": asdict(fake.check())}
+    ctx.attempt(post)
 
 
-@then("a new channel invites the bot with the owners token")
-def a_new_channel_invites_the_bot_with_the_owners_token():
-    made, _, transport = caller({
-        f"POST {API}/conversations.create": ok(channel={"id": "C9", "name": "new"}),
-        f"POST {API}/auth.test": ok(user_id="U-bot"),
-        f"POST {API}/conversations.invite": ok()})
-    assert SlackChannels(made, lambda: "owner", lambda: "bot").create("new") == SlackChannel("C9", "new")
-    by_url = {r.url.rsplit("/", 1)[1]: r for r in transport.sent}
-    assert by_url["auth.test"].headers["Authorization"] == "Bearer bot"
-    assert by_url["conversations.invite"].headers["Authorization"] == "Bearer owner"
-    assert params(by_url["conversations.invite"]) == {"channel": "C9", "users": "U-bot"}
+@when(parsers.parse('a post fake set to fail posts "{text}" to "{channel}"'))
+def broken_post_fake_posts(ctx, text, channel):
+    ctx.attempt(lambda: FakeSlackPost(working=False).post(channel, text))
 
 
-@then("each change uses the owners token")
-def each_change_uses_the_owners_token():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ("rename", ("C1", "n"), "conversations.rename", {"channel": "C1", "name": "n"}),
-    ("archive", ("C1",), "conversations.archive", {"channel": "C1"}),
-    ("unarchive", ("C1",), "conversations.unarchive", {"channel": "C1"}),
-    ("set_purpose", ("C1", "why"), "conversations.setPurpose", {"channel": "C1", "purpose": "why"}),
-]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_each_change_uses_the_owners_token(method=case0[0], args=case0[1], called=case0[2], sent=case0[3])
+@when(parsers.parse("the {fake} fake that is {state} is checked"))
+def fake_checked(ctx, fake, state):
+    made = (FakeSlackPost if fake == "post" else FakeSlackChannels)(working=state == "working")
+    ctx.attempt(lambda: asdict(made.check()))
 
 
-def _case_each_change_uses_the_owners_token(method, args, called, sent):
-    made, sink, transport = caller({f"POST {API}/{called}": ok()})
-    getattr(SlackChannels(made, lambda: "owner", lambda: "bot"), method)(*args)
-    assert params(transport.sent[0]) == sent
-    assert transport.sent[0].headers["Authorization"] == "Bearer owner"
-    assert (sink.records[0].plugin, sink.records[0].operation) == ("slack.channel-heal", "change")
+@when(parsers.parse('the channels fake creates "{name}", renames it "{new}", sets its purpose "{why}" and archives it'))
+def fake_changes(ctx, name, new, why):
+    fake = FakeSlackChannels()
+
+    def change():
+        made = fake.create(name)
+        fake.rename(made.id, new)
+        fake.set_purpose(made.id, why)
+        fake.archive(made.id)
+        return [asdict(c) for c in fake.channels()]
+    ctx.attempt(change)
 
 
-@then("the fakes answer as the clients do")
-def the_fakes_answer_as_the_clients_do():
-    post = FakeSlackPost()
-    post.post("C1", "hi")
-    assert post.posted == [("C1", "hi")] and post.check().ok
-    broken = FakeSlackPost(working=False)
-    with pytest.raises(Refused):
-        broken.post("C1", "hi")
-    assert not broken.check().ok
-
-    channels = FakeSlackChannels(users={"bot": "U-bot"})
-    made = channels.create("one")
-    channels.rename(made.id, "two")
-    channels.set_purpose(made.id, "why")
-    channels.archive(made.id)
-    assert channels.channels() == [SlackChannel(made.id, "two", True, "", "why")]
-    channels.unarchive(made.id)
-    assert not channels.channels()[0].archived
-    assert channels.user_id(lambda: "bot") == "U-bot"
-    assert channels.check().ok and not FakeSlackChannels(working=False).check().ok
+@given("the channels fake has an archived channel")
+def fake_archived(ctx):
+    ctx.fake = FakeSlackChannels()
+    ctx.made = ctx.fake.create("one")
+    ctx.fake.archive(ctx.made.id)
 
 
-@then("the command posts with the token from the environment")
-def the_command_posts_with_the_token_from_the_environment(monkeypatch, capsys):
-    transport = Replay({f"POST {API}/chat.postMessage": ok()})
-    monkeypatch.setenv("SLACK_TOKEN", "from-env")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
-    monkeypatch.setattr(cli, "Caller", lambda repo, app: Caller(repo, app, transport=transport))
-    assert cli.main(["slack", "post", "--channel", "U1", "--text", "hi"]) == 0
-    assert transport.sent[0].headers["Authorization"] == "Bearer from-env"
+@when("the channels fake unarchives it")
+def fake_unarchives(ctx):
+    def unarchive():
+        ctx.fake.unarchive(ctx.made.id)
+        return [asdict(c) for c in ctx.fake.channels()]
+    ctx.attempt(unarchive)
 
 
-@then("the command says when slack refuses")
-def the_command_says_when_slack_refuses(monkeypatch, capsys):
-    transport = Replay({f"POST {API}/chat.postMessage": {"status": 200, "json": {"ok": False, "error": "nope"}}})
-    monkeypatch.setenv("SLACK_TOKEN", "t")
-    monkeypatch.setattr(cli, "Caller", lambda repo, app: Caller(repo, app, transport=transport))
-    assert cli.main(["slack", "post", "--channel", "U1", "--text", "hi"]) == 1
-    assert "nope" in capsys.readouterr().err
+@given(parsers.parse('the channels fake knows the token "{token}" as "{user}"'))
+def fake_knows(ctx, token, user):
+    ctx.fake = FakeSlackChannels(users={token: user})
+
+
+@when(parsers.parse('the channels fake is asked whose the token "{token}" is'))
+def fake_whose(ctx, token):
+    ctx.attempt(lambda: ctx.fake.user_id(lambda: token))
+
+
+# --- the command -----------------------------------------------------------------
+
+@when(parsers.parse('the command line "{line}" runs'))
+def command_runs(ctx, monkeypatch, line):
+    """`integrations LINE`, in this process, its calls going to the fake providers."""
+    monkeypatch.setattr(cli, "Caller", lambda repo, app: Caller(repo, app, transport=providers(ctx)))
+
+    def run():
+        raise SystemExit(cli.main(shlex.split(line)))
+    ctx.attempt(run)

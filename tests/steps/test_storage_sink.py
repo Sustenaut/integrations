@@ -1,10 +1,11 @@
-"""A sender's files: one every cycle, even with nothing in it, and nothing lost or doubled."""
+"""A sender's files: one every cycle, even with nothing in it, and nothing lost or doubled.
+Storage is the in-memory buffer of stores.py (FakeBuffer), which lists, takes and gives
+files as the storage service does, and BigQuery its PickyBigQuery."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from urllib.parse import urlparse
-
-import pytest
 
 from integrations import __version__
 from integrations.avrofile import decode, file_status
@@ -12,134 +13,147 @@ from integrations.calls import CallRecord, Caller, MemorySink, Response
 from integrations.ingest.bigquery import BigQueryLoader, JobBudget
 from integrations.ingest.inbox import Inbox, Scanner
 from integrations.storage_sink import StorageSink, first_wait
+from pytest_bdd import given, parsers, scenarios, then, when
 
-from .test_inbox import FakeBuffer, PickyBigQuery
-from .test_ingest import BASE, record
-from pytest_bdd import scenarios, then
+from .stores import BASE, FakeBuffer, PickyBigQuery, record
 
 scenarios("storage-sink.feature")
 
-START = 1_800_000_000.0
+
+class Buffer(FakeBuffer):
+    """The buffer, keeping the tenants it was asked for too."""
+
+    def __init__(self):
+        super().__init__()
+        self.tenants: set[str] = set()
+
+    def send(self, request, timeout):
+        self.tenants.add(urlparse(request.url).path.lstrip("/").partition("/")[0])
+        return super().send(request, timeout)
 
 
-def call(n=1, repo="a-repo"):
-    return CallRecord(**record(n, repo=repo))
+def view(ctx) -> dict:
+    """What a sink's action came to: the buffer's inbox, and the sink's own state."""
+    buffer, sink = ctx.buffer, ctx.sink
+    names = buffer.under("inbox/")
+    files = [{"name": n, "request_ids": [r["request_id"] for r in decode(buffer.files[n])],
+              "report": file_status(buffer.files[n])} for n in names]
+    return {"count": len(files), "files": files, "inbox request_ids": [i for f in files for i in f["request_ids"]],
+            "held": sorted(sink.held), "failures": dict(sink.failures),
+            "waiting": {k: len(v) for k, v in sink.waiting.items()}, "tenants": sorted(buffer.tenants)}
 
 
-@pytest.fixture
-def world():
-    buffer = FakeBuffer()
-    now = [START]
-    sink = StorageSink({"a-repo": "ds", "b-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE,
-                       sender="app-1_x", clock=lambda: now[0], start=False, limit=3)
-    return sink, buffer, now
+def act(ctx, action) -> None:
+    """One step of the action: an earlier step's refusal no Then could read fails it."""
+    unread = ctx.unread_refusal()
+    if unread is not None:
+        raise AssertionError(f"an earlier step of the action was refused: {unread!r}") from unread
+
+    def done():
+        action()
+        return view(ctx)
+    ctx.attempt(done)
 
 
-def files(buffer):
-    return buffer.under("inbox/")
+def sink(ctx, datasets, sender, **options):
+    ctx.buffer = Buffer()
+    ctx.sink = StorageSink(datasets, transport=ctx.buffer, token=lambda: "pod-token", base_url=BASE, sender=sender,
+                           clock=lambda: ctx.now, start=False, **options)
 
 
-@then("an idle cycle still writes a report")
-def an_idle_cycle_still_writes_a_report(world):
-    sink, buffer, now = world
-    now[0] += 120
-    sink.flush()
-    name, = files(buffer)
-    assert name.startswith("inbox/calls/2027-01-15/080200-app-1-x-") and name.endswith(".avro")
-    assert decode(buffer.files[name]) == []
-    assert file_status(buffer.files[name]) == {
-        "kind": "sender", "sender": "app-1_x", "version": __version__, "at": "2027-01-15T08:02:00Z",
-        "cycle_start": "2027-01-15T08:00:00Z", "cycle_end": "2027-01-15T08:02:00Z", "calls": 0, "drops": 0,
-        "buffer_size": 0, "storage_failures": 0, "page_count": 0, "page_ms_low": None, "page_ms_median": None,
-        "page_ms_high": None, "cold_start": True}
+@given(parsers.parse("the clock reads {moment}"))
+def clock_reads(ctx, moment):
+    ctx.now = datetime.fromisoformat(moment.replace("Z", "+00:00")).timestamp()
 
 
-@then("a cycles calls are one file")
-def a_cycles_calls_are_one_file(world):
-    sink, buffer, now = world
-    sink.write(call(1))
-    sink.write(call(2, repo="b-repo"))
-    now[0] += 120
-    sink.flush()
-    name, = files(buffer)
-    assert [r["request_id"] for r in decode(buffer.files[name])] == ["r1", "r2"]
-    report = file_status(buffer.files[name])
-    assert report["calls"] == 2 and report["buffer_size"] == 2
-    now[0] += 120
-    sink.flush()
-    assert file_status(buffer.files[files(buffer)[1]])["calls"] == 0
-    assert file_status(buffer.files[files(buffer)[1]])["cycle_start"] == "2027-01-15T08:02:00Z"
+@given(parsers.parse('the package\'s version is "{version}"'))
+def package_version(monkeypatch, version):
+    import integrations.storage_sink as storage_sink
+    monkeypatch.setattr(storage_sink, "__version__", version)
 
 
-@then("each project has its own tenant")
-def each_project_has_its_own_tenant():
-    sent = []
-
-    class Taking:
-        def send(self, request, timeout):
-            sent.append(urlparse(request.url).path)
-            return Response(200, b"{}")
-
-    sink = StorageSink({"a": "calls_one", "b": "calls_two"}, transport=Taking(), token=lambda: "t", base_url=BASE,
-                       sender="s", clock=lambda: START, start=False)
-    sink.flush()
-    assert sorted(p.split("/")[1] for p in sent) == ["calls-one", "calls-two"]
+@given(parsers.parse('a sink for the sender "{sender}" sending "{one}" and "{two}" to "{dataset}", keeping {limit:d} calls'))
+def two_project_sink(ctx, sender, one, two, dataset, limit):
+    sink(ctx, {one: dataset, two: dataset}, sender, limit=limit)
 
 
-@then("past the limit the oldest go and are counted")
-def past_the_limit_the_oldest_go_and_are_counted(world):
-    sink, buffer, _ = world
-    for n in range(1, 6):
-        sink.write(call(n))
-    sink.flush()
-    data = buffer.files[files(buffer)[0]]
-    assert [r["request_id"] for r in decode(data)] == ["r3", "r4", "r5"]
-    assert file_status(data)["drops"] == 2 and file_status(data)["buffer_size"] == 3
+@given(parsers.parse('a sink for the sender "{sender}" sending "{one}" to "{first}" and "{two}" to "{second}"'))
+def two_tenant_sink(ctx, sender, one, first, two, second):
+    sink(ctx, {one: first, two: second}, sender)
 
 
-@then("a record for a project with no buffer is counted")
-def a_record_for_a_project_with_no_buffer_is_counted(world):
-    sink, buffer, _ = world
-    sink.write(call(1, repo="elsewhere"))
-    sink.flush()
-    assert file_status(buffer.files[files(buffer)[0]])["drops"] == 1
+@given(parsers.parse('a sink for the sender "{sender}" sending nothing'))
+def empty_sink(ctx, sender):
+    sink(ctx, {}, sender)
 
 
-@then("writing a record never fails with no projects")
-def writing_a_record_never_fails_with_no_projects():
-    sink = StorageSink({}, transport=FakeBuffer(), token=lambda: "t", base_url=BASE, sender="s", start=False)
-    sink.write(call(1))
-    sink.flush()
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", flushing on write'))
+def flushing_sink(ctx, sender, repo, dataset):
+    sink(ctx, {repo: dataset}, sender, flush_on_write=True)
 
 
-@then("a refused file goes again as it was and the failures are reported")
-def a_refused_file_goes_again_as_it_was_and_the_failures_are_reported(world):
-    sink, buffer, now = world
-    sink.write(call(1))
-    buffer.down_for = {"PUT"}
-    now[0] += 120
-    sink.flush()
-    assert files(buffer) == []
-    held_name, held_data = sink.held["ds"]
-    sink.write(call(2))
-    now[0] += 120
-    sink.flush()
-    assert files(buffer) == [] and sink.failures["ds"] == 2
-    buffer.down_for = set()
-    now[0] += 120
-    sink.flush()
-    assert buffer.files[held_name] == held_data and not sink.held
-    assert [r["request_id"] for r in decode(held_data)] == ["r1"]
-    newer = next(n for n in files(buffer) if n != held_name)
-    assert [r["request_id"] for r in decode(buffer.files[newer])] == ["r2"]
-    assert file_status(buffer.files[newer])["storage_failures"] == 2
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", flushing on write, '
+                     "started {seconds:d} seconds ago"))
+def started_sink(ctx, sender, repo, dataset, seconds):
+    sink(ctx, {repo: dataset}, sender, flush_on_write=True)
+    ctx.sink.started = ctx.now - seconds
 
 
-@then("a lost answer cant double a files calls")
-def a_lost_answer_cant_double_a_files_calls(world):
-    sink, buffer, now = world
-    real = buffer.send
-    lost = [True]
+def give(ctx, n, repo):
+    ctx.sink.write(CallRecord(**record(n, repo=repo)))
+
+
+@given(parsers.parse('the sink was given call {n:d} of "{repo}"'))
+def was_given(ctx, n, repo):
+    give(ctx, n, repo)
+
+
+@given(parsers.parse('the sink was given calls {first:d} to {last:d} of "{repo}"'))
+def was_given_calls(ctx, first, last, repo):
+    for n in range(first, last + 1):
+        give(ctx, n, repo)
+
+
+@when(parsers.parse('the sink is given call {n:d} of "{repo}"'))
+def is_given(ctx, n, repo):
+    act(ctx, lambda: give(ctx, n, repo))
+
+
+@given(parsers.parse("{seconds:d} seconds pass"))
+@when(parsers.parse("{seconds:d} seconds pass"))
+def seconds_pass(ctx, seconds):
+    ctx.now += seconds
+
+
+def flush(ctx):
+    ctx.sink.flush()
+    if ctx.sink.held and not hasattr(ctx, "first_held"):
+        ctx.first_held = next(iter(ctx.sink.held.values()))
+
+
+@given("the sink flushed")
+def flushed(ctx):
+    flush(ctx)
+
+
+@when("the sink flushes")
+def flushes(ctx):
+    act(ctx, lambda: flush(ctx))
+
+
+@given("storage takes no PUT")
+def no_put(ctx):
+    ctx.buffer.down_for = {"PUT"}
+
+
+@given("storage takes files again")
+def takes_again(ctx):
+    ctx.buffer.down_for = set()
+
+
+@given("storage loses its answer to the first PUT")
+def loses_answer(ctx):
+    real, lost = ctx.buffer.send, [True]
 
     def send(request, timeout):
         answer = real(request, timeout)
@@ -147,171 +161,96 @@ def a_lost_answer_cant_double_a_files_calls(world):
             lost.clear()
             return Response(None, error="no answer")
         return answer
-
-    buffer.send = send
-    sink.write(call(1))
-    now[0] += 120
-    sink.flush()
-    now[0] += 120
-    sink.flush()
-    rows = [r["request_id"] for n in files(buffer) for r in decode(buffer.files[n])]
-    assert rows == ["r1"]
+    ctx.buffer.send = send
 
 
-@then("a token that cant be read is a failed write")
-def a_token_that_cant_be_read_is_a_failed_write(world):
-    sink, buffer, _ = world
-
-    def no_token():
-        raise OSError("gone")
-
-    sink.token = no_token
-    buffer.send = lambda request, timeout: Response(401, b"{}")
-    sink.flush()
-    assert sink.failures["ds"] == 1 and "ds" in sink.held
+@given(parsers.parse('the sink\'s token can\'t be read, saying "{why}"'))
+def no_token(ctx, why):
+    def token():
+        raise OSError(why)
+    ctx.sink.token = token
 
 
-@then("from a call to the tables")
-def from_a_call_to_the_tables(world):
-    sink, buffer, now = world
+@given(parsers.parse('storage answers every request with {status:d} and the body "{body}"'))
+def answers_every(ctx, status, body):
+    ctx.buffer.send = lambda request, timeout: Response(status, body.encode())
+
+
+@then("the file held back went as it was")
+def held_went_as_it_was(ctx):
+    """The file the first refusal held back is in the buffer, under its name, byte for byte."""
+    name, data = ctx.first_held
+    assert ctx.buffer.files.get(name) == data, f"{name} is not in the buffer as it was held"
+
+
+@when(parsers.parse('the scanner scans "{dataset}"'))
+def scanner_scans(ctx, dataset):
     bigquery = PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(lambda: now[0]), lambda _: None, lambda: now[0])
-    sink.write(call(1))
-    now[0] += 120
-    sink.flush()
-    scanner.tick(["ds"])
-    assert [r["request_id"] for r in bigquery.rows] == ["r1"]
-    assert [(r["kind"], r["sender"], r["calls"]) for r in bigquery.status_rows] == [("sender", "app-1_x", 1)]
-    assert buffer.inbox() == []
+    made = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
+    scanner = Scanner(Inbox(ctx.buffer, lambda: "pod-token", BASE),
+                      BigQueryLoader(made, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                      JobBudget(lambda: ctx.now), lambda _: None, lambda: ctx.now)
+
+    def scanned():
+        scanner.tick([dataset])
+        return {"rows": [r["request_id"] for r in bigquery.rows],
+                "status rows": [{k: r[k] for k in ("kind", "sender", "calls")} for r in bigquery.status_rows],
+                "sender reports": [{k: r[k] for k in ("page_count", "page_ms_median", "cold_start")}
+                                   for r in bigquery.status_rows if r["kind"] == "sender"],
+                "inbox": ctx.buffer.inbox()}
+    ctx.attempt(scanned)
 
 
-@then("with flush on write a request that finds the file overdue writes it")
-def with_flush_on_write_a_request_that_finds_the_file_overdue_writes_it():
-    buffer = FakeBuffer()
-    now = [START]
-    sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
-                       clock=lambda: now[0], start=False, flush_on_write=True)
-    sink.write(call(1))
-    assert files(buffer) == []
-    now[0] += 119
-    sink.write(call(2))
-    assert files(buffer) == []
-    now[0] += 1
-    sink.write(call(3))
-    name, = files(buffer)
-    assert [r["request_id"] for r in decode(buffer.files[name])] == ["r1", "r2", "r3"]
-    assert file_status(buffer.files[name])["cycle_start"] == "2027-01-15T08:00:00Z"
+@given(parsers.parse("the sink was given the page times {times}"))
+def page_times(ctx, times):
+    for ms in times.replace(" and ", ", ").split(", "):
+        ctx.sink.page(float(ms))
 
 
-@then("without it writing never waits on storage")
-def without_it_writing_never_waits_on_storage(world):
-    sink, buffer, now = world
-    now[0] += 600
-    sink.write(call(1))
-    assert files(buffer) == []
-
-
-@then("a write doesnt flush while another flush is under way")
-def a_write_doesnt_flush_while_another_flush_is_under_way():
-    buffer = FakeBuffer()
-    now = [START + 200]
-    sink = StorageSink({"a-repo": "ds"}, transport=buffer, token=lambda: "pod-token", base_url=BASE, sender="run-1",
-                       clock=lambda: now[0], start=False, flush_on_write=True)
-    sink.started = START
-    sink.flushing.acquire()
-    sink.write(call(1))
-    assert files(buffer) == [] and len(sink.waiting["ds"]) == 1
-    sink.flushing.release()
-    sink.write(call(2))
-    assert len(files(buffer)) == 1
-
-
-@then("a write storage didnt take is said in the log")
-def a_write_storage_didnt_take_is_said_in_the_log(world, capsys):
-    sink, buffer, _ = world
-    buffer.down_for = {"PUT"}
-    sink.flush()
-    assert "storage didn't take inbox/calls/" in capsys.readouterr().err
-
-
-@then("a refusal says storages reason and a missing token says why")
-def a_refusal_says_storages_reason_and_a_missing_token_says_why(world, capsys):
-    sink, buffer, _ = world
-    buffer.send = lambda request, timeout: Response(401, b'{"error": "refused: a token for another audience"}')
-
-    def no_token():
-        raise OSError("metadata server: timed out")
-
-    sink.token = no_token
-    sink.flush()
-    err = capsys.readouterr().err
-    assert "HTTP 401 refused: a token for another audience" in err and "no token to send: metadata server: timed out" in err
-
-
-@then("a refusal without a reason still says its status")
-def a_refusal_without_a_reason_still_says_its_status(world, capsys):
-    sink, buffer, _ = world
-    buffer.send = lambda request, timeout: Response(500, b"not json")
-    sink.flush()
-    assert "HTTP 500\n" in capsys.readouterr().err
-
-
-@then("page times become the windows low median and high")
-def page_times_become_the_windows_low_median_and_high(world):
-    sink, buffer, now = world
-    for ms in (120.4, 80, 3400, 95.6, 101):
-        sink.page(ms)
-    now[0] += 120
-    sink.flush()
-    report = file_status(buffer.files[files(buffer)[0]])
-    assert (report["page_count"], report["page_ms_low"], report["page_ms_median"], report["page_ms_high"]) == (5, 80, 101, 3400)
-
-
-@then("only the first window is a cold start and a quiet one has no times")
-def only_the_first_window_is_a_cold_start_and_a_quiet_one_has_no_times(world):
-    sink, buffer, now = world
-    sink.page(50)
-    now[0] += 120
-    sink.flush()
-    now[0] += 120
-    sink.flush()
-    first, second = (file_status(buffer.files[n]) for n in files(buffer))
-    assert first["cold_start"] is True and second["cold_start"] is False
-    assert second["page_count"] == 0 and second["page_ms_median"] is None
-
-
-@then("past the limit page times are still counted")
-def past_the_limit_page_times_are_still_counted(world, monkeypatch):
+@given(parsers.parse("a sink keeps up to {limit:d} page times"))
+def page_limit(monkeypatch, limit):
     import integrations.storage_sink as storage_sink
-    monkeypatch.setattr(storage_sink, "PAGE_LIMIT", 3)
-    sink, buffer, _ = world
-    for ms in (10, 20, 30, 40, 50):
-        sink.page(ms)
-    sink.flush()
-    report = file_status(buffer.files[files(buffer)[0]])
-    assert report["page_count"] == 5 and report["page_ms_high"] == 30
+    monkeypatch.setattr(storage_sink, "PAGE_LIMIT", limit)
 
 
-@then("page times reach the status table")
-def page_times_reach_the_status_table(world):
-    sink, buffer, now = world
-    bigquery = PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(lambda: now[0]), lambda _: None, lambda: now[0])
-    sink.page(250)
-    now[0] += 120
-    sink.flush()
-    scanner.tick(["ds"])
-    row, = [r for r in bigquery.status_rows if r["kind"] == "sender"]
-    assert (row["page_count"], row["page_ms_median"], row["cold_start"]) == (1, 250, True)
+@given("another flush is under way")
+def flush_under_way(ctx):
+    ctx.sink.flushing.acquire()
 
 
-@then("the threads first file comes a random part of a cycle in")
-def the_threads_first_file_comes_a_random_part_of_a_cycle_in():
-    assert first_wait(120, lambda: 0.25) == 30
-    assert 0 <= first_wait(120) < 120
+@given("the other flush is over")
+def flush_over(ctx):
+    ctx.sink.flushing.release()
+
+
+@then(parsers.parse('the result\'s "{key}" matches "{pattern}"'))
+def result_key_matches(ctx, key, pattern):
+    """The value at the dotted key is text, and all of it is the pattern (`*` for anything)."""
+    from pubtest.core import dig, matches
+    assert ctx.refused is None, f"it was refused: {ctx.refused.message}"
+    got = dig(ctx.result, key)
+    assert isinstance(got, str) and matches(pattern, got), f"the result's {key} is {got!r}"
+
+
+@then(parsers.parse('the result\'s "{key}" is the package\'s version'))
+def result_key_is_version(ctx, key):
+    from pubtest.core import dig
+    assert ctx.refused is None, f"it was refused: {ctx.refused.message}"
+    got = dig(ctx.result, key)
+    assert got == __version__, f"the result's {key} is {got!r}, not {__version__}"
+
+
+@when(parsers.parse("I ask how long a {seconds:d} second cycle's first wait is, the random number being {r:g}"))
+def first_wait_given(ctx, seconds, r):
+    ctx.attempt(lambda: first_wait(seconds, lambda: r))
+
+
+@when(parsers.parse("I ask how long a {seconds:d} second cycle's first wait is"))
+def first_wait_random(ctx, seconds):
+    ctx.attempt(lambda: first_wait(seconds))
+
+
+@then(parsers.parse("the result is at least {low:g} and less than {high:g}"))
+def result_between(ctx, low, high):
+    assert ctx.refused is None, f"it was refused: {ctx.refused.message}"
+    assert low <= ctx.result < high, f"the result is {ctx.result}"

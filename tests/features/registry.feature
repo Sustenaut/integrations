@@ -1,28 +1,106 @@
-Feature: The registry and the consumer format, held to their JSON schemas.
+Feature: The registry and the consumer format, held to their JSON schemas
 
-  Scenario: Plugin meets the schema
-    Then plugin meets the schema
+  Scenario: Every plugin meets the plugin schema and is named by its file
+    When I hold every plugin to the plugin schema
+    Then the result is empty
 
   Scenario: Every signature compiles
-    Then every signature compiles
+    When I compile every plugin's signatures
+    Then the result is empty
 
   Scenario: A plugin with no signatures must be manual only
-    Then a plugin with no signatures must be manual only
+    Given the plugin "linear.sync" with no signatures
+    When I hold it to the plugin schema
+    Then it is refused, saying "'M' was expected"
 
   Scenario: Every inventory row has its plugins and every plugin a row
-    Then every inventory row has its plugins and every plugin a row
+    When I compare the inventory with the registry
+    Then the result's "rows" is "33"
+    And the result's "not listed" is "[]"
+    And the result's "not plugins" is "[]"
 
-  Scenario: Every class has its targets
-    Then every class has its targets
+  Scenario: The classes are the four
+    When I read the classes
+    Then the result has 4 classes
+    And the result includes "H"
+    And the result includes "E"
+    And the result includes "S"
+    And the result includes "M"
 
-  Scenario: The registry names no consumer
-    Then the registry names no consumer
+  Scenario Outline: Every class has its targets, and how a caller calls in it
+    When I read the class "<class>"
+    Then the result includes "response_p95"
+    And the result includes "uptime"
+    And the result includes "on_failure"
+    And the result's "timeout" is "<timeout>"
+    And the result's "tries" is "<tries>"
 
-  Scenario: The loader and the schema accept the same
-    Then the loader and the schema accept the same
+    Examples:
+      | class | timeout | tries |
+      | H     | 10      | 1     |
+      | E     | 60      | 4     |
+      | S     | 30      | 3     |
+      | M     | 30      | 1     |
 
-  Scenario: The loader and the schema refuse the same
-    Then the loader and the schema refuse the same
+  Scenario: The registry names no consumer, as consumers name themselves in their own repositories
+    When I look for a consumer's name in the plugins and not-providers.json
+    Then the result is empty
 
-  Scenario: Path patterns
-    Then path patterns
+  Scenario Outline: The loader and the schema accept the same
+    When the schema and the loader read '<data>'
+    Then the result is:
+      """
+      {"schema": "accepted", "loader": "accepted"}
+      """
+
+    Examples:
+      | data |
+      | {} |
+      | {"uses": [{"plugin": "linear.sync", "paths": ["tools/**"]}]} |
+      | {"uses": [{"plugin": "inwx.registrar", "paths": []}]} |
+      | {"uses": [{"plugin": "linear.sync", "paths": [], "mode": "advisory"}]} |
+      | {"terraform": [{"dir": "infra", "plugins": ["linear.sync"], "runs": [], "mode": "required"}]} |
+      | {"terraform": [{"dir": "infra", "plugins": ["linear.sync"], "runs": ["laptop", "actions"]}]} |
+      | {"own_hosts": ["mine.example"], "other_hosts": [{"host": "a.example", "reason": "why"}], "other_secrets": [{"name": "A", "reason": "why"}], "exclude": [{"path": "tests/**", "reason": "why"}]} |
+
+  Scenario Outline: The loader and the schema refuse the same
+    When the schema and the loader read '<data>'
+    Then the result is:
+      """
+      {"schema": "refused", "loader": "refused"}
+      """
+
+    Examples:
+      | data |
+      | [] |
+      | {"nope": []} |
+      | {"uses": {}} |
+      | {"uses": [{"plugin": "linear.sync"}]} |
+      | {"uses": [{"plugin": "linear.sync", "paths": [""]}]} |
+      | {"uses": [{"plugin": "linear.sync", "paths": [], "extra": 1}]} |
+      | {"uses": [{"plugin": "linear.sync", "paths": [], "mode": "optional"}]} |
+      | {"terraform": [{"dir": "infra", "plugins": ["linear.sync"], "runs": [], "mode": "optional"}]} |
+      | {"terraform": {}} |
+      | {"terraform": [{"dir": "infra", "plugins": ["linear.sync"]}]} |
+      | {"terraform": [{"dir": "infra", "plugins": ["linear.sync"], "runs": ["cloud"]}]} |
+      | {"own_hosts": "mine.example"} |
+      | {"other_hosts": {}} |
+      | {"other_hosts": [{"host": "a.example"}]} |
+      | {"other_secrets": [{"name": "A", "reason": ""}]} |
+      | {"exclude": [{"path": "tests/**"}]} |
+
+  Scenario Outline: Path patterns
+    When I match "<path>" against the path pattern "<pattern>"
+    Then the result is "<matches>"
+
+    Examples:
+      | pattern  | path         | matches |
+      | a.py     | a.py         | true    |
+      | a.py     | b/a.py       | false   |
+      | tests/   | tests/x/y.py | true    |
+      | tests/** | tests/y.py   | true    |
+      | tests/** | testsx/y.py  | false   |
+      | **/*.py  | a.py         | true    |
+      | **/*.py  | b/c/a.py     | true    |
+      | *.py     | b/a.py       | false   |
+      | a?.py    | ab.py        | true    |

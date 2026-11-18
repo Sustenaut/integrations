@@ -1,602 +1,338 @@
-"""The running service, with GitHub on recorded answers."""
+"""The running service, with GitHub as a fake service (providers.py)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from pathlib import Path
+import re
 
 import pytest
-from fastapi.testclient import TestClient
+from pubtest.core import show
+from pubtest.http import asgi
+from pubtest.steps.fakes import fake
+from pubtest.steps.secrets import produced
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from integrations import calls
-from integrations.calls import MemorySink, Replay
+from integrations.calls import Check, Response
 from integrations.clients.github_edit_pr import OneCommitProposer
-from integrations.service import main  # noqa: F401 - what uvicorn runs must import
+from integrations.service import main
 from integrations.service.app import RateLimit, create_app
 from integrations.service.settings import Settings
 from integrations.service.spec import spec_text
-from pytest_bdd import scenarios, then
+
+from .providers import providers, records
 
 scenarios("service.feature")
 
-ROUTE = "/v1/github/edit-pr/proposals"
-TOKEN = "person-secret-token"
-API = "https://api.github.com"
-AT = f"{API}/repos/o/r"
-ORIGIN = "https://site.example"
-FIELDS = {"repo": "o/r", "branch": "edit/one", "title": "T", "body": "B", "changes": {"a.txt": "new"}}
+GITHUB = "api.github.com"
+AT = "/repos/o/r"
+
+# What GitHub answers while one commit becomes a pull request.
+PROPOSAL = {
+    f"GET {AT}": (200, {"default_branch": "main"}),
+    f"GET {AT}/git/ref/heads/main": (200, {"object": {"sha": "start"}}),
+    f"GET {AT}/git/commits/start": (200, {"tree": {"sha": "base-tree"}}),
+    f"POST {AT}/git/trees": (201, {"sha": "next-tree"}),
+    f"POST {AT}/git/commits": (201, {"sha": "commit"}),
+    f"POST {AT}/git/refs": (201, {}),
+    f"POST {AT}/pulls": (201, {"html_url": "https://github.com/o/r/pull/7", "number": 7, "node_id": "N"}),
+}
+
+# What GitHub answers about a repository, and its files at a commit.
+READ = {
+    f"GET {AT}": (200, {"default_branch": "main", "permissions": {"push": True}}),
+    f"GET {AT}/git/ref/heads/main": (200, {"object": {"sha": "tip"}}),
+    f"GET {AT}/git/trees/tip?recursive=1": (200, {"tree": [
+        {"path": "a.txt", "type": "blob"}, {"path": "dir", "type": "tree"}, {"path": "dir/b.txt", "type": "blob"}]}),
+    f"GET {AT}/contents/a.txt?ref=tip": (200, "text of a"),
+    f"GET {AT}/contents/dir/b%C3%A4.txt?ref=tip": (200, "text of bä"),
+    f"GET {AT}/contents/gone.txt?ref=tip": (404, {}),
+}
 
 
-def github(**extra):
-    """What GitHub answers while one commit becomes a pull request."""
-    return {
-        f"GET {AT}": {"status": 200, "json": {"default_branch": "main"}},
-        f"GET {AT}/git/ref/heads/main": {"status": 200, "json": {"object": {"sha": "start"}}},
-        f"GET {AT}/git/commits/start": {"status": 200, "json": {"tree": {"sha": "base-tree"}}},
-        f"POST {AT}/git/trees": {"status": 201, "json": {"sha": "next-tree"}},
-        f"POST {AT}/git/commits": {"status": 201, "json": {"sha": "commit"}},
-        f"POST {AT}/git/refs": {"status": 201, "json": {}},
-        f"POST {AT}/pulls": {"status": 201, "json": {"html_url": "https://github.com/o/r/pull/7", "number": 7, "node_id": "N"}},
-        **extra,
-    }
+class Silencing:
+    """The fake providers, but for the requests a Given says get no answer."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def send(self, request, timeout):
+        path = request.url.split(GITHUB, 1)[-1]
+        if f"{request.method} {path}" in getattr(self.ctx, "unanswered", set()):
+            return Response(None, error="no answer")
+        return providers(self.ctx).send(request, timeout)
 
 
-def service(responses=None, **settings):
-    transport, sink = Replay(responses if responses is not None else github()), MemorySink()
-    made = Settings(edit_pr_repos=frozenset({"o/r"}), allowed_origins=frozenset({ORIGIN}), **settings)
-    return TestClient(create_app(made, transport=transport, sink=sink), raise_server_exceptions=False), transport, sink
+def settings(ctx) -> dict:
+    if getattr(ctx, "settings", None) is None:
+        ctx.settings = {}
+    return ctx.settings
 
 
-def post(client, fields=None, token=TOKEN, **headers):
-    return client.post(ROUTE, json=fields or FIELDS, headers={"Authorization": f"Bearer {token}", **headers})
+def app(ctx):
+    """The service, made at its first request from what the Givens said."""
+    if getattr(ctx, "app", None) is None:
+        made = Settings.from_env() if getattr(ctx, "from_env", False) else Settings(**settings(ctx))
+        ctx.app = create_app(made, transport=Silencing(ctx),
+                             sink=None if getattr(ctx, "stdout_sink", False) else records(ctx),
+                             checks=getattr(ctx, "checks", list))
+    return ctx.app
 
 
-def sent(transport, method, url):
-    return next(json.loads(r.body) for r in transport.sent if (r.method, r.url) == (method, url))
+def connected(service):
+    """The service as a server sees it: once the request's body is read, the
+    client stays until the answer is sent, rather than leaving at once (which
+    pubtest's asgi() says, so Starlette drops a streamed answer's body)."""
+
+    async def wrapped(scope, receive, send):
+        given = []
+
+        async def stays():
+            if not given:
+                given.append(True)
+                return await receive()
+            await asyncio.Event().wait()
+
+        await service(scope, stays, send)
+
+    return wrapped
 
 
-@then("a proposal is one commit and a pull request as the person")
-def a_proposal_is_one_commit_and_a_pull_request_as_the_person():
-    client, transport, sink = service()
-    response = post(client, **{"X-Request-Id": "from-the-app"})
-    assert response.status_code == 200
-    assert response.json() == {"status": "opened", "url": "https://github.com/o/r/pull/7", "number": 7,
-                               "branch": "edit/one", "commit": "commit"}
-    assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in transport.sent)
-    assert sent(transport, "POST", f"{AT}/git/trees") == {
-        "base_tree": "base-tree", "tree": [{"path": "a.txt", "mode": "100644", "type": "blob", "content": "new"}]}
-    assert sent(transport, "POST", f"{AT}/git/commits") == {"message": "T\n\nB", "tree": "next-tree", "parents": ["start"]}
-    assert sent(transport, "POST", f"{AT}/git/refs") == {"ref": "refs/heads/edit/one", "sha": "commit"}
-    assert sent(transport, "POST", f"{AT}/pulls") == {"title": "T", "head": "edit/one", "base": "main", "body": "B"}
-    assert {r.plugin for r in sink.records} == {"github.edit-pr"}
-    assert {r.request_id for r in sink.records} == {"from-the-app"}
-    assert {r.operation for r in sink.records} == {"open-pr", "service-total"}
+@pytest.fixture
+def http_client(ctx, caplog, capsys):
+    """pubtest's asgi(), with the Content-Length an HTTP client sends, and every
+    answer kept for the secret's check. capsys is asked for here so what the
+    service prints from the first request on is there for a Then."""
+    caplog.set_level(logging.DEBUG)
+    ctx.answers = getattr(ctx, "answers", [])
+
+    def send(method, path, headers, body):
+        if body is not None:
+            headers = {**headers, "Content-Length": str(len(body))}
+        answer = asgi(connected(app(ctx)))(method, path, headers, body)
+        ctx.answers.append(answer)
+        return answer
+
+    return send
 
 
-@then("parent base and message are the callers")
-def parent_base_and_message_are_the_callers():
-    client, transport, _ = service()
-    transport.responses[f"GET {AT}/git/commits/read-here"] = {"status": 200, "json": {"tree": {"sha": "base-tree"}}}
-    assert post(client, {**FIELDS, "base": "dev", "parent": "read-here", "message": "M"}).status_code == 200
-    assert not any(r.url.endswith("/git/ref/heads/dev") for r in transport.sent)
-    assert sent(transport, "POST", f"{AT}/git/commits")["message"] == "M"
-    assert sent(transport, "POST", f"{AT}/pulls")["base"] == "dev"
+def answer_the_rest(ctx, monkeypatch, answers: dict) -> None:
+    github = fake(ctx, monkeypatch, GITHUB)
+    for request, (status, body) in answers.items():
+        if request not in github.answers:
+            github.answer(request, status, body if isinstance(body, str) else json.dumps(body))
 
 
-@then("no change and the same tree are nothing to change")
-def no_change_and_the_same_tree_are_nothing_to_change():
-    client, _, _ = service()
-    assert post(client, {**FIELDS, "changes": {}}).json() == {"status": "nothing to change"}
-    client, transport, _ = service(github(**{f"POST {AT}/git/trees": {"status": 201, "json": {"sha": "base-tree"}}}))
-    assert post(client).json() == {"status": "nothing to change"}
-    assert not any(r.url.endswith("/pulls") for r in transport.sent)
+# --- Givens -------------------------------------------------------------------
+
+@given(parsers.parse('the service serves "{repos}" to "{origins}"'))
+def serves(ctx, repos, origins):
+    settings(ctx).update(edit_pr_repos=frozenset(repos.split(",")), allowed_origins=frozenset(origins.split(",")))
 
 
-@then("a file that moved is stale and writes nothing")
-def a_file_that_moved_is_stale_and_writes_nothing():
-    contents = f"GET {AT}/contents/a.txt?ref=start"
-    client, transport, _ = service(github(**{contents: {"status": 200, "json": {"sha": "moved"}}}))
-    assert post(client, {**FIELDS, "expect": {"a.txt": "read"}}).json() == {"status": "stale", "path": "a.txt"}
-    assert all(r.method == "GET" for r in transport.sent)
-    client, _, _ = service(github(**{contents: {"status": 404, "json": {}}}))
-    assert post(client, {**FIELDS, "expect": {"a.txt": None}}).json()["status"] == "opened"
+@given(parsers.re(r'the service serves "(?P<repos>[^"]+)"'))
+def serves_repos(ctx, repos):
+    settings(ctx).update(edit_pr_repos=frozenset(repos.split(",")))
 
 
-@then("a file that cant be read for expect is refused")
-def a_file_that_cant_be_read_for_expect_is_refused():
-    contents = f"GET {AT}/contents/a.txt?ref=start"
-    client, _, _ = service(github(**{contents: {"status": 403, "json": {}}}))
-    assert post(client, {**FIELDS, "expect": {"a.txt": "read"}}).status_code == 403
+@given("the service takes its settings from the environment")
+def from_env(ctx):
+    ctx.from_env = True
 
 
-@then("deleting skips a file that isnt there")
-def deleting_skips_a_file_that_isnt_there():
-    gone = f"GET {AT}/contents/gone.txt?ref=start"
-    there = f"GET {AT}/contents/there.txt?ref=start"
-    client, transport, _ = service(github(**{gone: {"status": 404, "json": {}}, there: {"status": 200, "json": {"sha": "s"}}}))
-    assert post(client, {**FIELDS, "changes": {"gone.txt": None, "there.txt": None}}).json()["status"] == "opened"
-    assert sent(transport, "POST", f"{AT}/git/trees")["tree"] == [
-        {"path": "there.txt", "mode": "100644", "type": "blob", "sha": None}]
-    client, transport, _ = service(github(**{gone: {"status": 404, "json": {}}}))
-    assert post(client, {**FIELDS, "changes": {"gone.txt": None}}).json() == {"status": "nothing to change"}
+@given(parsers.parse("the service allows {count:d} {what} a minute"))
+def allows(ctx, count, what):
+    key = {"proposals": "edit_pr_per_minute", "reads": "edit_pr_reads_per_minute",
+           "timings": "edit_pr_timings_per_minute"}[what]
+    settings(ctx)[key] = count
 
 
-@then("auto merge says what happened and the pull request stands")
-def auto_merge_says_what_happened_and_the_pull_request_stands():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ({"status": 200, "json": {"data": {}}}, "on"),
-    ({"status": 200, "json": {"errors": [{"message": "not allowed"}]}}, "not allowed"),
-    ({"status": 200, "json": {"errors": [{"message": "Pull request is in clean status"}]}}, "merged"),
-    ({"status": 403, "json": {"message": "nope"}}, "HTTP 403: nope"),
-]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_auto_merge_says_what_happened_and_the_pull_request_stands(answer=case0[0], says=case0[1])
+@given(parsers.parse("the service takes bodies of at most {count:d} bytes"))
+def max_body(ctx, count):
+    settings(ctx)["max_body_bytes"] = count
 
 
-def _case_auto_merge_says_what_happened_and_the_pull_request_stands(answer, says):
-    client, _, _ = service(github(**{f"POST {API}/graphql": answer, f"PUT {AT}/pulls/7/merge": {"status": 200, "json": {}}}))
-    result = post(client, {**FIELDS, "autoMerge": True}).json()
-    assert result["status"] == "opened" and result["autoMerge"] == says
+@given(parsers.parse('the service serves its docs from "{directory}"'))
+def docs_from(ctx, directory):
+    settings(ctx)["docs_dir"] = directory
 
 
-@then("a repository not named is refused before any call")
-def a_repository_not_named_is_refused_before_any_call():
-    client, transport, _ = service()
-    response = post(client, {**FIELDS, "repo": "other/repo"})
-    assert response.status_code == 403 and "not served" in response.json()["detail"]
-    assert not transport.sent
+@given("the service writes its call records to stdout")
+def stdout_sink(ctx):
+    ctx.stdout_sink = True
 
 
-@then("with nothing named nothing is served")
-def with_nothing_named_nothing_is_served(monkeypatch):
-    monkeypatch.delenv("INTEGRATIONS_EDIT_PR_REPOS", raising=False)
-    client = TestClient(create_app(transport=Replay(github()), sink=MemorySink()))
-    assert post(client).status_code == 403
+@given(parsers.parse('the service\'s check of "{plugin}" fails, saying "{detail}"'))
+def failing_check(ctx, plugin, detail):
+    ctx.checks = lambda: [Check(plugin, False, detail)]
 
 
-@then("settings come from the environment")
-def settings_come_from_the_environment(monkeypatch):
-    monkeypatch.setenv("INTEGRATIONS_EDIT_PR_REPOS", "o/r, a/b")
-    monkeypatch.setenv("INTEGRATIONS_ORIGINS", ORIGIN)
-    monkeypatch.setenv("INTEGRATIONS_EDIT_PR_PER_MINUTE", "5")
-    monkeypatch.setenv("INTEGRATIONS_EDIT_PR_TIMINGS_PER_MINUTE", "7")
-    made = Settings.from_env()
-    assert made.edit_pr_repos == {"o/r", "a/b"} and made.allowed_origins == {ORIGIN} and made.edit_pr_per_minute == 5
-    assert made.edit_pr_timings_per_minute == 7
+@given("GitHub answers the rest of a proposal")
+def rest_of_a_proposal(ctx, monkeypatch):
+    answer_the_rest(ctx, monkeypatch, PROPOSAL)
 
 
-@then("no token is refused")
-def no_token_is_refused():
-    client, transport, _ = service()
-    assert client.post(ROUTE, json=FIELDS).status_code in (401, 403)
-    assert not transport.sent
+@given("GitHub answers the rest of a read")
+def rest_of_a_read(ctx, monkeypatch):
+    answer_the_rest(ctx, monkeypatch, READ)
 
 
-@then("githubs refusal comes back with its words")
-def githubs_refusal_comes_back_with_its_words():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ({"status": 401, "json": {"message": "Bad credentials"}}, 401),
-    ({"status": 404, "json": {"message": "Not Found"}}, 404),
-    ({"status": 422, "json": {"message": "Reference already exists"}}, 422),
-]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_githubs_refusal_comes_back_with_its_words(answer=case0[0], code=case0[1])
+@given(parsers.parse('GitHub does not answer "{request}"'))
+def github_does_not_answer(ctx, request):
+    ctx.unanswered = getattr(ctx, "unanswered", set()) | {request}
 
 
-def _case_githubs_refusal_comes_back_with_its_words(answer, code):
-    client, _, _ = service(github(**{f"POST {AT}/git/refs": answer}))
-    response = post(client)
-    assert response.status_code == code and answer["json"]["message"] in response.json()["detail"]
-
-
-@then("a refusal with no json still says its status")
-def a_refusal_with_no_json_still_says_its_status():
-    client, _, _ = service(github(**{f"GET {AT}": {"status": 403, "json": None}}))
-    response = post(client)
-    assert response.status_code == 403
-
-
-@then("github not answering is a 503 and a bad answer a 502")
-def github_not_answering_is_a_503_and_a_bad_answer_a_502(monkeypatch):
-    client, _, _ = service(github(**{f"GET {AT}": {"error": "no answer"}}))
-    assert post(client).status_code == 503
-    client, _, _ = service()
-
+@given("GitHub's answer to a proposal cannot be used")
+def unusable(monkeypatch):
     def fails(self, **kwargs):
         raise calls.IntegrationError("github.edit-pr", "open-pr", "odd")
 
     monkeypatch.setattr(OneCommitProposer, "propose", fails)
-    assert post(client).status_code == 502
-
-
-@then("the token is never in a record a log or an answer")
-def the_token_is_never_in_a_record_a_log_or_an_answer(caplog, capsys):
-    """Every case of the parametrized test this was, in turn."""
-    for answers in [
-    github(),
-    github(**{f"POST {AT}/git/refs": {"status": 401, "json": {"message": "Bad credentials"}}}),
-    github(**{f"GET {AT}": {"error": "no answer"}}),
-    {},
-]:
-        answers = answers.values[0] if type(answers).__name__ == "ParameterSet" else answers
-        _case_the_token_is_never_in_a_record_a_log_or_an_answer(answers=answers, caplog=caplog, capsys=capsys)
-
-
-def _case_the_token_is_never_in_a_record_a_log_or_an_answer(answers, caplog, capsys):
-    caplog.set_level(logging.DEBUG)
-    client, _, sink = service(answers)
-    response = post(client)
-    invalid = client.post(ROUTE, json={"repo": "o/r"}, headers={"Authorization": f"Bearer {TOKEN}"})
-    out = capsys.readouterr()
-    everything = "".join([response.text, invalid.text, json.dumps(dict(response.headers)), out.out, out.err,
-                          caplog.text, json.dumps([r.__dict__ for r in sink.records])])
-    assert TOKEN not in everything
-
-
-@then("the service keeps no token")
-def the_service_keeps_no_token():
-    client, _, _ = service()
-    post(client)
-    assert not hasattr(client.app.state, "token")
-    assert TOKEN not in repr(vars(client.app.state))
-
-
-@then("a stdout record holds no token")
-def a_stdout_record_holds_no_token(capsys):
-    transport = Replay(github())
-    made = Settings(edit_pr_repos=frozenset({"o/r"}))
-    post(TestClient(create_app(made, transport=transport)))
-    printed = capsys.readouterr().out
-    assert '"plugin": "github.edit-pr"' in printed and TOKEN not in printed
-
-
-@then("cors lets in only the named sites")
-def cors_lets_in_only_the_named_sites():
-    client, _, _ = service()
-    preflight = {"Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type"}
-    allowed = client.options(ROUTE, headers={"Origin": ORIGIN, **preflight})
-    assert allowed.headers["access-control-allow-origin"] == ORIGIN
-    assert "access-control-allow-credentials" not in allowed.headers
-    refused = client.options(ROUTE, headers={"Origin": "https://evil.example", **preflight})
-    assert "access-control-allow-origin" not in refused.headers
-
-
-@then("the rate limit is per minute and refuses before any call")
-def the_rate_limit_is_per_minute_and_refuses_before_any_call():
-    client, transport, _ = service(edit_pr_per_minute=1)
-    assert post(client).status_code == 200
-    before = len(transport.sent)
-    assert post(client).status_code == 429
-    assert len(transport.sent) == before
-
-
-@then("a rate limit lets calls in again after its window")
-def a_rate_limit_lets_calls_in_again_after_its_window():
-    now = [0.0]
-    limit = RateLimit(1, 60, lambda: now[0])
-    assert limit.allow() and not limit.allow()
-    now[0] = 61
-    assert limit.allow()
-
-
-@then("a body too large is refused before it is read")
-def a_body_too_large_is_refused_before_it_is_read():
-    client, transport, _ = service(max_body_bytes=10)
-    assert post(client).status_code == 413
-    assert not transport.sent
-
-
-@then("a bad proposal is a validation error")
-def a_bad_proposal_is_a_validation_error():
-    client, transport, _ = service()
-    assert post(client, {**FIELDS, "repo": "../../etc"}).status_code == 422
-    assert not transport.sent
-
-
-@then("the address alone leads to the docs")
-def the_address_alone_leads_to_the_docs():
-    response = service()[0].get("/", follow_redirects=False)
-    assert response.status_code == 307 and response.headers["location"] == "/docs/"
-
-
-@then("a projects calls are recorded as that projects")
-def a_projects_calls_are_recorded_as_that_projects():
-    client, _, sink = service()
-    post(client)
-    assert {r.repo for r in sink.records} == {"o/r"}
-    client, _, sink = service(repository())
-    client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
-    client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
-    assert {r.repo for r in sink.records} == {"o/r"}
-
-
-@then("healthz needs nothing")
-def healthz_needs_nothing():
-    client, _, _ = service()
-    assert client.get("/healthz").json() == {"status": "ok", "unhealthy": [], "alerts": []}
-    assert client.get("/livez").json() == {"status": "ok"}
-
-
-@then("a buffer it cannot reach only alerts")
-def a_buffer_it_cannot_reach_only_alerts():
-    from integrations.calls import Check
-    failing = lambda: [Check("storage.buffer", False, "no token")]  # noqa: E731
-    client = TestClient(create_app(Settings(), sink=MemorySink(), checks=failing))
-    answer = client.get("/healthz")
-    assert answer.status_code == 200
-    assert answer.json() == {"status": "ok", "unhealthy": [], "alerts": ["storage.buffer"]}
-
-
-@then("the service checks its storage token")
-def the_service_checks_its_storage_token(tmp_path, monkeypatch):
-    from integrations.service import main
-    token = tmp_path / "token"
-    monkeypatch.setenv("INTEGRATIONS_STORAGE_URL", "https://storage.example")
-    monkeypatch.setenv("INTEGRATIONS_STORAGE_TOKEN_FILE", str(token))
-    assert [c.ok for c in main.checks()] == [False]
-    token.write_text("t\n")
-    assert [c.ok for c in main.checks()] == [True]
-    monkeypatch.delenv("INTEGRATIONS_STORAGE_URL")
-    assert main.checks() == []
-
-
-@then("the built docs are served and the interactive ones are off")
-def the_built_docs_are_served_and_the_interactive_ones_are_off(tmp_path):
-    (tmp_path / "index.html").write_text("<title>the docs</title>")
-    client = TestClient(create_app(Settings(docs_dir=str(tmp_path)), sink=MemorySink()))
-    assert "the docs" in client.get("/docs/").text
-    assert client.get("/redoc").status_code == 404
-    assert service()[0].get("/docs").status_code == 404
-
-
-SNAPSHOT = "/v1/github/edit-pr/snapshot"
-FILES = "/v1/github/edit-pr/files"
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
-
-
-def repository(**extra):
-    """What GitHub answers about a repository, and its files at a commit."""
-    return {
-        f"GET {AT}": {"status": 200, "json": {"default_branch": "main", "permissions": {"push": True}}},
-        f"GET {AT}/git/ref/heads/main": {"status": 200, "json": {"object": {"sha": "tip"}}},
-        f"GET {AT}/git/trees/tip?recursive=1": {"status": 200, "json": {"tree": [
-            {"path": "a.txt", "type": "blob"}, {"path": "dir", "type": "tree"}, {"path": "dir/b.txt", "type": "blob"}]}},
-        f"GET {AT}/contents/a.txt?ref=tip": {"status": 200, "text": "text of a"},
-        f"GET {AT}/contents/dir/b%C3%A4.txt?ref=tip": {"status": 200, "text": "text of b\u00e4"},
-        f"GET {AT}/contents/gone.txt?ref=tip": {"status": 404, "json": {}},
-        **extra,
-    }
-
-
-@then("a snapshot is the newest commit its paths and whether the token may write")
-def a_snapshot_is_the_newest_commit_its_paths_and_whether_the_token_may_write():
-    client, transport, sink = service(repository())
-    response = client.get(SNAPSHOT, params={"repo": "o/r"}, headers={**AUTH, "X-Request-Id": "from-the-app"})
-    assert response.json() == {"branch": "main", "commit": "tip", "can_push": True,
-                               "paths": ["a.txt", "dir/b.txt"], "truncated": False}
-    assert all(r.headers["Authorization"] == f"Bearer {TOKEN}" for r in transport.sent)
-    assert {(r.plugin, r.operation, r.request_id) for r in sink.records} == {
-        ("github.edit-pr", "read", "from-the-app"), ("github.edit-pr", "service-total", "from-the-app")}
-
-
-@then("a snapshot says when the token may not write and when github left paths out")
-def a_snapshot_says_when_the_token_may_not_write_and_when_github_left_paths_out():
-    client, _, _ = service(repository(**{
-        f"GET {AT}": {"status": 200, "json": {"default_branch": "main", "permissions": {"push": False}}},
-        f"GET {AT}/git/trees/tip?recursive=1": {"status": 200, "json": {"tree": [], "truncated": True}}}))
-    answer = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).json()
-    assert answer["can_push"] is False and answer["truncated"] is True
-
-
-@then("a snapshot can be of another branch")
-def a_snapshot_can_be_of_another_branch():
-    client, transport, _ = service(repository(**{
-        f"GET {AT}/git/ref/heads/dev": {"status": 200, "json": {"object": {"sha": "tip"}}}}))
-    assert client.get(SNAPSHOT, params={"repo": "o/r", "branch": "dev"}, headers=AUTH).json()["branch"] == "dev"
-    assert not any(r.url.endswith("/heads/main") for r in transport.sent)
-
-
-@then("files come in one call with null for one that isnt there")
-def files_come_in_one_call_with_null_for_one_that_isnt_there():
-    client, transport, sink = service(repository())
-    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt", "dir/b\u00e4.txt", "gone.txt"]},
-                           headers=AUTH)
-    assert response.json() == {"files": {"a.txt": "text of a", "dir/b\u00e4.txt": "text of b\u00e4", "gone.txt": None}}
-    assert all(r.headers["Accept"] == "application/vnd.github.raw+json" for r in transport.sent)
-    assert len([r for r in sink.records if r.operation == "read"]) == 3
-
-
-@then("a file github refuses refuses the call")
-def a_file_github_refuses_refuses_the_call():
-    client, _, _ = service(repository(**{f"GET {AT}/contents/a.txt?ref=tip": {"status": 403, "json": {"message": "no"}}}))
-    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
-    assert response.status_code == 403 and "no" in response.json()["detail"]
-
-
-@then("too many files is a validation error")
-def too_many_files_is_a_validation_error():
-    client, transport, _ = service(repository())
-    response = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a"] * 2001}, headers=AUTH)
-    assert response.status_code == 422 and not transport.sent
-
-
-@then("reads serve only the repositories named and need a token")
-def reads_serve_only_the_repositories_named_and_need_a_token():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ("get", {"url": SNAPSHOT, "params": {"repo": "other/repo"}}),
-    ("post", {"url": FILES, "json": {"repo": "other/repo", "commit": "tip", "paths": ["a"]}}),
-]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_reads_serve_only_the_repositories_named_and_need_a_token(call=case0[0], kwargs=case0[1])
-
-
-def _case_reads_serve_only_the_repositories_named_and_need_a_token(call, kwargs):
-    client, transport, _ = service(repository())
-    assert getattr(client, call)(**kwargs, headers=AUTH).status_code == 403
-    assert getattr(client, call)(**kwargs).status_code in (401, 403)
-    assert not transport.sent
-
-
-@then("reads have their own rate limit")
-def reads_have_their_own_rate_limit():
-    client, _, _ = service(repository(), edit_pr_reads_per_minute=1)
-    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 200
-    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 429
-    assert post(client).status_code != 429
-
-
-@then("reads keep the token out of records logs and answers")
-def reads_keep_the_token_out_of_records_logs_and_answers(caplog, capsys):
-    """Every case of the parametrized test this was, in turn."""
-    for answers in [
-    repository(),
-    repository(**{f"GET {AT}": {"status": 401, "json": {"message": "Bad credentials"}}}),
-    repository(**{f"GET {AT}/contents/a.txt?ref=tip": {"error": "no answer"}}),
-]:
-        answers = answers.values[0] if type(answers).__name__ == "ParameterSet" else answers
-        _case_reads_keep_the_token_out_of_records_logs_and_answers(answers=answers, caplog=caplog, capsys=capsys)
-
-
-def _case_reads_keep_the_token_out_of_records_logs_and_answers(answers, caplog, capsys):
-    caplog.set_level(logging.DEBUG)
-    client, _, sink = service(answers)
-    snapshot = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
-    files = client.post(FILES, json={"repo": "o/r", "commit": "tip", "paths": ["a.txt"]}, headers=AUTH)
-    out = capsys.readouterr()
-    everything = "".join([snapshot.text, files.text, out.out, out.err, caplog.text,
-                          json.dumps([r.__dict__ for r in sink.records])])
-    assert TOKEN not in everything
-
-
-@then("cors lets the named sites read")
-def cors_lets_the_named_sites_read():
-    client, _, _ = service()
-    allowed = client.options(SNAPSHOT, headers={"Origin": ORIGIN, "Access-Control-Request-Method": "GET",
-                                                "Access-Control-Request-Headers": "authorization"})
-    assert allowed.headers["access-control-allow-origin"] == ORIGIN
-
-
-@then("every call of one request shares its id and the answer says it")
-def every_call_of_one_request_shares_its_id_and_the_answer_says_it():
-    client, _, sink = service()
-    response = post(client)
-    made = response.headers["x-request-id"]
-    assert {r.request_id for r in sink.records} == {made}
-    client, _, sink = service(repository())
-    response = client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH)
-    assert {r.request_id for r in sink.records} == {response.headers["x-request-id"]}
-
-
-@then("an apps own id is kept unless it isnt one")
-def an_apps_own_id_is_kept_unless_it_isnt_one():
-    client, _, sink = service()
-    assert post(client, **{"X-Request-Id": "from-the-app"}).headers["x-request-id"] == "from-the-app"
-    assert {r.request_id for r in sink.records} == {"from-the-app"}
-    client, _, sink = service()
-    made = post(client, **{"X-Request-Id": "not one\tat all"}).headers["x-request-id"]
-    assert made != "not one\tat all" and {r.request_id for r in sink.records} == {made}
-
-
-@then("a request records its whole time as well as its calls")
-def a_request_records_its_whole_time_as_well_as_its_calls():
-    client, _, sink = service()
-    post(client)
-    totals = [r for r in sink.records if r.operation == "service-total"]
-    assert len(totals) == 1 and totals[0].route == "none" and totals[0].status == 200 and totals[0].outcome == "ok"
-    assert totals[0].repo == "o/r" and totals[0].latency_ms >= 0
-
-
-@then("a failed request records how it ended")
-def a_failed_request_records_how_it_ended():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    (github(**{f"POST {AT}/git/refs": {"status": 422, "json": {"message": "exists"}}}), 422, "refused"),
-    (github(**{f"GET {AT}": {"error": "no answer"}}), 503, "unavailable"),
-]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_a_failed_request_records_how_it_ended(answers=case0[0], status=case0[1], outcome=case0[2])
-
-
-def _case_a_failed_request_records_how_it_ended(answers, status, outcome):
-    client, _, sink = service(answers)
-    post(client)
-    total = next(r for r in sink.records if r.operation == "service-total")
-    assert (total.status, total.outcome) == (status, outcome)
-
-
-TIMINGS = "/v1/github/edit-pr/timings"
-
-
-@then("an apps timings become records with no token needed")
-def an_apps_timings_become_records_with_no_token_needed():
-    client, _, sink = service()
-    response = client.post(TIMINGS, json={"repo": "o/r", "timings": [{"request_id": "a-1", "total_ms": 120}, {"request_id": "b-2", "total_ms": 80}]})
-    assert response.status_code == 202 and response.json() == {"accepted": 2}
-    assert [(r.operation, r.request_id, r.latency_ms, r.repo) for r in sink.records] == [
-        ("client-total", "a-1", 120, "o/r"), ("client-total", "b-2", 80, "o/r")]
-
-
-@then("timings are only ids and sensible numbers")
-def timings_are_only_ids_and_sensible_numbers():
-    """Every case of the parametrized test this was, in turn."""
-    for body in [
-    {"repo": "o/r", "timings": [{"request_id": "bad id!", "total_ms": 1}]},
-    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": -1}]},
-    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": 3_600_001}]},
-    {"repo": "o/r", "timings": [{"request_id": "a", "total_ms": 1}] * 201},
-]:
-        body = body.values[0] if type(body).__name__ == "ParameterSet" else body
-        _case_timings_are_only_ids_and_sensible_numbers(body=body)
-
-
-def _case_timings_are_only_ids_and_sensible_numbers(body):
-    client, _, sink = service()
-    assert client.post(TIMINGS, json=body).status_code == 422
-    assert not sink.records
-
-
-@then("timings serve only the repositories named and are rate limited")
-def timings_serve_only_the_repositories_named_and_are_rate_limited():
-    client, _, sink = service()
-    assert client.post(TIMINGS, json={"repo": "other/repo", "timings": []}).status_code == 403
-    client, _, _ = service(edit_pr_timings_per_minute=1)
-    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 202
-    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 429
-
-
-@then("timings with no token cant use up what reads and proposals need")
-def timings_with_no_token_cant_use_up_what_reads_and_proposals_need():
-    client, _, _ = service(repository(), edit_pr_timings_per_minute=1, edit_pr_reads_per_minute=1, edit_pr_per_minute=1)
-    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 202
-    assert client.post(TIMINGS, json={"repo": "o/r", "timings": []}).status_code == 429
-    assert client.get(SNAPSHOT, params={"repo": "o/r"}, headers=AUTH).status_code == 200
-    assert post(client).status_code != 429
-
-
-@then("the committed spec is what the service gives")
-def the_committed_spec_is_what_the_service_gives():
-    committed = (Path(__file__).parents[2] / "openapi" / "integrations.json").read_text()
-    assert committed == spec_text(), "run: PYTHONPATH=src python -m integrations.service.spec > openapi/integrations.json"
-
-
-@then("records go to storage only when a deployment names it")
-def records_go_to_storage_only_when_a_deployment_names_it(monkeypatch, tmp_path):
-    monkeypatch.delenv("INTEGRATIONS_STORAGE_URL", raising=False)
-    assert isinstance(main.sink(), calls.StdoutSink)
-    token = tmp_path / "token"
-    token.write_text("pod-token\n")
-    monkeypatch.setenv("INTEGRATIONS_STORAGE_URL", "https://storage.example/")
-    monkeypatch.setenv("INTEGRATIONS_STORAGE_TOKEN_FILE", str(token))
-    monkeypatch.setenv("INGEST_DATASETS", '{"o/r": "calls_r"}')
-    monkeypatch.setenv("HOSTNAME", "app-1")
+
+
+def earlier(ctx, http_client, request: str, status: int, body: bytes | None) -> None:
+    method, path = request.split(" ", 1)
+    headers = dict(getattr(ctx, "headers", {}))
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    answer = http_client(method, path, headers, body)
+    assert answer.status == status, f"{request} was answered {answer.status}: {answer.text}"
+
+
+@given(parsers.parse('"{request}" was answered {status:d}'))
+def was_answered(ctx, http_client, request, status):
+    earlier(ctx, http_client, request, status, None)
+
+
+@given(parsers.parse('"{request}" was answered {status:d} to:'))
+def was_answered_to(ctx, http_client, request, status, docstring):
+    earlier(ctx, http_client, request, status, docstring.encode())
+
+
+# --- Whens --------------------------------------------------------------------
+
+@when("the settings are read from the environment")
+def read_settings(ctx):
+    def read():
+        made = Settings.from_env()
+        return {k: sorted(v) if isinstance(v, frozenset) else v for k, v in vars(made).items()}
+
+    ctx.attempt(read)
+
+
+@when(parsers.parse('a limit of {limit:d} a minute is asked at the seconds "{seconds}"'))
+def limit_asked(ctx, limit, seconds):
+    def ask():
+        now = [0.0]
+        made = RateLimit(limit, 60, lambda: now[0])
+        allowed = []
+        for second in seconds.split(","):
+            now[0] = float(second)
+            allowed.append(made.allow())
+        return allowed
+
+    ctx.attempt(ask)
+
+
+@when("the service checks what it needs")
+def service_checks(ctx):
+    ctx.attempt(main.checks)
+
+
+@when("the service's spec is made")
+def spec_made(ctx):
+    ctx.attempt(spec_text)
+
+
+@when("the service makes its sink")
+def makes_sink(ctx, monkeypatch):
     import integrations.storage_sink as storage_sink
     monkeypatch.setattr(storage_sink.threading, "Thread", lambda **kw: type("T", (), {"start": lambda self: None})())
     monkeypatch.setattr(storage_sink.atexit, "register", lambda f: None)
-    made = main.sink()
-    assert isinstance(made, storage_sink.StorageSink)
-    assert made.base == "https://storage.example" and made.sender == "app-1" and made.token() == "pod-token"
-    assert made.datasets == {"o/r": "calls_r"}
+
+    def made():
+        sink = main.sink()
+        found = {"kind": type(sink).__name__}
+        if isinstance(sink, storage_sink.StorageSink):
+            found.update(base=sink.base, sender=sink.sender, token=sink.token(), datasets=sink.datasets)
+        return found
+
+    ctx.attempt(made)
+
+
+# --- Thens --------------------------------------------------------------------
+
+@then(parsers.parse('the "{name}" service was asked, in turn:'))
+def asked_in_turn(ctx, name, docstring):
+    """Exactly these requests, "METHOD PATH" a line, in the order they came."""
+    asked = [f"{r['method']} {r['path']}" for r in ctx.fakes[name].requests]
+    want = [line.strip() for line in docstring.splitlines() if line.strip()]
+    assert asked == want, f"{name} was asked:\n" + "\n".join(asked)
+
+
+@then(parsers.parse('every call recorded has the id the answer\'s "{header}" gives'))
+def calls_have_answer_id(ctx, header):
+    given = ctx.answer.header(header)
+    kept = {r.request_id for r in records(ctx).records}
+    assert kept == {given}, f"the answer's {header} is {given!r}; the records' ids are {kept}"
+
+
+@then(parsers.parse('the answer\'s "{header}" is a new id'))
+def answer_new_id(ctx, header):
+    got = ctx.answer.header(header)
+    assert got is not None and re.fullmatch(r"[0-9a-f]{32}", got), f"the answer's {header} is {got!r}"
+
+
+@then(parsers.parse('every call recorded has "{key}" at least {least:d}'))
+def calls_at_least(ctx, key, least):
+    kept = records(ctx).records
+    assert kept and all(getattr(r, key) >= least for r in kept), f"{key}: {[getattr(r, key) for r in kept]}"
+
+
+@then(parsers.parse('no secret appears in what it produced but what it sent "{name}"'))
+def no_secret_but_sent(ctx, caplog, capsys, name):
+    """pubtest's check, less the requests to `name`, which the secret is for, and
+    with every answer of the scenario, the log and the call records."""
+    assert ctx.secrets, "no secret was given"
+    out = capsys.readouterr()
+    where = {k: v for k, v in produced(ctx).items() if k != f"what it sent {name}"}
+    where["the answers"] = "".join(json.dumps(a.headers) + a.text for a in getattr(ctx, "answers", []))
+    where["stdout and stderr"] = out.out + out.err
+    where["the log"] = caplog.text
+    where["the calls recorded"] = json.dumps([r.__dict__ for r in records(ctx).records])
+    leaks = [f"{s!r} in {w}" for w, text in where.items() for s in ctx.secrets if s in text]
+    assert not leaks, "a secret appears: " + "; ".join(leaks)
+
+
+@then("the service keeps no secret")
+def keeps_no_secret(ctx):
+    state = app(ctx).state
+    assert not hasattr(state, "token")
+    kept = repr(vars(state))
+    assert not any(s in kept for s in ctx.secrets), kept
+
+
+@then(parsers.parse('the service printed "{text}"'))
+def service_printed(capsys, text):
+    out = capsys.readouterr().out
+    assert text in out, f"the service printed {out!r}"
+    print(out, end="")  # for a later step that reads it too
+
+
+@then(parsers.parse('the result is what the file "{path}" holds'))
+def result_is_file(ctx, path):
+    assert ctx.outcome is not None and ctx.refused is None, "the action was refused"
+    wanted = (ctx.directory / path).read_text(encoding="utf-8")
+    assert ctx.result == wanted, f"the result is not what {path} holds:\n{show(ctx.result)[:2000]}"
+
+
+@given(parsers.parse('a file "{path}" that asks "{repo}" for {count:d} files'))
+def asks_for_files(ctx, path, repo, count):
+    (ctx.directory / path).write_text(json.dumps({"repo": repo, "commit": "tip", "paths": ["a"] * count}))
+
+
+@given(parsers.parse('a file "{path}" that reports {count:d} timings for "{repo}"'))
+def reports_timings(ctx, path, count, repo):
+    (ctx.directory / path).write_text(json.dumps({"repo": repo, "timings": [{"request_id": "a", "total_ms": 1}] * count}))

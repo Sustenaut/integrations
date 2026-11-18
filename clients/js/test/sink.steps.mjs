@@ -1,331 +1,235 @@
 // caller.js's StorageSink: as tests/steps/test_storage_sink.py holds storage_sink.py.
-import { After, Then } from "@cucumber/cucumber";
-import { mock as nodeMock } from "node:test";
-import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+// Its storage is a stand-in fetch that keeps each file it is sent in the scratch
+// directory, under the URL's path, and says on stdout, when a Given asks, what it was
+// sent (as a line of JSON, its body left out: that is the file).
+import { Given, Then, When } from "@cucumber/cucumber";
+import { mock } from "node:test";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { StorageSink, encode, fileName } from "../caller.js";
-
-// What node:test gave each test as `t`: its mocks, restored when the
-// scenario ends, and the cleanups it registers with t.after().
-const cleanups = [];
-const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
-After("@sink", async function () {
-  while (cleanups.length) await cleanups.pop()();
-  nodeMock.restoreAll();
-});
-
+import { avroMetadata, bucket, given } from "./helpers.mjs";
 
 const START = 1_800_000_000_000; // 2027-01-15T08:00:00Z
-const VECTORS = new URL("../../../tests/vectors/", import.meta.url);
 
 const record = (n = 1, fields = {}) => ({
   at: "2026-11-02T10:00:00Z", repo: "a-repo", app: "web", plugin: "github.edit-pr", operation: "open-pr",
   request_id: `r${n}`, latency_ms: 12, status: 201, outcome: "ok", retries: 0, bytes_in: 3, bytes_out: 4,
   mode: "required", route: "routed", ...fields,
 });
+const records = (ids, fields) => ids.split(",").filter(Boolean).map((id) => record(Number(id.slice(1)), fields));
 
-// The storage service's buffer, by PUT; down while down is true.
-function storage() {
-  const files = new Map();
-  const sent = [];
+function storage(world) {
   const self = {
-    files, sent, down: false, status: 200, body: "{}",
+    down: false, status: 200, body: "{}", says: false, sent: 0,
     fetch: async (url, init) => {
-      const { pathname } = new URL(url);
-      sent.push({ path: pathname, init });
+      self.sent += 1;
+      if (self.says) process.stdout.write(`${await given(url, { ...init, body: undefined })}\n`);
       if (self.down) throw new TypeError("fetch failed");
       if (self.status !== 200) return new Response(self.body, { status: self.status });
-      files.set(pathname.slice(1), init.body);
+      const file = path.join(world.pubtest.directory, new URL(url).pathname);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, init.body);
       return new Response("{}");
     },
   };
   return self;
 }
 
-function world(options = {}) {
-  const buffer = storage();
-  const clock = { now: START };
-  const sink = new StorageSink({ "a-repo": "ds", "b-repo": "ds" }, {
-    sender: "app-1_x", url: "https://storage.example/", token: "pod-token", clock: () => clock.now, fetch: buffer.fetch,
-    flushOnWrite: false, limit: 3, ...options,
-  });
-  return { sink, buffer, clock };
+function sink(world) {
+  world.made ??= new StorageSink(world.datasets, world.sinkOptions);
+  return world.made;
 }
 
-// An Avro file's metadata, read back: just enough of the container format to check it.
-function metadata(bytes) {
-  let at = 4; // after "Obj\x01"
-  const long = () => {
-    let z = 0n;
-    for (let shift = 0n; ; shift += 7n) {
-      const b = bytes[at++];
-      z |= BigInt(b & 0x7f) << shift;
-      if (!(b & 0x80)) break;
+Given("a StorageSink {string} for:", function (sender, doc) {
+  this.store = storage(this);
+  this.clock = { now: START };
+  this.datasets = JSON.parse(doc);
+  this.sinkOptions = {
+    sender, url: "https://storage.example/", token: "pod-token", clock: () => this.clock.now, fetch: this.store.fetch,
+    flushOnWrite: false, limit: 3,
+  };
+});
+
+Given("a StorageSink {string} into an R2 bucket with the prefix {string}, for:", function (sender, prefix, doc) {
+  this.calls = bucket(this);
+  this.clock = { now: START };
+  this.datasets = JSON.parse(doc);
+  this.sinkOptions = { sender, bucket: this.calls, prefix, clock: () => this.clock.now, flushOnWrite: false };
+});
+
+Given("its limit is the default", function () {
+  delete this.sinkOptions.limit;
+});
+
+Given("its token is a function giving {string}", function (token) {
+  this.sinkOptions.token = () => token;
+});
+
+// The token file says each read on stdout, and holds each token in turn, its last for good.
+Given("its token is read from {string}, which holds {string}, then {string}", function (tokenFile, first, second) {
+  const tokens = [first, second];
+  delete this.sinkOptions.token;
+  Object.assign(this.sinkOptions, {
+    tokenFile,
+    readFile: async (p, encoding) => {
+      process.stdout.write(`read ${p} ${encoding}\n`);
+      return `${tokens.length > 1 ? tokens.shift() : tokens[0]}\n`;
+    },
+  });
+});
+
+Given("its token is read from {string}, which isn't there", function (tokenFile) {
+  delete this.sinkOptions.token;
+  this.sinkOptions.tokenFile = tokenFile;
+});
+
+Given("it flushes from a write that finds the file overdue, handing that to waitUntil", function () {
+  this.handed = [];
+  Object.assign(this.sinkOptions, {
+    flushOnWrite: true,
+    waitUntil: (p) => {
+      process.stdout.write("handed a flush to waitUntil\n");
+      this.handed.push(p);
+    },
+  });
+});
+
+Given("it flushes as it does by default", function () {
+  delete this.sinkOptions.flushOnWrite;
+});
+
+Given("storage says on stdout what it is sent", function () {
+  this.store.says = true;
+});
+
+Given("storage is down", function () {
+  this.store.down = true;
+});
+
+Given("storage refuses with {int} and:", function (status, doc) {
+  Object.assign(this.store, { status, body: doc });
+});
+
+When("storage takes files again", function () {
+  Object.assign(this.store, { status: 200, down: false });
+});
+
+// The sink is made by the scenario's first When, at the start, if it isn't yet.
+When("two minutes pass", function () {
+  sink(this);
+  this.clock.now += 120_000;
+});
+
+// What waits to be sent, by dataset, as request ids; a flush the write handed to
+// waitUntil is waited for, as the Worker's runtime would.
+When("it is given the records {string}", async function (ids) {
+  await this.attempt(() => given_(this, records(ids)));
+});
+
+When("it is given the records {string} for {string}", async function (ids, repo) {
+  await this.attempt(() => given_(this, records(ids, { repo })));
+});
+
+async function given_(world, sent) {
+  const made = sink(world);
+  for (const r of sent) made.write(r);
+  await Promise.all(world.handed ?? []);
+  await made.flushing;
+  return Object.fromEntries(Object.entries(made.waiting).map(([d, rs]) => [d, rs.map((r) => r.request_id)]));
+}
+
+When("it flushes", async function () {
+  await this.attempt(() => sink(this).flush());
+});
+
+When("it flushes {int} times", async function (times) {
+  await this.attempt(async () => {
+    for (let i = 0; i < times; i++) await sink(this).flush();
+  });
+});
+
+When("it times pages of {string} ms", async function (times) {
+  await this.attempt(() => {
+    for (const ms of times.split(",")) sink(this).page(Number(ms));
+    return sink(this).pages;
+  });
+});
+
+When("it times {int} pages of {int} ms", async function (n, ms) {
+  await this.attempt(() => {
+    for (let i = 0; i < n; i++) sink(this).page(ms);
+    return sink(this).pages;
+  });
+});
+
+When("it is made", async function () {
+  await this.attempt(() => sink(this));
+});
+
+// A Node sink started on a timer: how many files it has sent after each step of the
+// timeline, the last two after close().
+When("it is started with a random part of {float} of a {int} s cycle, and the timers run {string} ms, then it is closed and they run {int} ms more", async function (part, every, steps, after) {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  Object.assign(this.sinkOptions, { start: true, everySeconds: every, random: () => part });
+  delete this.sinkOptions.flushOnWrite;
+  await this.attempt(async () => {
+    const made = sink(this);
+    const counts = [];
+    for (const ms of steps.split(",").map(Number)) {
+      mock.timers.tick(ms);
+      await made.flushing;
+      counts.push(this.store.sent);
     }
-    return Number((z >> 1n) ^ -(z & 1n));
-  };
-  const string = () => {
-    const n = long();
-    return new TextDecoder().decode(bytes.slice(at, (at += n)));
-  };
-  const meta = {};
-  for (let n = long(); n; n = long()) for (let i = 0; i < n; i++) meta[string()] = string();
-  return meta;
-}
-
-const report = (bytes) => JSON.parse(metadata(bytes)["integrations.status"]);
-
-Then("an idle cycle still writes a report", function () {
-  return (async () => {
-  const { sink, buffer, clock } = world();
-  clock.now += 120_000;
-  await sink.flush();
-  const [[name, data]] = buffer.files;
-  assert.match(name, /^ds\/inbox\/calls\/2027-01-15\/080200-app-1-x-[0-9a-f]{16}\.avro$/);
-  assert.deepEqual(report(data), {
-    kind: "sender", sender: "app-1_x", version: "js", at: "2027-01-15T08:02:00Z", cycle_start: "2027-01-15T08:00:00Z",
-    cycle_end: "2027-01-15T08:02:00Z", calls: 0, drops: 0, buffer_size: 0, storage_failures: 0, page_count: 0,
-    page_ms_low: null, page_ms_median: null, page_ms_high: null, cold_start: true,
+    await made.close();
+    counts.push(this.store.sent);
+    mock.timers.tick(after);
+    await made.flushing;
+    counts.push(this.store.sent);
+    return counts;
   });
-  assert.equal(metadata(data)["avro.codec"], "null");
-  assert.equal(buffer.sent[0].init.headers.Authorization, "Bearer pod-token");
-  assert.equal(buffer.sent[0].init.method, "PUT");
-  assert.ok(buffer.sent[0].init.signal instanceof AbortSignal);
-})();
 });
 
-Then("each dataset is its own tenant, and a cycle's calls are one file", function () {
-  return (async () => {
-  const buffer = storage();
-  const sink = new StorageSink({ "a-repo": "proj_a", "b-repo": "proj_b" }, { sender: "s", url: "https://storage.example", token: () => "pod-token", fetch: buffer.fetch, flushOnWrite: false });
-  sink.write(record(1));
-  sink.write(record(2));
-  sink.write(record(3, { repo: "b-repo" }));
-  await sink.flush();
-  const names = [...buffer.files.keys()];
-  assert.deepEqual(names.map((n) => n.split("/")[0]), ["proj-a", "proj-b"]);
-  assert.deepEqual([report(buffer.files.get(names[0])).calls, report(buffer.files.get(names[1])).calls], [2, 1]);
-})();
+When("I name a file for {string} at the start, of the records {string} with a sender's report", async function (sender, ids) {
+  await this.attempt(async () => fileName(START, sender, await encode(records(ids), { kind: "sender" })));
 });
 
-Then("past the limit the oldest go and are counted, as are a project's with no buffer", function () {
-  return (async () => {
-  const { sink, buffer } = world();
-  for (let n = 1; n <= 5; n++) sink.write(record(n));
-  sink.write(record(6, { repo: "elsewhere" }));
-  assert.deepEqual(sink.waiting.ds.map((r) => r.request_id), ["r3", "r4", "r5"]);
-  await sink.flush();
-  const status = report([...buffer.files.values()][0]);
-  assert.deepEqual([status.calls, status.drops, status.buffer_size], [3, 3, 3]);
-  const none = new StorageSink({}, { sender: "s", bucket: { put: async () => {} } });
-  none.write(record());
-  await none.flush();
-})();
+When("I encode no records, with no report, into {string}", async function (file) {
+  await this.attempt(async () => writeFile(path.join(this.pubtest.directory, file), await encode([])));
 });
 
-Then("a refused file goes again as it was, under its name, and the failures are reported", function () {
-  return (async (t) => {
-  const said = [];
-  t.mock.method(console, "error", (line) => said.push(line));
-  const { sink, buffer, clock } = world();
-  sink.write(record(1));
-  buffer.status = 403;
-  buffer.body = JSON.stringify({ error: "github:x may not write here" });
-  clock.now += 120_000;
-  await sink.flush();
-  assert.equal(buffer.files.size, 0);
-  const first = buffer.sent[0].path;
-  sink.write(record(2));
-  clock.now += 120_000;
-  await sink.flush(); // still refused: the held file again, and nothing new
-  assert.deepEqual(buffer.sent.map((s) => s.path), [first, first]);
-  buffer.status = 200;
-  clock.now += 120_000;
-  await sink.flush();
-  assert.equal(buffer.sent[2].path, first);
-  const [held, next] = [...buffer.files.values()];
-  assert.equal(report(held).calls, 1);
-  assert.deepEqual([report(next).calls, report(next).storage_failures], [1, 2]);
-  assert.match(said[0], /^integrations: storage didn't take inbox\/calls\/.+\.avro for ds: HTTP 403 github:x may not write here$/);
-})(scenarioContext);
-});
-
-Then("no answer, a status without a reason, and a token that can't be read are failed writes too", function () {
-  return (async (t) => {
-  const said = [];
-  t.mock.method(console, "error", (line) => said.push(line));
-  const { sink, buffer } = world();
-  buffer.down = true;
-  await sink.flush();
-  assert.match(said[0], /: no answer: fetch failed$/);
-  buffer.down = false;
-  buffer.status = 500;
-  buffer.body = "<html>";
-  await sink.flush();
-  assert.match(said[1], /: HTTP 500$/);
-  const files = storage();
-  const reading = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", tokenFile: "/no/such/token", fetch: files.fetch, flushOnWrite: false });
-  files.status = 401;
-  await reading.flush();
-  assert.equal(files.sent[0].init.headers.Authorization, "Bearer ");
-  assert.match(said[2], /HTTP 401; no token to send: ENOENT/);
-})(scenarioContext);
-});
-
-Then("the token file is read for each request", function () {
-  return (async () => {
-  let token = "first";
-  const reads = [];
-  const buffer = storage();
-  const sink = new StorageSink({ "a-repo": "ds" }, {
-    sender: "s", url: "https://s.example", tokenFile: "/var/run/token", fetch: buffer.fetch, flushOnWrite: false,
-    readFile: async (path, encoding) => (reads.push([path, encoding]), `${token}\n`),
+// tests/vectors/sink.avro, which test_vectors.py reads with avrofile.decode and file_status;
+// WRITE_VECTORS=1 rewrites it, and sink.json, from what the sink writes.
+When("the sink of the vector writes its records and page times, two minutes in", async function () {
+  this.calls = bucket(this);
+  this.clock = { now: START };
+  const made = new StorageSink({ "a-repo": "ds" }, { sender: "app-1_x", version: "0.0.0-test", bucket: this.calls, clock: () => this.clock.now, flushOnWrite: false });
+  await this.attempt(async () => {
+    const written = [
+      record(1),
+      record(2, { status: null, outcome: "unavailable", retries: 2, latency_ms: 30_000, bytes_in: 0 }),
+      record(3, { app: "", operation: "check-push", plugin: "github.repo-ops", mode: "advisory", request_id: "ünïcode-ünd-𝄞" }),
+      record(4, { at: "1999-12-31T23:59:59Z", latency_ms: 2 ** 40, status: 429, bytes_out: 0 }),
+    ];
+    for (const r of written) made.write(r);
+    for (const ms of [5, 7, 40]) made.page(ms);
+    this.clock.now += 120_000;
+    await made.flush();
+    const [file] = await readdir(path.join(this.pubtest.directory, "ds/inbox/calls/2027-01-15"));
+    const name = `inbox/calls/2027-01-15/${file}`;
+    const data = await readFile(path.join(this.pubtest.directory, "ds", name));
+    const report = JSON.parse(avroMetadata(new Uint8Array(data))["integrations.status"]);
+    const expected = { sender: "app-1_x", at: this.clock.now / 1000, name, records: written, report };
+    if (process.env.WRITE_VECTORS) {
+      const vectors = path.join(this.pubtest.repository, "tests/vectors");
+      await writeFile(path.join(vectors, "sink.avro"), data);
+      await writeFile(path.join(vectors, "sink.json"), `${JSON.stringify(expected, null, 2)}\n`);
+    }
+    return expected;
   });
-  await sink.flush();
-  token = "second";
-  await sink.flush();
-  assert.deepEqual(buffer.sent.map((s) => s.init.headers.Authorization), ["Bearer first", "Bearer second"]);
-  assert.deepEqual(reads[0], ["/var/run/token", "utf8"]);
-})();
 });
 
-Then("into an R2 bucket binding, under its prefix, for the storage Worker", function () {
-  return (async () => {
-  const put = [];
-  let failing = false;
-  const bucket = { put: async (key, data) => { if (failing) throw new Error("R2 is down"); put.push([key, data]); } };
-  const sink = new StorageSink({ "a-repo": "proj_a" }, { sender: "storage", bucket, prefix: "", flushOnWrite: false });
-  sink.write(record());
-  failing = true;
-  await sink.flush();
-  failing = false;
-  await sink.flush();
-  assert.equal(put.length, 2);
-  assert.match(put[0][0], /^proj-a\/inbox\/calls\/.+-storage-[0-9a-f]{16}\.avro$/);
-  assert.equal(report(put[1][1]).storage_failures, 1);
-  const prefixed = new StorageSink({ "a-repo": "ds" }, { sender: "s", bucket, prefix: "x/", flushOnWrite: false });
-  await prefixed.flush();
-  assert.match(put[2][0], /^x\/ds\/inbox\//);
-})();
-});
-
-Then("a write that finds the file overdue sends it, and hands that to waitUntil", function () {
-  return (async () => {
-  const handed = [];
-  const { sink, buffer, clock } = world({ flushOnWrite: true, waitUntil: (p) => handed.push(p) });
-  sink.write(record(1));
-  assert.equal(handed.length, 0, "not yet due");
-  clock.now += 120_000;
-  sink.write(record(2));
-  sink.write(record(3)); // a flush is under way: not another
-  assert.equal(handed.length, 1);
-  await handed[0];
-  assert.equal(buffer.files.size, 1);
-  assert.equal(report([...buffer.files.values()][0]).calls, 2);
-  assert.deepEqual(sink.waiting.ds.map((r) => r.request_id), ["r3"]);
-})();
-});
-
-Then("by default, a Worker's way: flush from write, with no timer", function () {
-  return (async () => {
-  const buffer = storage();
-  const clock = { now: START };
-  const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, clock: () => clock.now });
-  assert.equal(sink.timer, undefined);
-  clock.now += 120_000;
-  sink.write(record());
-  await sink.flushing;
-  assert.equal(buffer.files.size, 1);
-})();
-});
-
-Then("in Node, start: true sends on a timer, first a random part of a cycle in, and close\\(\\) stops it", function () {
-  return (async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
-  const buffer = storage();
-  const sink = new StorageSink({ "a-repo": "ds" }, { sender: "s", url: "https://s.example", token: "t", fetch: buffer.fetch, start: true, everySeconds: 120, random: () => 0.25 });
-  t.mock.timers.tick(29_999);
-  assert.equal(buffer.sent.length, 0);
-  t.mock.timers.tick(1);
-  await sink.flushing;
-  assert.equal(buffer.sent.length, 1, "30 s in: a quarter of the cycle");
-  t.mock.timers.tick(120_000);
-  await sink.flushing;
-  assert.equal(buffer.sent.length, 2, "then every cycle");
-  await sink.close();
-  t.mock.timers.tick(240_000);
-  assert.equal(buffer.sent.length, 3);
-})(scenarioContext);
-});
-
-Then("a sink needs a sender and somewhere to send", function () {
-  return (() => {
-  assert.throws(() => new StorageSink({}, { url: "https://s", token: "t" }), /needs a sender/);
-  assert.throws(() => new StorageSink({}, { sender: "s", url: "https://s" }), /needs a url and a token/);
-})();
-});
-
-Then("page times become the window's low, median and high, rounded as Python rounds", function () {
-  return (async () => {
-  const { sink, buffer } = world();
-  for (const ms of [3, 2, 9, 1]) sink.page(ms); // median 2.5: Python's round() makes it 2
-  await sink.flush();
-  sink.page(0.5);
-  sink.page(1.5);
-  sink.page(2.5);
-  await sink.flush();
-  await sink.flush();
-  const [first, second, third] = [...buffer.files.values()].map(report);
-  assert.deepEqual([first.page_count, first.page_ms_low, first.page_ms_median, first.page_ms_high, first.cold_start], [4, 1, 2, 9, true]);
-  assert.deepEqual([second.page_ms_low, second.page_ms_median, second.page_ms_high, second.cold_start], [0, 2, 2, false]);
-  assert.deepEqual([third.page_count, third.page_ms_median], [0, null]);
-})();
-});
-
-Then("past the limit page times are still counted", function () {
-  return (async () => {
-  const { sink, buffer } = world();
-  for (let i = 0; i < 10_005; i++) sink.page(1);
-  assert.equal(sink.pages.length, 10_000);
-  await sink.flush();
-  assert.equal(report([...buffer.files.values()][0]).page_count, 10_005);
-})();
-});
-
-Then("the same records give the same bytes, and the name holds their hash", function () {
-  return (async () => {
-  const a = await encode([record(1), record(2)], { kind: "sender" });
-  assert.deepEqual(a, await encode([record(1), record(2)], { kind: "sender" }));
-  assert.notDeepEqual(a, await encode([record(1)], { kind: "sender" }));
-  assert.match(await fileName(START, "a b/c", a), /^inbox\/calls\/2027-01-15\/080000-a-b-c-[0-9a-f]{16}\.avro$/);
-  assert.equal(metadata(await encode([]))["integrations.status"], undefined);
-})();
-});
-
-// tests/vectors/sink.avro, which test_vectors.py reads with avrofile.decode and file_status.
-Then("the file in tests\\/vectors\\/ is what the sink writes", function () {
-  return (async () => {
-  const put = [];
-  const clock = { now: START };
-  const sink = new StorageSink({ "a-repo": "ds" }, { sender: "app-1_x", version: "0.0.0-test", bucket: { put: async (key, data) => put.push([key, data]) }, clock: () => clock.now, flushOnWrite: false });
-  const records = [
-    record(1),
-    record(2, { status: null, outcome: "unavailable", retries: 2, latency_ms: 30_000, bytes_in: 0 }),
-    record(3, { app: "", operation: "check-push", plugin: "github.repo-ops", mode: "advisory", request_id: "ünïcode-ünd-𝄞" }),
-    record(4, { at: "1999-12-31T23:59:59Z", latency_ms: 2 ** 40, status: 429, bytes_out: 0 }),
-  ];
-  for (const r of records) sink.write(r);
-  for (const ms of [5, 7, 40]) sink.page(ms);
-  clock.now += 120_000;
-  await sink.flush();
-  const [[key, data]] = put;
-  const name = key.slice("ds/".length);
-  const expected = { sender: "app-1_x", at: clock.now / 1000, name, records, report: report(data) };
-  if (process.env.WRITE_VECTORS) {
-    await writeFile(new URL("sink.avro", VECTORS), data);
-    await writeFile(new URL("sink.json", VECTORS), `${JSON.stringify(expected, null, 2)}\n`);
-  }
-  assert.deepEqual(new Uint8Array(await readFile(new URL("sink.avro", VECTORS))), data);
-  assert.deepEqual(JSON.parse(await readFile(new URL("sink.json", VECTORS), "utf8")), expected);
-})();
+Then("the file {string} is the repository's {string}", async function (file, source) {
+  const got = await readFile(path.join(this.pubtest.directory, file));
+  const want = await readFile(path.join(this.pubtest.repository, source));
+  if (!got.equals(want)) throw new Error(`${file} is not ${source}: ${got.length} bytes, not ${want.length}`);
 });
