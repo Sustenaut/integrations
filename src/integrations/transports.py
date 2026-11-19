@@ -824,12 +824,16 @@ def write_cassette(path: Path | str, data: dict, root: Path | str | None = None)
     when that is inside `root` (by default `cassettes_dir(path)`): else
     `CassettePathError`, and nothing is written. Returns where it wrote."""
     base = Path(root).resolve() if root is not None else cassettes_dir(path)
-    target = Path(path).resolve()
-    if base is None or not target.is_relative_to(base):
-        raise _refused(path, target, base)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    return target
+    if base is None:
+        raise _refused(path, Path(path).resolve(), base)
+    inside = os.path.realpath(str(base))
+    target = os.path.realpath(os.path.abspath(os.fspath(path)))
+    if not target.startswith(inside + os.sep):
+        raise _refused(path, Path(target), base)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8") as out:
+        out.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    return Path(target)
 
 
 def promote(path: Path | str) -> None:
