@@ -1,5 +1,5 @@
 {
-  "description": "Replay's old format reads as a cassette: answers by METHOD url, a list in turn and its last for good",
+  "description": "The old responses format reads as a cassette: answers by METHOD url, a list in turn and its last for good",
   "cassette": {
     "responses": {
       "GET https://api.example/x": [

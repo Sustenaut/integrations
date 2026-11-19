@@ -17,10 +17,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from integrations import __version__, registry
-from integrations.calls import (Caller, Check, JsonlSink, Network, NullSink, Recording, Replay, Request, Response,
-                                health, read_modes)
+from integrations.calls import Caller, Check, JsonlSink, Network, NullSink, Request, Response, health, read_modes
 from integrations.clients.github_app_token import AppToken, FakeAppToken
 from integrations.clients.github_edit_pr import Change, EditPullRequests, FakeEditPullRequests, next_branch
+from integrations.transports import Cassette, Recorder
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from .providers import providers, records
@@ -309,7 +309,7 @@ def network_user_agent(ctx):
 
 @given(parsers.parse('a recording of answers where "{asked}" is {status:d} with:'))
 def a_recording(ctx, asked, status, docstring):
-    ctx.recording = Recording(Replay({asked: {"status": status, "json": json.loads(docstring)}}))
+    ctx.recording = Recorder(Cassette({"responses": {asked: {"status": status, "json": json.loads(docstring)}}}))
 
 
 @when(parsers.parse('the recording sends "{asked}" with the header "{name}" set to "{value}"'))
@@ -332,7 +332,7 @@ def recording_saved(ctx, path):
 @when(parsers.parse('a replay of "{path}" sends "{asked}"'))
 def replay_sends(ctx, path, asked):
     method, url = asked.split(" ", 1)
-    ctx.attempt(lambda: Replay.from_file(ctx.directory / path).send(Request(method, url), 1))
+    ctx.attempt(lambda: Cassette(ctx.directory / path).send(Request(method, url), 1))
 
 
 @when(parsers.parse("I read an empty answer with the status {status:d} as JSON"))

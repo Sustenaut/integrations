@@ -3,10 +3,10 @@
 // default transport and caller.fetch.
 import { Given, When } from "@cucumber/cucumber";
 import { dig } from "@sustenaut/pubtest";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Caller, MemorySink, pythonJson } from "../caller.js";
-import { Cassette, Faulty, Recorder, checkMode, currentTransport, promote, record, use } from "../transports.js";
+import { Cassette, Faulty, LIVE, Recorder, checkMode, currentTransport, promote, record, use } from "../transports.js";
 import { repositoryJson } from "./helpers.mjs";
 
 const utf8 = (text) => new TextEncoder().encode(text);
@@ -190,4 +190,34 @@ When("code that takes a fetch opens a pull request at {string} through caller.fe
 
 When("I make a fetch of {string} {string} from a caller", async function (plugin, operation) {
   await this.attempt(() => new Caller("a-repo").fetch(plugin, operation));
+});
+
+// A path in the scratch directory as written, its ".." left for the transports to resolve.
+const scratch = (world, p) => `${world.pubtest.directory}${path.sep}${p}`;
+
+Given("the environment sets {string} to {string} in the scratch directory", function (name, value) {
+  const was = process.env[name];
+  process.env[name] = scratch(this, value);
+  this.pubtest.cleanup(() => {
+    if (was === undefined) delete process.env[name];
+    else process.env[name] = was;
+  });
+});
+
+Given("{string} is a symlink to {string}", async function (link, target) {
+  const at = scratch(this, link);
+  await mkdir(path.dirname(at), { recursive: true });
+  await symlink(target, at);
+});
+
+When("a recorder made for {string} is saved as {string}", async function (made, saved) {
+  await this.attempt(() => new Recorder(LIVE, scratch(this, made)).save(scratch(this, saved)));
+});
+
+When("a recorder made for {string} is saved", async function (made) {
+  await this.attempt(() => new Recorder(LIVE, scratch(this, made)).save());
+});
+
+When("I promote {string}", async function (file) {
+  await this.attempt(() => promote(scratch(this, file)));
 });

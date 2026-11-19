@@ -14,7 +14,7 @@ from pathlib import Path
 
 from integrations import registry
 from integrations.avrofile import decode, file_name, file_status
-from integrations.calls import Caller, Replay, Request, Response, Unavailable
+from integrations.calls import Caller, Request, Response, Unavailable
 from integrations.transports import Cassette, Faulty, Recorder, promote
 from pubtest.core import dig, show
 from pytest_bdd import given, parsers, scenarios, then, when
@@ -45,7 +45,7 @@ def vector_call(ctx):
     shape of the vector's "expect"."""
     vector = ctx.vector
     sink, naps = records(ctx), []
-    transport = Replay(vector["responses"])
+    transport = Cassette({"responses": vector["responses"]})
     made = Caller("a-repo", "web", sink=sink, transport=transport, modes=vector.get("modes"), sleep=naps.append,
                   new_id=lambda: "id-1", random=lambda: vector.get("random", 1.0))
     asked = vector["request"]

@@ -13,7 +13,7 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | advisory.json | The repository's mode reaches the record |
       | event-four-tries.json | An event-driven call (E) is tried four times, 1, 2 and 4 s apart |
       | jitter.json | The wait is random, up to 2**n s: here a quarter of it |
-      | no-answer.json | Nothing recorded is no answer: status null |
+      | no-answer.json | No answer: status null |
       | ok.json | A call that worked: one record, its sizes, no retries |
       | person-waits.json | A call a person waits on (H) is tried once |
       | post-once.json | A POST is not safe to repeat, so it is tried once |
@@ -55,7 +55,7 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | in-order.json | The same request twice is answered by its recorded calls in order, each once |
       | match.json | A request finds its recorded call: its query in any order, its host in any case, its headers aside |
       | no-snapshot.json | A call with no recording raises NoSnapshot, naming the scenario, the call, the nearest recorded one and how they differ |
-      | old-format.json | Replay's old format reads as a cassette: answers by METHOD url, a list in turn and its last for good |
+      | old-format.json | The old responses format reads as a cassette: answers by METHOD url, a list in turn and its last for good |
       | repeats.json | A request made again is kept again, in order, each with how long it took, and replayed in that order |
       | rules.json | A plugin's record rules, its extends merged over the defaults; a plugin with none gets the defaults |
       | secret-leak.json | A secret the recorder saw that would still be written, here echoed in a body, stops the save |

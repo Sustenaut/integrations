@@ -1,7 +1,8 @@
 // clients/js/caller.js: what tests/vectors/ doesn't cover.
 import { Given, Then, When } from "@cucumber/cucumber";
 import { mock } from "node:test";
-import { Answer, Caller, MemorySink, NullSink, OPERATIONS, POLICIES, Replay, pythonJson, readModes } from "../caller.js";
+import { Answer, Caller, MemorySink, NullSink, OPERATIONS, POLICIES, pythonJson, readModes } from "../caller.js";
+import { Cassette } from "../transports.js";
 import { given, repositoryJson, saidSleep, toFakes } from "./helpers.mjs";
 
 // A request as a step gives it: {"bytes": [...]} for a body of bytes.
@@ -105,7 +106,7 @@ Given("the {string} service answers {string} with {int} and a Retry-After an hou
 });
 
 Given("a replay of:", function (doc) {
-  this.replay = new Replay(JSON.parse(doc));
+  this.replay = new Cassette({ responses: JSON.parse(doc) });
 });
 
 When("it calls {string} {string} with:", async function (plugin, operation, doc) {

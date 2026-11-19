@@ -101,6 +101,28 @@ def save_without_path(ctx):
     ctx.attempt(lambda: Recorder(Network()).save())
 
 
+@when(parsers.parse('a recorder made for "{made}" is saved as "{path}"'))
+def recorder_saved_as(ctx, made, path):
+    ctx.attempt(lambda: Recorder(Network(), made).save(path))
+
+
+@when(parsers.parse('a recorder made for "{made}" is saved'))
+def recorder_saved(ctx, made):
+    ctx.attempt(lambda: Recorder(Network(), made).save())
+
+
+@given(parsers.parse('"{path}" is a symlink to "{target}"'))
+def a_symlink(ctx, path, target):
+    link = ctx.directory / path
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+
+
+@when(parsers.parse('I promote "{path}"'))
+def promote_file(ctx, path):
+    ctx.attempt(lambda: promote(path))
+
+
 @when("I close the cassette")
 def close_cassette(ctx):
     def close():

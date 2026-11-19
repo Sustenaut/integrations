@@ -137,65 +137,6 @@ def _headers(headers: Any) -> dict[str, str]:
         return {}
 
 
-def recorded_key(request: Request) -> str:
-    return f"{request.method} {request.url}"
-
-
-class Replay:
-    """Recorded responses, by method and URL; one not recorded has no answer.
-    A list of responses answers in turn, for a call whose answer changes. An answer's
-    "headers" may give its ETag and Retry-After.
-
-    Deprecated, for one release: use `integrations.transports.Cassette`, which reads
-    this format too."""
-
-    def __init__(self, responses: dict[str, Any]):
-        self.responses = responses
-        self.sent: list[Request] = []
-
-    @classmethod
-    def from_file(cls, path: Path) -> Replay:
-        return cls(json.loads(path.read_text(encoding="utf-8"))["responses"])
-
-    def send(self, request: Request, timeout: float) -> Response:
-        self.sent.append(request)
-        found = self.responses.get(recorded_key(request))
-        if isinstance(found, list):
-            found = found.pop(0) if len(found) > 1 else found[0]
-        if found is None:
-            return Response(None, error="not recorded")
-        if "error" in found:
-            return Response(None, error=found["error"])
-        headers = found.get("headers", {})
-        body = found["text"].encode("utf-8") if "text" in found else json.dumps(found.get("json")).encode("utf-8")
-        return Response(found["status"], body, etag=headers.get("ETag"), retry_after=headers.get("Retry-After"),
-                        headers=dict(headers))
-
-
-class Recording:
-    """`inner`'s answers, kept for a replay file. A token travels in a header,
-    so it is never kept.
-
-    Deprecated, for one release: use `integrations.transports.Recorder`, which keeps
-    requests, headers and repeats, and never writes a secret."""
-
-    def __init__(self, inner: Transport):
-        self.inner = inner
-        self.responses: dict[str, Any] = {}
-
-    def send(self, request: Request, timeout: float) -> Response:
-        response = self.inner.send(request, timeout)
-        if response.error:
-            self.responses[recorded_key(request)] = {"error": response.error}
-        else:
-            self.responses[recorded_key(request)] = {"status": response.status, "json": response.json()}
-        return response
-
-    def save(self, path: Path) -> None:
-        path.write_text(json.dumps({"responses": self.responses}, indent=1, sort_keys=True) + "\n",
-                        encoding="utf-8")
-
-
 @dataclass(frozen=True)
 class CallRecord:
     """One call, as schemas/call-record.schema.json describes it."""

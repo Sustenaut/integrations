@@ -20,7 +20,7 @@ export const RECORD = Object.freeze({
 // init.integrations.
 //
 // - new Cassette(pathOrData) answers from a recording (integrations.cassette/1, or the
-//   older { responses } files Replay reads) and throws NoSnapshot for a call it has none of.
+//   older { responses } format) and throws NoSnapshot for a call it has none of.
 // - new Recorder(inner, path) sends through inner, keeps every call, and save() writes
 //   them as a cassette, normalised by each plugin's record rules (RECORD above, from
 //   plugins/*.json): only the headers worth keeping, volatile values as placeholders,
@@ -33,6 +33,14 @@ export const RECORD = Object.freeze({
 // name, and a stand-in sent back reads as its placeholder again. Real text holding
 // "⟦integrations:" is written ⟦integrations:escape⟧, and read back as it was.
 //
+// Where cassettes go: a cassette is written (save(), promote(), writeCassette()), and a
+// cassette the environment names is read, only at a path that resolves, symlinks
+// followed, inside the cassettes directory; anything else throws CassettePathError
+// before a byte is read or written. The cassettes directory is INTEGRATIONS_CASSETTES
+// when it is set, else the directory holding INTEGRATIONS_CASSETTE when that is set,
+// else the directory of the path given (to the Recorder when it is made, or to promote()
+// and writeCassette()), each resolved.
+//
 //   import { Cassette, use } from "@sustenaut/integrations/transports.js";
 //   const restore = use(new Cassette(data));
 //   try { ... } finally { restore(); }
@@ -44,6 +52,7 @@ export const FORMAT = "integrations.cassette/1";
 export const DIGEST_OVER = 64 * 1024;
 export const MODE = "INTEGRATIONS_MODE";
 export const CASSETTE = "INTEGRATIONS_CASSETTE";
+export const CASSETTES = "INTEGRATIONS_CASSETTES";
 export const MARKER = "PUBTEST_RUN";
 const MODES = ["live", "replay", "record"];
 
@@ -86,6 +95,15 @@ export class UnusedCalls extends NoSnapshot {}
 
 // A secret the recorder saw would be written: the recording is not saved.
 export class SecretInRecording extends Error {
+  constructor(message) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+// A cassette path that resolves outside the cassettes directory: nothing is read or
+// written there.
+export class CassettePathError extends Error {
   constructor(message) {
     super(message);
     this.name = new.target.name;
@@ -466,7 +484,12 @@ export async function readRequest(url, init = {}) {
   else if (body instanceof ArrayBuffer) body = new Uint8Array(body);
   else if (ArrayBuffer.isView(body)) body = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
   else if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) body = utf8(body.toString());
-  else if (body !== null) throw new TypeError("a transport here reads a text or bytes body only");
+  else if ((typeof FormData !== "undefined" && body instanceof FormData) || (typeof Blob !== "undefined" && body instanceof Blob)) {
+    // Encoded as fetch would send it, with the Content-Type (a form's boundary) it would add.
+    const encoded = new Request("https://body.invalid/", { method: "POST", body });
+    body = new Uint8Array(await encoded.arrayBuffer());
+    if (!("content-type" in headers) && encoded.headers.get("content-type")) headers["content-type"] = encoded.headers.get("content-type");
+  } else if (body !== null) throw new TypeError("a transport here reads a text, bytes, form or blob body only");
   const { plugin = null, operation = null, timeout = Infinity } = init.integrations ?? {};
   return { method: (init.method ?? given?.method ?? "GET").toUpperCase(), url: given ? given.url : String(url), headers, body, plugin, operation, timeout };
 }
@@ -496,10 +519,80 @@ function oldAnswer(found) {
   return { status: found.status, headers: { ...(found.headers ?? {}) }, body: "text" in found ? { text: found.text } : { json: found.json ?? null } };
 }
 
-function nodeFs() {
-  const fs = globalThis.process?.getBuiltinModule?.("node:fs");
-  if (!fs) throw new Error("a cassette file needs Node 22.3 or later to be read or written: give its data instead");
-  return fs;
+function nodeModule(name) {
+  const found = globalThis.process?.getBuiltinModule?.(name);
+  if (!found) throw new Error("a cassette file needs Node 22.3 or later to be read or written: give its data instead");
+  return found;
+}
+
+const nodeFs = () => nodeModule("node:fs");
+const nodePath = () => nodeModule("node:path");
+
+// p made absolute, without folding its ".." into what comes before, which a symlink may
+// change: resolved() follows each part as the file system would.
+function absolute(p) {
+  const path = nodePath();
+  const text = String(p).replace(/[\\/]+$/, "") || path.sep;
+  return path.isAbsolute(text) ? text : `${globalThis.process.cwd()}${path.sep}${text}`;
+}
+
+// p with every symlink followed and every "." and ".." taken, as Python's Path.resolve()
+// gives it: the parts that exist as the file system resolves them, the rest as written.
+function resolved(p, hops = 0) {
+  const fs = nodeFs();
+  const path = nodePath();
+  const start = absolute(p);
+  let at = path.parse(start).root;
+  for (const part of start.slice(at.length).split(/[\\/]+/)) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      at = path.dirname(at);
+      continue;
+    }
+    const next = path.join(at, part);
+    let link = null;
+    try {
+      if (fs.lstatSync(next).isSymbolicLink()) link = fs.readlinkSync(next);
+    } catch (err) {
+      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") throw err;
+    }
+    if (link === null) {
+      at = next;
+      continue;
+    }
+    if (hops >= 40) throw new CassettePathError(`${p}: too many symlinks`);
+    at = resolved(path.isAbsolute(link) ? link : `${at}${path.sep}${link}`, hops + 1);
+  }
+  return at;
+}
+
+// The directory cassettes are written in, and an environment-named one read from,
+// resolved: INTEGRATIONS_CASSETTES when it is set, else the directory holding
+// INTEGRATIONS_CASSETTE, else the directory of given; null with none of them. A
+// cassette's own name is not resolved here, so one that is a symlink out of its
+// directory still lands outside it.
+export function cassettesDir(given = null) {
+  const vars = env();
+  if (vars[CASSETTES]) return resolved(vars[CASSETTES]);
+  const named = vars[CASSETTE] || given;
+  if (!named) return null;
+  const whole = absolute(named);
+  return resolved(whole.slice(0, whole.lastIndexOf(nodePath().sep)) || nodePath().sep);
+}
+
+function refused(p, target, root) {
+  return new CassettePathError(`the cassette ${p} is at ${target}, outside the cassettes directory ${root}: cassettes go in ${CASSETTES}, else beside ${CASSETTE}`);
+}
+
+const within = (target, root) => target.startsWith(root.endsWith(nodePath().sep) ? root : `${root}${nodePath().sep}`);
+
+// p resolved, symlinks followed, when that is inside root (by default cassettesDir(p));
+// else CassettePathError.
+export function cassettePath(p, root = null) {
+  const base = root === null ? cassettesDir(p) : resolved(root);
+  const target = resolved(p);
+  if (base === null || !within(target, base)) throw refused(p, target, base);
+  return target;
 }
 
 function load(source) {
@@ -511,7 +604,7 @@ function load(source) {
 const env = () => globalThis.process?.env ?? {};
 
 // A transport that answers from a recording: path (or the data itself), in
-// integrations.cassette/1 or Replay's { responses } format, the shared vectors among
+// integrations.cassette/1 or the older { responses } format, the shared vectors among
 // them. A request finds its recorded call by plugin, operation, method, URL (scheme,
 // host, path, the query sorted) and body, each normalised as the plugin's record rules
 // say, and is answered with the first such call not answered yet; an old-format list
@@ -693,12 +786,16 @@ const monotonic = globalThis.performance?.now ? () => performance.now() : () => 
 // bodies (base64), a request body over 64 KiB as its digest, volatile values as
 // placeholders. A secret is never written: secret headers are dropped, secret JSON paths
 // and query parameters replaced, and save() throws SecretInRecording when a secret it saw
-// would still be written anywhere. clock() is in milliseconds.
+// would still be written anywhere. clock() is in milliseconds. save() writes only inside
+// the cassettes directory (cassettesDir()), settled when the recorder is made:
+// INTEGRATIONS_CASSETTES, else the directory of INTEGRATIONS_CASSETTE, else that of
+// path; a path resolving outside it throws CassettePathError.
 export class Recorder {
   calls = [];
 
   constructor(inner, path = null, { plugins = registry, scenario = null, consumer = null, clock = monotonic, now = () => new Date() } = {}) {
     Object.assign(this, { inner: asTransport(inner), path, plugins, scenario, consumer, clock, now });
+    this.root = cassettesDir(path);
   }
 
   fetch = async (url, init = {}) => {
@@ -743,14 +840,14 @@ export class Recorder {
   save(path = this.path) {
     if (!path) throw new Error("a recording needs a path to be saved to");
     const fs = nodeFs();
+    const root = this.root ?? cassettesDir(path);
+    const target = cassettePath(path, root);
     const current = this.recording();
-    const old = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : {};
+    const old = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, "utf8")) : {};
     let baseline = null;
     if (old.format === FORMAT) baseline = old.baseline ?? old.current ?? null;
-    const scenario = this.scenario || old.scenario || path.split("/").pop().replace(/\.[^.]*$/, "");
-    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-    if (dir) fs.mkdirSync(dir, { recursive: true });
-    writeCassette(path, { format: FORMAT, scenario, current, baseline });
+    const scenario = this.scenario || old.scenario || String(path).split(/[\\/]/).pop().replace(/\.[^.]*$/, "");
+    writeCassette(target, { format: FORMAT, scenario, current, baseline }, root);
     return path;
   }
 }
@@ -768,17 +865,29 @@ function noSecrets(current, secrets) {
   });
 }
 
-export function writeCassette(path, data) {
-  nodeFs().writeFileSync(path, JSON.stringify(data, null, 1) + "\n");
+// Writes data as a cassette at path, resolved, symlinks followed, and only when that is
+// inside root (by default cassettesDir(path)): else CassettePathError, and nothing is
+// written. Returns where it wrote.
+export function writeCassette(path, data, root = null) {
+  const fs = nodeFs();
+  const base = root === null ? cassettesDir(path) : resolved(root);
+  const target = resolved(path);
+  if (base === null || !within(target, base)) throw refused(path, target, base);
+  fs.mkdirSync(nodePath().dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(data, null, 1) + "\n");
+  return target;
 }
 
-// Accepts the cassette's current recording: it becomes the baseline.
+// Accepts the cassette's current recording: it becomes the baseline. The cassette must
+// resolve inside cassettesDir(path), else CassettePathError.
 export function promote(path) {
   const fs = nodeFs();
-  const data = JSON.parse(fs.readFileSync(path, "utf8"));
+  const root = cassettesDir(path);
+  const target = cassettePath(path, root);
+  const data = JSON.parse(fs.readFileSync(target, "utf8"));
   if (data.format !== FORMAT) throw new Error(`${path} is not an ${FORMAT} cassette`);
   data.baseline = data.current;
-  writeCassette(path, data);
+  writeCassette(target, data, root);
 }
 
 // --- faults ---------------------------------------------------------------
@@ -895,11 +1004,13 @@ export function checkMode(vars = env()) {
 
 // The transport use() installed, else the one INTEGRATIONS_MODE picks: globalThis.fetch
 // (live), new Cassette(INTEGRATIONS_CASSETTE) (replay) or new Recorder(LIVE,
-// INTEGRATIONS_CASSETTE) (record), which saves when the process exits.
+// INTEGRATIONS_CASSETTE) (record), which saves when the process exits. Throws
+// CassettePathError when INTEGRATIONS_CASSETTE resolves outside the cassettes directory
+// (INTEGRATIONS_CASSETTES, if set).
 export function currentTransport() {
   const mode = checkMode();
   if (installed.length) return installed.at(-1);
-  const path = mode === "live" ? "" : env()[CASSETTE];
+  const path = mode === "live" ? "" : cassettePath(env()[CASSETTE]);
   const key = `${mode} ${path}`;
   if (!byMode.has(key)) {
     if (mode === "live") byMode.set(key, LIVE);

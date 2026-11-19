@@ -2,7 +2,7 @@
 process gets when it is given none.
 
 - `Cassette(path)` answers from a recording, `integrations.cassette/1` (or the
-  older `{"responses": ...}` files `Replay` reads), and raises `NoSnapshot` for a
+  older `{"responses": ...}` format), and raises `NoSnapshot` for a
   call it has no recording of.
 - `Recorder(inner, path)` sends through `inner`, keeps every call, and `save()`
   writes them as a cassette, normalised by each plugin's `record` rules
@@ -15,6 +15,16 @@ process gets when it is given none.
 
 The same in clients/js/src/transports.js, and the vectors in tests/vectors/cassettes/
 run on both.
+
+Where cassettes go. A cassette is written (`Recorder.save()`, `promote()`,
+`write_cassette()`), and a cassette the environment names is read, only at a path
+that resolves, symlinks followed, inside the cassettes directory; anything else
+raises `CassettePathError` before a byte is read or written. The cassettes
+directory is `INTEGRATIONS_CASSETTES` when it is set, else the directory holding
+`INTEGRATIONS_CASSETTE` when that is set, else the directory of the path given
+(to the `Recorder` when it is made, or to `promote()` and `write_cassette()`), each
+resolved. So `../outside.json` under `INTEGRATIONS_CASSETTES`, or a cassette that is
+a symlink out of its directory, is refused.
 
 Placeholders. A value that changes between two recordings of the same calls (a
 sha, a date, an id, an ETag) is written `⟦integrations:KIND:N⟧`, the same
@@ -53,6 +63,7 @@ FORMAT = "integrations.cassette/1"
 DIGEST_OVER = 64 * 1024
 MODE = "INTEGRATIONS_MODE"
 CASSETTE = "INTEGRATIONS_CASSETTE"
+CASSETTES = "INTEGRATIONS_CASSETTES"
 MARKER = "PUBTEST_RUN"
 MODES = ("live", "replay", "record")
 
@@ -88,6 +99,11 @@ class UnusedCalls(NoSnapshot):
 
 class SecretInRecording(ValueError):
     """A secret the recorder saw would be written: the recording is not saved."""
+
+
+class CassettePathError(ValueError):
+    """A cassette path that resolves outside the cassettes directory: nothing is
+    read or written there."""
 
 
 class ModeError(RuntimeError):
@@ -490,7 +506,7 @@ def _load(source: Path | str | dict) -> tuple[dict, str]:
 class Cassette:
     """A Transport that answers from a recording: `path` (or the data itself), in
     `integrations.cassette/1`, or the `{"responses": {"METHOD URL": answer}}` files
-    `Replay` reads (the shared vectors among them).
+    format (the shared vectors among them).
 
     A request finds its recorded call by plugin, operation, method, URL (scheme, host,
     path, the query sorted) and body, each normalised as the plugin's record rules
@@ -703,12 +719,18 @@ class Recorder:
     over 64 KiB as its digest, volatile values as placeholders. A secret is never
     written: secret headers are dropped, secret JSON paths and query parameters
     replaced, and `save()` refuses (`SecretInRecording`) when a secret it saw would
-    still be written anywhere."""
+    still be written anywhere.
+
+    `save()` writes only inside the cassettes directory (`cassettes_dir()`), which
+    is settled when the recorder is made: `INTEGRATIONS_CASSETTES`, else the
+    directory of `INTEGRATIONS_CASSETTE`, else that of `path`. A path that resolves
+    outside it raises `CassettePathError`."""
 
     def __init__(self, inner: Transport, path: Path | str | None = None, plugins: Any = registry, *,
                  scenario: str | None = None, consumer: str | None = None,
                  clock: Callable[[], float] = time.monotonic, now: Callable[[], datetime] | None = None):
         self.inner, self.path, self.plugins = inner, Path(path) if path else None, plugins
+        self.root = cassettes_dir(self.path)
         self.scenario, self.consumer, self.clock = scenario, consumer, clock
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.calls: list[tuple[Request, Response, int]] = []
@@ -743,9 +765,11 @@ class Recorder:
         candidate, `current`, and the file's previous `current` becomes its
         `baseline` unless it has one: a baseline is the last accepted recording,
         which a re-record never overwrites and only `promote()` moves."""
-        target = Path(path) if path else self.path
-        if target is None:
+        given = Path(path) if path else self.path
+        if given is None:
             raise ValueError("a recording needs a path to be saved to")
+        root = self.root if self.root is not None else cassettes_dir(given)
+        target = cassette_path(given, root)
         current = self.recording()
         old: dict = {}
         if target.exists():
@@ -753,10 +777,9 @@ class Recorder:
         baseline = None
         if old.get("format") == FORMAT:
             baseline = old.get("baseline") if old.get("baseline") is not None else old.get("current")
-        scenario = self.scenario or old.get("scenario") or target.stem
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_cassette(target, {"format": FORMAT, "scenario": scenario, "current": current, "baseline": baseline})
-        return target
+        scenario = self.scenario or old.get("scenario") or given.stem
+        return write_cassette(target, {"format": FORMAT, "scenario": scenario, "current": current, "baseline": baseline},
+                              root)
 
 
 def _no_secrets(current: dict, secrets: dict[str, str]) -> None:
@@ -769,18 +792,56 @@ def _no_secrets(current: dict, secrets: dict[str, str]) -> None:
                                             "the recording is not saved")
 
 
-def write_cassette(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+def cassettes_dir(given: Path | str | None = None) -> Path | None:
+    """The directory cassettes are written in, and an environment-named one read
+    from, resolved: `INTEGRATIONS_CASSETTES` when it is set, else the directory
+    holding `INTEGRATIONS_CASSETTE`, else the directory of `given`; None with none
+    of them. A cassette's own name is not resolved here, so a cassette that is a
+    symlink out of its directory still lands outside it."""
+    if os.environ.get(CASSETTES):
+        return Path(os.environ[CASSETTES]).resolve()
+    named = os.environ.get(CASSETTE) or given
+    return Path(named).absolute().parent.resolve() if named else None
+
+
+def _refused(path: Path | str, target: Path, root: Path) -> CassettePathError:
+    return CassettePathError(f"the cassette {path} is at {target}, outside the cassettes directory {root}: "
+                             f"cassettes go in {CASSETTES}, else beside {CASSETTE}")
+
+
+def cassette_path(path: Path | str, root: Path | str | None = None) -> Path:
+    """`path` resolved, symlinks followed, when that is inside `root` (by default
+    `cassettes_dir(path)`); else `CassettePathError`."""
+    base = Path(root).resolve() if root is not None else cassettes_dir(path)
+    target = Path(path).resolve()
+    if base is None or not target.is_relative_to(base):
+        raise _refused(path, target, base)
+    return target
+
+
+def write_cassette(path: Path | str, data: dict, root: Path | str | None = None) -> Path:
+    """Writes `data` as a cassette at `path`, resolved, symlinks followed, and only
+    when that is inside `root` (by default `cassettes_dir(path)`): else
+    `CassettePathError`, and nothing is written. Returns where it wrote."""
+    base = Path(root).resolve() if root is not None else cassettes_dir(path)
+    target = Path(path).resolve()
+    if base is None or not target.is_relative_to(base):
+        raise _refused(path, target, base)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    return target
 
 
 def promote(path: Path | str) -> None:
-    """Accepts the cassette's `current` recording: it becomes the baseline."""
-    target = Path(path)
+    """Accepts the cassette's `current` recording: it becomes the baseline. The
+    cassette must resolve inside `cassettes_dir(path)`, else `CassettePathError`."""
+    root = cassettes_dir(path)
+    target = cassette_path(path, root)
     data = json.loads(target.read_text(encoding="utf-8"))
     if data.get("format") != FORMAT:
-        raise ValueError(f"{target} is not an {FORMAT} cassette")
+        raise ValueError(f"{path} is not an {FORMAT} cassette")
     data["baseline"] = data["current"]
-    write_cassette(target, data)
+    write_cassette(target, data, root)
 
 
 # --- faults ---------------------------------------------------------------------
@@ -894,7 +955,8 @@ def check_mode(env: dict[str, str] | None = None) -> str:
     """INTEGRATIONS_MODE, checked: `live` (the default), `replay` or `record`. A mode
     other than live needs PUBTEST_RUN, which only a test harness sets, so a process
     misconfigured into answering from cassettes refuses to start; and
-    INTEGRATIONS_CASSETTE, the cassette's file."""
+    INTEGRATIONS_CASSETTE, the cassette's file (where it may be is
+    `cassettes_dir()`'s, checked by `current_transport()`)."""
     env = os.environ if env is None else env
     mode = env.get(MODE) or "live"
     if mode not in MODES:
@@ -911,12 +973,14 @@ def current_transport() -> Transport:
     """The transport installed by `use()` in this context, else the one
     INTEGRATIONS_MODE picks: `Network()` (live), `Cassette(INTEGRATIONS_CASSETTE)`
     (replay) or `Recorder(Network(), INTEGRATIONS_CASSETTE)` (record), which saves
-    when the process exits. Raises `ModeError` as `check_mode()` does."""
+    when the process exits. Raises `ModeError` as `check_mode()` does, and
+    `CassettePathError` when INTEGRATIONS_CASSETTE resolves outside the cassettes
+    directory (`INTEGRATIONS_CASSETTES`, if set)."""
     mode = check_mode()
     installed = _installed.get()
     if installed:
         return installed[-1]
-    path = os.environ.get(CASSETTE, "") if mode != "live" else ""
+    path = str(cassette_path(os.environ[CASSETTE])) if mode != "live" else ""
     key = (mode, path)
     if key not in _by_mode:
         if mode == "live":

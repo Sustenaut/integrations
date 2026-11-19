@@ -323,31 +323,6 @@ export class MemorySink {
 
 const NULL_BODY = new Set([101, 204, 205, 304]); // a Response with one of these can't have a body
 
-// Recorded answers by "METHOD url", in calls.py's Replay format, as a fetch: for tests,
-// and the shared vectors in tests/vectors/. A list answers in turn, its last one for
-// good; one not recorded has no answer. A "json" answer's body is written as Python's
-// json.dumps writes it, so both languages count the same bytes_in. An answer's
-// "headers" are its headers, such as an ETag. Deprecated, for one release: Cassette in
-// transports.js reads this format too.
-export class Replay {
-  sent = [];
-
-  constructor(responses) {
-    this.responses = structuredClone(responses);
-  }
-
-  fetch = async (url, init = {}) => {
-    const request = { method: init.method ?? "GET", url: String(url), headers: init.headers ?? {}, body: init.body ?? null };
-    this.sent.push(request);
-    let found = this.responses[`${request.method} ${request.url}`];
-    if (Array.isArray(found)) found = found.length > 1 ? found.shift() : found[0];
-    if (!found) throw new TypeError("not recorded");
-    if ("error" in found) throw new TypeError(found.error);
-    const text = "text" in found ? found.text : pythonJson(found.json ?? null);
-    return new Response(NULL_BODY.has(found.status) ? null : text, { status: found.status, headers: found.headers });
-  };
-}
-
 // json.dumps(value): ", " and ": " between items, and anything outside ASCII escaped.
 export function pythonJson(value) {
   if (Array.isArray(value)) return `[${value.map(pythonJson).join(", ")}]`;

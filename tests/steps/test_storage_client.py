@@ -1,6 +1,6 @@
 """The storage client (integrations.clients.storage), on the vectors in tests/vectors/storage/
 that clients/js/storage.js runs too, and what they don't cover. Storage is a fake service
-(providers.py), but for the vectors, which are Replay's answers."""
+(providers.py), but for the vectors, which a Cassette answers in their old {"responses": ...} format."""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from integrations.calls import Caller, MemorySink, Replay
+from integrations.calls import Caller, MemorySink
 from integrations.clients import storage as client
 from integrations.clients.storage import NotFound, Storage, StorageError, StorageUnavailable
 from integrations.clients.storage_routes import ROUTES, SPEC
+from integrations.transports import Cassette
 from pubtest.steps.fakes import fake
 from pytest_bdd import given, parsers, scenarios, then, when
 
@@ -49,7 +50,7 @@ def storage_vector(ctx, name):
 @when("I make its call on its recorded answers")
 def make_vector_call(ctx):
     vector = ctx.vector
-    ctx.sink, ctx.naps, ctx.replay = MemorySink(), [], Replay(vector["responses"])
+    ctx.sink, ctx.naps, ctx.replay = MemorySink(), [], Cassette({"responses": vector["responses"]})
     made = Caller("a-repo", "web", sink=ctx.sink, transport=ctx.replay, sleep=ctx.naps.append, new_id=lambda: "id-1",
                   random=lambda: 1.0)
     options = vector["client"]

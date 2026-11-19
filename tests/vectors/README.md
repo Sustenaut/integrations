@@ -3,9 +3,9 @@
 Each file is one call, run by both callers: `tests/steps/test_vectors.py` for
 `integrations.calls` and `clients/js/test/vectors.steps.mjs` for `clients/js/caller.js`.
 
-- `responses` is in `Replay`'s format: answers by `"METHOD url"`, a list answering in
-  turn (its last for good), `{"error": ...}` for no answer, `"json"` or `"text"` for the body, and
-  `"headers"` for its ETag or Retry-After.
+- `responses` is in the old cassette format, which `Cassette` reads: answers by
+  `"METHOD url"`, a list answering in turn (its last for good), `{"error": ...}` for no
+  answer, `"json"` or `"text"` for the body, and `"headers"` for its ETag or Retry-After.
 - `request` is what `call` is given (`body` as text), with `request_id`, `modes` and
   `refused` (`{"key", "equals"}`: refused when the body's `key` equals that) when the vector needs them.
 - The caller is `repo` `a-repo`, `app` `web`, with ids `id-1`, and its sleeps are kept, in seconds.

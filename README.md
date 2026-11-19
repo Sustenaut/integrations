@@ -201,8 +201,8 @@ if (!answer.ok || !answer.json().permissions?.push) throw new Error("no push");
 its R2 binding (`bucket` and `prefix`). A Worker has no background timer, so the write
 that finds a file overdue sends it; give it the request's `waitUntil`
 (`sink.waitUntil = (p) => ctx.waitUntil(p)`) so the answer doesn't wait on storage. In
-Node, `start: true` also sends every two minutes. `MemorySink`, `NullSink` and `Replay`
-(a recorded fetch, for tests) are there too.
+Node, `start: true` also sends every two minutes. `MemorySink` and `NullSink` are there
+too; a test's recorded answers come from `Cassette` in `transports.js` (below).
 
 `clients/js/storage.js` is the storage service's client on that `Caller`, and
 `integrations.clients.storage` the same in Python: one tenant's files (upload, get, and a
@@ -288,8 +288,20 @@ integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/do
   call it.
 - `promote(path)` accepts a cassette's recording: it becomes the baseline.
 
-`Replay` and `Recording` in `integrations.calls` (and `Replay` in `caller.js`) still work,
-and are deprecated for one release: use `Cassette` and `Recorder`.
+There is no `Replay` or `Recording` any more: `Cassette` and `Recorder` from
+`integrations.transports` (or `transports.js`) take their place, and `Cassette` still reads
+the old `{"responses": ...}` files.
+
+**Where cassettes go.** A cassette is written (`Recorder.save()`, `promote()`,
+`write_cassette()`), and a cassette the environment names is read, only at a path that
+resolves, symlinks followed, inside the cassettes directory; anything else raises
+`CassettePathError` (a `ValueError`; in JS an `Error` of that name) before a byte is read
+or written. The cassettes directory is `INTEGRATIONS_CASSETTES` when it is set, else the
+directory holding `INTEGRATIONS_CASSETTE` when that is set, else the directory of the path
+given: to the `Recorder` when it is made, or to `promote()` and `write_cassette()`. So
+`../outside.json` climbing out of `INTEGRATIONS_CASSETTES`, or a cassette that is a symlink
+out of its directory, is refused. `cassettes_dir()` (`cassettesDir()`) says which
+directory that is, and `cassette_path(path)` (`cassettePath()`) checks a path against it.
 
 #### Modes and the guard
 
@@ -303,7 +315,8 @@ the one `INTEGRATIONS_MODE` picks:
 | `record` | `Recorder(Network(), INTEGRATIONS_CASSETTE)`, saved when the process exits |
 
 `INTEGRATIONS_CASSETTE` is a file path: it is how a child process, a command line a scenario
-runs, learns its cassette. A mode other than `live` needs `PUBTEST_RUN` set, which only a
+runs, learns its cassette. `INTEGRATIONS_CASSETTES`, when set, is the directory every
+cassette must resolve inside, `INTEGRATIONS_CASSETTE` included. A mode other than `live` needs `PUBTEST_RUN` set, which only a
 test harness sets: without it `current_transport()`, and every `Caller.call`, whatever
 transport it was given, raise `ModeError`, so a pod misconfigured into replay can't answer
 from cassettes. Another mode, or one with no `INTEGRATIONS_CASSETTE`, is refused the same way.
@@ -341,7 +354,8 @@ different one for every other value. `volatile` lists them, with where each was 
 it never holds a real value. On replay each placeholder is answered as a stand-in made from
 its name, of its kind's shape: a 40-hex sha, an ISO or HTTP date, a ten-digit id, a
 `ghs_` token. A stand-in the code sends back is read as its placeholder again, so a sha one
-call answers and the next sends still matches. A volatile value first seen in a request is
+call answers and the next sends still matches. Replayed stand-in dates are in the year
+2000, so one is never mistaken for a real date. A volatile value first seen in a request is
 one the code made itself, and matches any value of its kind; where an answer echoes it, it
 is replayed as a stand-in. Real text holding `⟦integrations:` is written
 `⟦integrations:escape⟧`, and replayed as it was.

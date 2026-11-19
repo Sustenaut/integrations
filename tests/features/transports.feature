@@ -155,6 +155,72 @@ Feature: Record and replay: the transport a caller given none uses, cassettes in
     When I save a recorder that was given no path
     Then it is refused, saying "a recording needs a path to be saved to"
 
+  Scenario: A recording is not saved outside its cassettes directory
+    Given a scratch directory
+    And the environment does not set "INTEGRATIONS_CASSETTES"
+    And the environment does not set "INTEGRATIONS_CASSETTE"
+    When a recorder made for "cassettes/c.json" is saved as "cassettes/../outside.json"
+    Then it is refused, saying "outside the cassettes directory"
+    And the file "outside.json" does not exist
+
+  Scenario: Under INTEGRATIONS_CASSETTES, a recording climbing out of it is not saved
+    Given a scratch directory
+    And the environment sets "INTEGRATIONS_CASSETTES" to "cassettes"
+    When a recorder made for "cassettes/../outside.json" is saved
+    Then it is refused, saying "outside the cassettes directory"
+    And the file "outside.json" does not exist
+
+  Scenario: A recording is not saved through a symlink out of its directory
+    Given a scratch directory
+    And the environment does not set "INTEGRATIONS_CASSETTES"
+    And the environment does not set "INTEGRATIONS_CASSETTE"
+    And a file "outside.json" holding "{}"
+    And "cassettes/c.json" is a symlink to "../outside.json"
+    When a recorder made for "cassettes/c.json" is saved
+    Then it is refused, saying "outside the cassettes directory"
+    And the file "outside.json" holds "{}"
+
+  Scenario: A recording is not saved through a dangling symlink out of its directory
+    Given a scratch directory
+    And the environment does not set "INTEGRATIONS_CASSETTES"
+    And the environment does not set "INTEGRATIONS_CASSETTE"
+    And "cassettes/c.json" is a symlink to "../outside.json"
+    When a recorder made for "cassettes/c.json" is saved
+    Then it is refused, saying "outside the cassettes directory"
+    And the file "outside.json" does not exist
+
+  Scenario: A cassette that is a symlink out of its directory is not promoted
+    Given a scratch directory
+    And the environment does not set "INTEGRATIONS_CASSETTES"
+    And the environment does not set "INTEGRATIONS_CASSETTE"
+    And a file "outside.json" holding "{}"
+    And "cassettes/c.json" is a symlink to "../outside.json"
+    When I promote "cassettes/c.json"
+    Then it is refused, saying "outside the cassettes directory"
+    And the file "outside.json" holds "{}"
+
+  Scenario: A recording inside its cassettes directory is saved
+    Given a scratch directory
+    And the environment sets "INTEGRATIONS_CASSETTES" to "cassettes"
+    When a recorder made for "cassettes/deep/c.json" is saved
+    Then it is not refused
+    And the JSON in "cassettes/deep/c.json" has "format" equal to "integrations.cassette/1"
+
+  Scenario Outline: <mode> mode refuses an INTEGRATIONS_CASSETTE outside INTEGRATIONS_CASSETTES
+    Given a scratch directory
+    And a file "outside.json" holding "{"responses": {}}"
+    And the environment sets "INTEGRATIONS_MODE" to "<mode>"
+    And the environment sets "PUBTEST_RUN" to "1"
+    And the environment sets "INTEGRATIONS_CASSETTES" to "cassettes"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "cassettes/../outside.json"
+    When I ask for the current transport
+    Then it is refused, saying "outside the cassettes directory"
+
+    Examples:
+      | mode   |
+      | replay |
+      | record |
+
   Scenario: A cassette in record mode only warns of calls never made
     Given a cassette in record mode from "tests/vectors/cassettes/unused.json"
     When I close the cassette
