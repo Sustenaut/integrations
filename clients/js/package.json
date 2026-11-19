@@ -13,6 +13,7 @@
     "@cucumber/cucumber": "13.3.0",
     "@hey-api/openapi-ts": "0.99.0",
     "@redocly/cli": "2.72.1",
+    "@sustenaut/pubtest": "github:Sustenaut/pubtest#v0.2.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   },

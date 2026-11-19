@@ -1,268 +1,192 @@
 // clients/js/caller.js: what tests/vectors/ doesn't cover.
-import { After, Then } from "@cucumber/cucumber";
-import { mock as nodeMock } from "node:test";
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { Answer, Caller, IntegrationError, MemorySink, NullSink, OPERATIONS, POLICIES, Refused, Replay, Unavailable, pythonJson, readModes } from "../caller.js";
+import { Given, Then, When } from "@cucumber/cucumber";
+import { mock } from "node:test";
+import { Answer, Caller, MemorySink, NullSink, OPERATIONS, POLICIES, Replay, pythonJson, readModes } from "../caller.js";
+import { given, repositoryJson, saidSleep, toFakes } from "./helpers.mjs";
 
-// What node:test gave each test as `t`: its mocks, restored when the
-// scenario ends, and the cleanups it registers with t.after().
-const cleanups = [];
-const scenarioContext = { mock: nodeMock, after: (fn) => cleanups.push(fn) };
-After("@caller", async function () {
-  while (cleanups.length) await cleanups.pop()();
-  nodeMock.restoreAll();
-});
-
-
-const REGISTRY = new URL("../../../src/integrations/", import.meta.url);
-const URL_ = "https://api.example/x";
-const PLUGIN = "github.edit-pr";
-
-function caller(responses = {}, options = {}) {
-  const sink = new MemorySink();
-  const replay = new Replay(responses);
-  const made = new Caller("a-repo", "web", { sink, fetch: replay.fetch, sleep: async () => {}, newId: () => "id-1", ...options });
-  return { made, sink, replay };
+// A request as a step gives it: {"bytes": [...]} for a body of bytes.
+function request(doc) {
+  const made = JSON.parse(doc);
+  if (made.body && typeof made.body === "object" && "bytes" in made.body) made.body = new Uint8Array(made.body.bytes);
+  return made;
 }
 
-Then("the tables are classes.json's and the plugins'", function () {
-  return (async () => {
-  const classes = JSON.parse(await readFile(new URL("classes.json", REGISTRY), "utf8"));
-  for (const [id, c] of Object.entries(classes)) assert.deepEqual(POLICIES[id], { timeout: c.timeout, tries: c.tries });
-  const ops = JSON.parse(await readFile(new URL("plugins/github.repo-ops.json", REGISTRY), "utf8")).operations;
-  for (const o of ops) assert.deepEqual(OPERATIONS["github.repo-ops"][o.name], { class: o.class, route: o.route });
-  assert.ok(Object.isFrozen(POLICIES) && Object.isFrozen(OPERATIONS));
-})();
+function made(world) {
+  return new Caller("a-repo", "web", world.options);
+}
+
+Given("a caller", function () {
+  this.sink = new MemorySink();
+  this.options = { sink: this.sink, fetch: toFakes(this), sleep: saidSleep, newId: () => "id-1" };
 });
 
-Then("a record has CallRecord's fields, in its order, and no body, URL or token", function () {
-  return (async () => {
-  const { made, sink } = caller({ [`POST ${URL_}`]: { status: 201, json: { "secret-answer": 1 } } });
-  await made.call(PLUGIN, "open-pr", { method: "POST", url: URL_, headers: { Authorization: "secret-token" }, body: "secret-body" });
-  const [record] = sink.records;
-  assert.deepEqual(Object.keys(record), ["at", "repo", "app", "plugin", "operation", "request_id", "latency_ms", "status", "outcome", "retries", "bytes_in", "bytes_out", "mode", "route"]);
-  assert.match(record.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  assert.ok(Number.isInteger(record.latency_ms) && record.latency_ms >= 0);
-  const text = JSON.stringify(record);
-  for (const leak of ["secret", "api.example"]) assert.ok(!text.includes(leak), leak);
-})();
+Given("the time is {string}", function (at) {
+  mock.timers.enable({ apis: ["Date"], now: Date.parse(at) });
 });
 
-Then("an operation not in the registry is refused, for a call and a note", function () {
-  return (async () => {
-  const { made, sink } = caller();
-  await assert.rejects(made.call(PLUGIN, "nope", { method: "GET", url: URL_ }), /github.edit-pr nope is not a registered operation/);
-  assert.throws(() => made.note(PLUGIN, "nope", { requestId: "r", latencyMs: 1, status: null, outcome: "ok" }), RangeError);
-  assert.equal(sink.records.length, 0);
-})();
+Given("its clock reads, in turn, {string}", function (readings) {
+  const left = readings.split(",").map(Number);
+  this.options.clock = () => (left.length > 1 ? left.shift() : left[0]);
 });
 
-Then("the answer can be read as the client needs it", function () {
-  return (async () => {
-  const { made } = caller({ [`GET ${URL_}`]: { status: 200, json: { permissions: { push: true } } } });
-  const answer = await made.call("github.repo-ops", "check-push", { method: "GET", url: URL_ });
-  assert.ok(answer instanceof Answer && answer.ok);
-  assert.deepEqual(await answer.json(), { permissions: { push: true } });
-  assert.equal(new Answer(204).json(), null);
-  assert.equal(new Answer(null).ok, false);
-})();
+Given("its random source gives {float}", function (n) {
+  this.options.random = () => n;
 });
 
-Then("the call is sent with its method, headers, body, a User-Agent and a class timeout", function () {
-  return (async () => {
-  const seen = [];
-  const fetch = async (url, init) => {
-    seen.push({ url, init });
-    return new Response("{}", { status: 200, headers: { ETag: '"e1"' } });
+Given("it sleeps for real", function () {
+  delete this.options.sleep;
+});
+
+Given("it calls {string} in {string} mode", function (plugin, mode) {
+  this.options.modes = { ...this.options.modes, [plugin]: mode };
+});
+
+Given("its sink {word}, saying {string}", function (how, why) {
+  this.options.sink = how === "throws"
+    ? { write: () => { throw new Error(why); } }
+    : { write: async () => { throw new Error(why); } };
+});
+
+// The caller's clock, in milliseconds, moves only as it sleeps and as each try takes time.
+function standingClock(world) {
+  world.now = 0;
+  world.options.clock = () => world.now;
+  world.options.sleep = async (s) => {
+    process.stdout.write(`slept ${s}\n`);
+    world.now += s * 1000;
   };
-  const made = new Caller("a-repo", "", { fetch });
-  const answer = await made.call(PLUGIN, "open-pr", { method: "PUT", url: URL_, headers: { Authorization: "t" }, body: new Uint8Array([1, 2]) });
-  assert.equal(answer.etag, '"e1"');
-  const [{ url, init }] = seen;
-  assert.equal(url, URL_);
-  assert.equal(init.method, "PUT");
-  assert.deepEqual(init.headers, { "User-Agent": "integrations-caller.js", Authorization: "t" });
-  assert.deepEqual(init.body, new Uint8Array([1, 2]));
-  assert.ok(init.signal instanceof AbortSignal && !init.signal.aborted);
-})();
+}
+
+Given("its clock moves only as it sleeps and as each try takes {float} s", function (seconds) {
+  standingClock(this);
+  this.tryTakes = seconds * 1000;
 });
 
-Then("a provider that doesn't answer within its class's timeout is no answer", function () {
-  return (async () => {
-  const sink = new MemorySink();
-  const fetch = async () => {
+Given("its clock moves only as it sleeps and as each try takes its whole timeout", function () {
+  standingClock(this);
+  // The clock moves when the try's signal would have fired, and says the timeout it gave.
+  const real = AbortSignal.timeout;
+  AbortSignal.timeout = (ms) => {
+    process.stdout.write(`timeout ${ms}\n`);
+    this.now += ms;
+    return real.call(AbortSignal, ms);
+  };
+  this.pubtest.cleanup(() => (AbortSignal.timeout = real));
+});
+
+Given("its fetch is a stand-in that answers {int}", function (status) {
+  this.options.fetch = async (url, init) => {
+    process.stdout.write(`${await given(url, init)}\n`);
+    return new Response("{}", { status });
+  };
+});
+
+Given("its fetch is a stand-in that answers {int} with the header {string} set to {string}", function (status, name, value) {
+  this.options.fetch = async (url, init) => {
+    process.stdout.write(`${await given(url, init)}\n`);
+    this.now += this.tryTakes ?? 0;
+    return new Response("{}", { status, headers: { [name]: value } });
+  };
+});
+
+Given("its fetch is a stand-in that times out", function () {
+  this.options.fetch = async () => {
     throw new DOMException("The operation timed out.", "TimeoutError");
   };
-  const made = new Caller("a-repo", "", { sink, fetch });
-  await assert.rejects(made.call(PLUGIN, "open-pr", { method: "GET", url: URL_ }), (err) => {
-    assert.ok(err instanceof Unavailable && err instanceof IntegrationError);
-    assert.equal(err.message, "github.edit-pr open-pr: no answer: timed out after 10 s");
-    assert.deepEqual([err.plugin, err.operation, err.name], [PLUGIN, "open-pr", "Unavailable"]);
-    return true;
-  });
-  assert.equal(sink.records[0].status, null);
-})();
 });
 
-Then("only https goes out", function () {
-  return (async () => {
-  let asked = false;
-  const made = new Caller("a-repo", "", { fetch: async () => (asked = true) });
-  await assert.rejects(made.call(PLUGIN, "open-pr", { method: "GET", url: "http://api.example/x" }), /not https/);
-  assert.equal(asked, false);
-})();
+Given("the global fetch answers {int}", function (status) {
+  mock.method(globalThis, "fetch", async () => new Response("{}", { status }));
 });
 
-Then("the backoff sleeps by default, in seconds", function () {
-  return (async () => {
-  const { made } = caller({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 200, json: {} }] }, { sleep: undefined, random: () => 1 });
+Given("the {string} service answers {string} with {int} and a Retry-After an hour {word}", async function (name, req, status, when) {
+  const at = Date.now() + (when === "ahead" ? 3600e3 : -3600e3);
+  this.pubtest.fakes[name].answer(req, status, "{}", { "Retry-After": new Date(at).toUTCString() });
+});
+
+Given("a replay of:", function (doc) {
+  this.replay = new Replay(JSON.parse(doc));
+});
+
+When("it calls {string} {string} with:", async function (plugin, operation, doc) {
   const started = Date.now();
-  assert.ok((await made.call(PLUGIN, "check", { method: "GET", url: URL_ })).ok);
-  assert.ok(Date.now() - started >= 990);
-})();
-});
-
-Then("a note is a record of time that wasn't a call", function () {
-  return (async () => {
-  const { made, sink, replay } = caller();
-  made.note(PLUGIN, "service-total", { requestId: "r", latencyMs: 9, status: 200, outcome: "ok" });
-  const [record] = sink.records;
-  assert.deepEqual([record.operation, record.latency_ms, record.route, record.bytes_in, record.request_id], ["service-total", 9, "none", 0, "r"]);
-  assert.equal(replay.sent.length, 0);
-})();
-});
-
-Then("forRepo is the same caller for another project", function () {
-  return (async () => {
-  const { made, sink } = caller({ [`GET ${URL_}`]: { status: 200, json: {} } }, { modes: { [PLUGIN]: "advisory" } });
-  const other = made.forRepo("b-repo");
-  await other.call(PLUGIN, "open-pr", { method: "GET", url: URL_ });
-  assert.deepEqual([sink.records[0].repo, sink.records[0].app, sink.records[0].mode], ["b-repo", "web", "advisory"]);
-  assert.equal(made.repo, "a-repo");
-  assert.ok(other instanceof Caller);
-})();
-});
-
-Then("a sink that fails loses the record, not the call", function () {
-  return (async (t) => {
-  const said = [];
-  t.mock.method(console, "error", (line) => said.push(line));
-  const fetch = new Replay({ [`GET ${URL_}`]: { status: 200, json: {} } }).fetch;
-  const broken = new Caller("a-repo", "", { fetch, sink: { write: () => { throw new Error("disk full"); } } });
-  assert.ok((await broken.call(PLUGIN, "open-pr", { method: "GET", url: URL_ })).ok);
-  const rejecting = new Caller("a-repo", "", { fetch, sink: { write: async () => { throw new Error("bucket gone"); } } });
-  assert.ok((await rejecting.call(PLUGIN, "open-pr", { method: "GET", url: URL_ })).ok);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(said, ["integrations: could not keep a call record: disk full", "integrations: could not keep a call record: bucket gone"]);
-})(scenarioContext);
-});
-
-Then("the default sink keeps nothing, and the default fetch is the global one", function () {
-  return (async (t) => {
-  new NullSink().write({});
-  t.mock.method(globalThis, "fetch", async () => new Response("{}"));
-  assert.ok((await new Caller("a-repo").call(PLUGIN, "open-pr", { method: "GET", url: URL_ })).ok);
-})(scenarioContext);
-});
-
-Then("Refused is for clients, as in Python", function () {
-  return (() => {
-  const err = new Refused(PLUGIN, "open-pr", "no");
-  assert.ok(err instanceof IntegrationError && !(err instanceof Unavailable));
-  assert.equal(err.message, "github.edit-pr open-pr: no");
-})();
-});
-
-Then("modes come from integrations.json, required winning", function () {
-  return (() => {
-  const modes = readModes({
-    uses: [{ plugin: PLUGIN, paths: ["a"], mode: "advisory" }, { plugin: "slack.post", paths: ["a"] },
-      { plugin: "linear.sync", paths: ["a"], mode: "advisory" }, { plugin: "linear.sync", paths: ["b"] }],
-    terraform: [{ dir: "infra", plugins: ["terraform.hetzner"], runs: [], mode: "advisory" }],
+  // A record a sink failed to take asynchronously is said by the next turn of the event loop.
+  await this.attempt(async () => {
+    const answer = await made(this).call(plugin, operation, request(doc));
+    await new Promise((resolve) => setImmediate(resolve));
+    return answer;
   });
-  assert.deepEqual(modes, { [PLUGIN]: "advisory", "slack.post": "required", "linear.sync": "required", "terraform.hetzner": "advisory" });
-  assert.deepEqual(readModes({}), {});
-})();
+  this.took = Date.now() - started;
 });
 
-Then("a replay answers in turn, keeps its last answer, and a null-body status has none", function () {
-  return (async () => {
-  const replay = new Replay({ [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 204 }] });
-  assert.equal((await replay.fetch(URL_)).status, 503);
-  assert.equal((await replay.fetch(URL_)).status, 204);
-  assert.equal((await replay.fetch(URL_)).status, 204);
-  await assert.rejects(replay.fetch("https://other.example/"), /not recorded/);
-})();
+When("the caller for {string} calls {string} {string} with:", async function (repo, plugin, operation, doc) {
+  await this.attempt(() => made(this).forRepo(repo).call(plugin, operation, request(doc)));
 });
 
-Then("json is written as Python's json.dumps writes it", function () {
-  return (() => {
-  assert.equal(pythonJson({ a: [1, true, null], "é": "x \n" }), '{"a": [1, true, null], "\\u00e9": "x\\u2028\\n"}');
-  assert.equal(pythonJson([]), "[]");
-  assert.equal(pythonJson({}), "{}");
-})();
+When("a caller with only a repository calls {string} {string} with:", async function (plugin, operation, doc) {
+  await this.attempt(() => new Caller("a-repo").call(plugin, operation, request(doc)));
 });
 
-Then("a Retry-After date is waited for up to the timeout, and one in the past not at all", function () {
-  return (async () => {
-  for (const [at, waited] of [[Date.now() + 3600e3, 30], [Date.now() - 3600e3, 0]]) {
-    const naps = [];
-    const responses = { [`GET ${URL_}`]: [{ status: 503, json: {}, headers: { "Retry-After": new Date(at).toUTCString() } }, { status: 200, json: {} }] };
-    const { made } = caller(responses, { sleep: async (s) => naps.push(s) });
-    await made.call(PLUGIN, "check", { method: "GET", url: URL_ });
-    assert.equal(naps.length, 1);
-    assert.ok(Math.abs(naps[0] - waited) < 1, `${naps[0]} for ${waited}`);
-  }
-})();
+When("it notes {string} {string} with:", async function (plugin, operation, doc) {
+  await this.attempt(() => made(this).note(plugin, operation, JSON.parse(doc)));
 });
 
-Then("a call never runs past its timeout times its tries", function () {
-  return (async () => {
-  let now = 0;
-  const timeouts = [];
-  // Nothing answers: each try takes all the time its signal gives it.
-  const fetch = async (url, init) => {
-    timeouts.push(init.signal);
-    throw new DOMException("The operation timed out.", "TimeoutError");
-  };
-  const made = new Caller("a-repo", "", { fetch, random: () => 1, clock: () => now, sleep: async (s) => (now += s * 1000) });
-  const send = made.call.bind(made);
-  // Each try costs its whole timeout: the clock moves when the signal would have fired.
-  const realTimeout = AbortSignal.timeout;
-  const given = [];
-  AbortSignal.timeout = (ms) => (given.push(ms), (now += ms), realTimeout.call(AbortSignal, ms));
-  try {
-    await assert.rejects(send("github.repo-ops", "call", { method: "GET", url: URL_ }), Unavailable);
-  } finally {
-    AbortSignal.timeout = realTimeout;
-  }
-  assert.deepEqual(given, [60_000, 60_000, 60_000, 53_000]);
-  assert.equal(now, 240_000);
-})();
+When("I read the answer's JSON", async function () {
+  const answer = this.pubtest.result;
+  await this.attempt(() => answer.json());
 });
 
-Then("no try starts that the deadline leaves no time for", function () {
-  return (async () => {
-  let now = 0;
-  let tries = 0;
-  const fetch = async () => {
-    tries += 1;
-    now += 29_500;
-    return new Response("{}", { status: 503, headers: { "Retry-After": "30" } });
-  };
-  const made = new Caller("a-repo", "", { fetch, clock: () => now, sleep: async (s) => (now += s * 1000) });
-  await assert.rejects(made.call(PLUGIN, "check", { method: "GET", url: URL_ }), Unavailable);
-  assert.equal(tries, 2, "the third would start at 89 s, with no time left to wait 30");
-})();
+When("I read the JSON of an answer with status {int}", async function (status) {
+  await this.attempt(() => new Answer(status).json());
 });
 
-Then("the jitter's random source is the caller's, and forRepo keeps it", function () {
-  return (async () => {
-  const naps = [];
-  const responses = { [`GET ${URL_}`]: [{ status: 503, json: {} }, { status: 503, json: {} }, { status: 200, json: {} }] };
-  const { made } = caller(responses, { sleep: async (s) => naps.push(s), random: () => 0.5 });
-  await made.forRepo("b-repo").call(PLUGIN, "check", { method: "GET", url: URL_ });
-  assert.deepEqual(naps, [0.5, 1]);
-})();
+When("I make an answer with no status", async function () {
+  await this.attempt(() => new Answer(null));
+});
+
+When("I make its caller for {string}", async function (repo) {
+  await this.attempt(() => {
+    const first = made(this);
+    return { first, copy: first.forRepo(repo) };
+  });
+});
+
+When("a record is written to the default sink", async function () {
+  await this.attempt(() => new NullSink().write({}));
+});
+
+When("I read the modes of:", async function (doc) {
+  await this.attempt(() => readModes(JSON.parse(doc)));
+});
+
+When("I fetch {string} from it {int} times", async function (url, times) {
+  await this.attempt(async () => {
+    const statuses = [];
+    for (let i = 0; i < times; i++) statuses.push((await this.replay.fetch(url)).status);
+    return statuses;
+  });
+});
+
+When("I write as Python's json.dumps does:", async function (doc) {
+  await this.attempt(() => pythonJson(JSON.parse(doc)));
+});
+
+// What differs between classes.json's timeouts and tries and caller.js's POLICIES, by class.
+When("I compare caller.js's policies with {string}", async function (file) {
+  const classes = await repositoryJson(this, file);
+  await this.attempt(() => Object.entries(classes)
+    .filter(([id, c]) => JSON.stringify(POLICIES[id]) !== JSON.stringify({ timeout: c.timeout, tries: c.tries }))
+    .map(([id]) => id));
+});
+
+// What differs between a plugin file's operations and caller.js's OPERATIONS, by name.
+When("I compare caller.js's operations of {string} with {string}", async function (plugin, file) {
+  const { operations } = await repositoryJson(this, file);
+  await this.attempt(() => operations
+    .filter((o) => JSON.stringify(OPERATIONS[plugin]?.[o.name]) !== JSON.stringify({ class: o.class, route: o.route }))
+    .map((o) => o.name));
+});
+
+Then("it took at least {int} ms", function (ms) {
+  if (!(this.took >= ms)) throw new Error(`it took ${this.took} ms`);
 });

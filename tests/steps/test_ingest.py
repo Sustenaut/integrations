@@ -1,4 +1,6 @@
-"""The ingest pod's parts: its BigQuery loads, its Google token, its Avro and its health."""
+"""The ingest pod's parts: its BigQuery loads, its Google token, its Avro and its health.
+BigQuery is an in-memory fake of its load jobs (FakeBigQuery, which test_inbox.py builds on);
+Google's token services are fake services (providers.py)."""
 
 from __future__ import annotations
 
@@ -7,27 +9,26 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi.testclient import TestClient
 
-from integrations.calls import Caller, MemorySink, Response
+import pubtest.http
+from integrations.avrofile import SCHEMA, decode, encode
+from integrations.calls import CallRecord, Caller, MemorySink, Response
 from integrations.ingest import main  # noqa: F401 - what uvicorn runs must import
 from integrations.ingest.app import create_app
-from integrations.avrofile import decode, encode
-from integrations.ingest.bigquery import BigQueryLoader, Outcome
-from integrations.ingest.google_token import GoogleToken
-from pytest_bdd import scenarios, then
+from integrations.ingest.bigquery import BigQueryLoader
+from integrations.ingest.google_token import FederatedToken, GoogleToken, google_token, project_of
+from integrations.ingest.main import scanning
+from pytest_bdd import given, parsers, scenarios, then, when
+
+from .providers import caller
+from .stores import record
 
 scenarios("ingest.feature")
 
-BASE = "https://storage.example"
-
-
-def record(n=1, **fields):
-    return {"at": "2026-11-02T10:00:00Z", "repo": "a-repo", "app": "web", "plugin": "github.edit-pr",
-            "operation": "open-pr", "request_id": f"r{n}", "latency_ms": 12, "status": 201, "outcome": "ok",
-            "retries": 0, "bytes_in": 3, "bytes_out": 4, "mode": "required", "route": "routed", **fields}
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeBigQuery:
@@ -71,109 +72,6 @@ class FakeBigQuery:
         return Response(200, json.dumps({"status": state}).encode())
 
 
-@then("avro is the same bytes for the same records and keeps every field")
-def avro_is_the_same_bytes_for_the_same_records_and_keeps_every_field():
-    rows = [record(1), record(2, status=None)]
-    first, again = encode(rows), encode([dict(r) for r in rows])
-    assert first == again
-    assert decode(encode(rows)) == rows
-
-
-@then("a load says whether another try may work")
-def a_load_says_whether_another_try_may_work():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ("silent", Outcome.RETRY), ("busy", Outcome.RETRY), ("job-busy", Outcome.RETRY), ("running", Outcome.RETRY),
-    ("forbidden", Outcome.RETRY), ("bad-request", Outcome.REJECTED), ("invalid", Outcome.REJECTED), ("ok", Outcome.LOADED)]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_a_load_says_whether_another_try_may_work(answer=case0[0], outcome=case0[1])
-
-
-def _case_a_load_says_whether_another_try_may_work(answer, outcome):
-    bigquery = FakeBigQuery()
-    bigquery.answer = answer
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    loader = BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2)
-    result = loader.load("ds", encode([record(1)]), "calls_x")
-    assert result.outcome is outcome
-    assert result.ended == (answer in ("job-busy", "invalid"))
-
-
-@then("a lost answer finds the job already there")
-def a_lost_answer_finds_the_job_already_there():
-    bigquery = FakeBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    loader = BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2)
-    data = encode([record(1)])
-    assert loader.load("ds", data, "calls_x").outcome is Outcome.LOADED
-    assert loader.load("ds", data, "calls_x").outcome is Outcome.LOADED and len(bigquery.rows) == 1
-
-
-@then("ingest answers health and has no public docs")
-def ingest_answers_health_and_has_no_public_docs():
-    http = TestClient(create_app())
-    assert http.get("/healthz").json() == {"status": "ok", "unhealthy": []}
-    assert http.get("/livez").json() == {"status": "ok"}
-    assert http.get("/docs").status_code == 404 and http.get("/openapi.json").status_code == 404
-    assert http.post("/records", json={}).status_code in (404, 405)
-
-
-@then("a scanner that stops makes the pod unready but not dead")
-def a_scanner_that_stops_makes_the_pod_unready_but_not_dead():
-    from integrations.ingest.main import scanning
-    from integrations.ingest.inbox import INTERVAL_SECONDS
-    assert scanning(3 * INTERVAL_SECONDS - 1).ok and not scanning(3 * INTERVAL_SECONDS).ok
-    http = TestClient(create_app(lambda: [scanning(3 * INTERVAL_SECONDS)]))
-    answer = http.get("/healthz")
-    assert answer.status_code == 503 and answer.json() == {"status": "unhealthy", "unhealthy": ["ingest.scanner"]}
-    assert http.get("/livez").status_code == 200
-
-
-@then("the record fields are the schemas")
-def the_record_fields_are_the_schemas():
-    schema = json.loads((Path(__file__).parents[2] / "src/integrations/schemas/call-record.schema.json").read_text())
-    from integrations.avrofile import SCHEMA
-    from integrations.calls import CallRecord
-    assert set(schema["required"]) == set(CallRecord.__dataclass_fields__) == {f["name"] for f in SCHEMA["fields"]}
-
-
-@then("a google token is traded in once and reused")
-def a_google_token_is_traded_in_once_and_reused():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                            serialization.NoEncryption()).decode()
-    answers = [Response(200, b'{"access_token": "first"}'), Response(200, b'{"access_token": "second"}')]
-
-    class Google:
-        sent = 0
-
-        def send(self, request, timeout):
-            Google.sent += 1
-            assert b"grant_type" in request.body and pem not in request.body.decode()
-            return answers.pop(0)
-
-    now = [1000.0]
-    token = GoogleToken(Caller("r", transport=Google()), {"client_email": "w@x", "token_uri": "https://oauth.example/token",
-                                                          "private_key": pem}, clock=lambda: now[0])
-    assert token() == "first" and token() == "first" and Google.sent == 1
-    now[0] += 3400
-    assert token() == "second"
-
-
-@then("a refused google token is a refusal")
-def a_refused_google_token_is_a_refusal():
-    class Refused401:
-        def send(self, request, timeout):
-            return Response(401, b"{}")
-
-    token = GoogleToken(Caller("r", transport=Refused401()), {"client_email": "w", "token_uri": "https://o.example/t",
-                                                               "private_key": rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
-                                                                   serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()})
-    from integrations.calls import Refused
-    with pytest.raises(Refused):
-        token()
-
-
 EXTERNAL = {"type": "external_account",
             "audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/services/providers/k3s",
             "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
@@ -183,82 +81,182 @@ EXTERNAL = {"type": "external_account",
                                                  "reader@a-project.iam.gserviceaccount.com:generateAccessToken"}
 
 
-@then("a federated token trades the pods token then impersonates and is reused")
-def a_federated_token_trades_the_pods_token_then_impersonates_and_is_reused():
+def now(ctx) -> float:
+    if not hasattr(ctx, "now"):
+        ctx.now = 1000.0
+    return ctx.now
+
+
+def pem() -> str:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                             serialization.NoEncryption()).decode()
+
+
+@pytest.fixture
+def http_client(ctx):
+    """The ingest pod's app, with the scanner's check a Given set."""
+    def send(method, path, headers, body):
+        checks = getattr(ctx, "checks", list)
+        return pubtest.http.asgi(create_app(checks))(method, path, headers, body)
+    return send
+
+
+@given("the call records 1 and 2, the second with no status")
+def records_one_and_two(ctx):
+    ctx.rows = [record(1), record(2, status=None)]
+
+
+@when("I encode them, and again from copies")
+def encode_twice(ctx):
+    ctx.attempt(lambda: encode(ctx.rows) == encode([dict(r) for r in ctx.rows]))
+
+
+@when("I encode them and read them back")
+def encode_and_decode(ctx):
+    ctx.attempt(lambda: decode(encode(ctx.rows)))
+
+
+def loader(ctx) -> BigQueryLoader:
+    if not hasattr(ctx, "loader"):
+        ctx.bigquery = FakeBigQuery()
+        made = Caller("integrations", "ingest", sink=MemorySink(), transport=ctx.bigquery, sleep=lambda _: None)
+        ctx.loader = BigQueryLoader(made, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2)
+    return ctx.loader
+
+
+@given(parsers.parse('BigQuery answers a load "{answer}"'))
+def bigquery_answers(ctx, answer):
+    loader(ctx)
+    ctx.bigquery.answer = answer
+
+
+def load(ctx, n, dataset, table):
+    result = loader(ctx).load(dataset, encode([record(n)]), table)
+    return {"outcome": result.outcome.value, "ended": result.ended, "rows loaded": len(ctx.bigquery.rows)}
+
+
+@given(parsers.parse('call record {n:d} was loaded into "{dataset}" as "{table}"'))
+def was_loaded(ctx, n, dataset, table):
+    load(ctx, n, dataset, table)
+
+
+@when(parsers.parse('I load call record {n:d} into "{dataset}" as "{table}"'))
+def i_load(ctx, n, dataset, table):
+    ctx.attempt(lambda: load(ctx, n, dataset, table))
+
+
+@when(parsers.parse("I check a scanner whose last pass was {seconds:d} seconds ago"))
+def check_scanner(ctx, seconds):
+    ctx.attempt(lambda: scanning(seconds))
+
+
+@given(parsers.parse("the scanner's last pass was {seconds:d} seconds ago"))
+def scanner_stopped(ctx, seconds):
+    ctx.checks = lambda: [scanning(seconds)]
+
+
+@when("I compare the call record's fields with its JSON schema's and its Avro schema's")
+def compare_fields(ctx):
+    def differences():
+        schema = json.loads((ROOT / "src/integrations/schemas/call-record.schema.json").read_text())
+        sets = [set(schema["required"]), set(CallRecord.__dataclass_fields__), {f["name"] for f in SCHEMA["fields"]}]
+        return sorted(set.union(*sets) - set.intersection(*sets))
+    ctx.attempt(differences)
+
+
+@given(parsers.parse('a service account "{email}" whose key trades at "{uri}"'))
+def service_account(ctx, email, uri):
+    key = pem()
+    ctx.secrets.append(key)
+    ctx.token = GoogleToken(caller(ctx, "r"), {"client_email": email, "token_uri": uri, "private_key": key},
+                            clock=lambda: now(ctx))
+
+
+@given(parsers.parse('the pod\'s external account credential, its token "{token}"'))
+def external_account(ctx, token):
+    ctx.reads = []
+    ctx.token = FederatedToken(caller(ctx, "r"), EXTERNAL, clock=lambda: now(ctx),
+                               read=lambda path: ctx.reads.append(path) or f"{token}\n")
+
+
+@given("its token was asked for")
+def token_was_asked(ctx):
+    ctx.token()
+
+
+@given(parsers.parse("{seconds:d} seconds pass"))
+def seconds_pass(ctx, seconds):
+    ctx.now = now(ctx) + seconds
+
+
+@when("I ask for its token")
+def ask_token(ctx):
+    ctx.attempt(ctx.token)
+
+
+@when("I ask for its token twice")
+def ask_token_twice(ctx):
+    ctx.attempt(lambda: [ctx.token(), ctx.token()])
+
+
+@then(parsers.parse('the "{name}" service was sent a form with "{field}" set to "{value}"'))
+def sent_a_form_with(ctx, name, field, value):
+    """Some application/x-www-form-urlencoded request carried the field with that value."""
     from urllib.parse import parse_qs
-
-    from integrations.ingest.google_token import FederatedToken, google_token, project_of
-
-    sent = []
-
-    class Google:
-        def send(self, request, timeout):
-            sent.append(request)
-            if request.url.startswith("https://sts."):
-                return Response(200, json.dumps({"access_token": "federated"}).encode())
-            return Response(200, json.dumps({"accessToken": f"access-{len(sent)}"}).encode())
-
-    now, reads = [1000.0], []
-    token = FederatedToken(Caller("r", transport=Google()), EXTERNAL, clock=lambda: now[0],
-                           read=lambda path: reads.append(path) or "pod-token\n")
-    assert token() == "access-2" and token() == "access-2" and len(sent) == 2
-    exchange = parse_qs(sent[0].body.decode())
-    assert exchange["subject_token"] == ["pod-token"] and exchange["audience"] == [EXTERNAL["audience"]]
-    assert sent[1].headers["Authorization"] == "Bearer federated" and reads == ["/var/run/secrets/google/token"]
-    now[0] += 3400
-    assert token() == "access-4"
-    assert project_of(EXTERNAL) == "a-project" and project_of({"project_id": "p"}) == "p"
-    assert isinstance(google_token(Caller("r", transport=Google()), EXTERNAL), FederatedToken)
-    assert isinstance(google_token(Caller("r", transport=Google()), {"client_email": "w"}), GoogleToken)
+    forms = [parse_qs(r["body"]) for r in ctx.fakes[name].requests]
+    assert any(form.get(field) == [value] for form in forms), f"{name} was sent {forms}"
 
 
-@then("a federated token refused at either step is a refusal and a bad credential is said")
-def a_federated_token_refused_at_either_step_is_a_refusal_and_a_bad_credential_is_said():
-    from integrations.calls import Refused
-    from integrations.ingest.google_token import FederatedToken, project_of
-
-    class Refuses:
-        def __init__(self, at):
-            self.at = at
-
-        def send(self, request, timeout):
-            if request.url.startswith(self.at):
-                return Response(403, b"{}")
-            return Response(200, json.dumps({"access_token": "federated"}).encode())
-
-    for at in ("https://sts.", "https://iamcredentials."):
-        token = FederatedToken(Caller("r", transport=Refuses(at)), EXTERNAL, read=lambda path: "t")
-        with pytest.raises(Refused):
-            token()
-    with pytest.raises(ValueError):
-        FederatedToken(Caller("r"), {"type": "service_account"})
-    with pytest.raises(ValueError):
-        project_of({"type": "external_account"})
+@then(parsers.parse('the pod\'s token was read once, from "{path}"'))
+def token_read_once(ctx, path):
+    assert ctx.reads == [path], f"the pod's token was read from {ctx.reads}"
 
 
-@then("the ingests token its credential and the provider name one audience")
-def the_ingests_token_its_credential_and_the_provider_name_one_audience():
-    """A mismatch fails only at run time, as Google's STS refusing the token."""
-    import yaml
+CREDENTIALS = {
+    "the pod's external account credential": EXTERNAL,
+    'a key whose project_id is "p"': {"project_id": "p"},
+    "an external account credential with no account": {"type": "external_account"},
+    'a key of "w"': {"client_email": "w"},
+}
 
-    from integrations.ingest.google_token import FederatedToken, google_token, project_of
 
-    root = Path(__file__).resolve().parents[2]
-    provider = ("//iam.googleapis.com/projects/948171295184/locations/global/workloadIdentityPools/services/"
-                "providers/sustenaut-k3s")
-    configmap = yaml.safe_load((root / "k8s" / "google-credential.yaml").read_text(encoding="utf-8"))
-    credential = json.loads(configmap["data"]["credential.json"])
-    assert credential["audience"] == provider and project_of(credential) == "sustenaut"
-    assert isinstance(google_token(Caller("integrations", "ingest"), credential), FederatedToken)
-    deployment = next(d for d in yaml.safe_load_all((root / "k8s" / "ingest.yaml").read_text(encoding="utf-8"))
-                      if d and d["kind"] == "Deployment")
-    spec = deployment["spec"]["template"]["spec"]
-    assert spec["serviceAccountName"] == "ingest" and spec["automountServiceAccountToken"] is False
-    (volume,) = [v for v in spec["volumes"] if v["name"] == "google-token"]
-    (source,) = volume["projected"]["sources"]
-    assert source["serviceAccountToken"]["audience"] == provider
-    (container,) = spec["containers"]
-    mounts = {m["name"]: m["mountPath"] for m in container["volumeMounts"]}
-    assert f"{mounts['google-token']}/{source['serviceAccountToken']['path']}" == credential["credential_source"]["file"]
-    env = {e["name"]: e.get("value") for e in container["env"]}
-    assert env["INGEST_KEY_FILE"] == f"{mounts['google-credential']}/credential.json"
+@when(parsers.parse("I read the project of {credential}"))
+def project(ctx, credential):
+    ctx.attempt(lambda: project_of(CREDENTIALS[credential]))
+
+
+@when(parsers.parse("I make the Google token for {credential}"))
+def make_google_token(ctx, credential):
+    ctx.attempt(lambda: type(google_token(caller(ctx, "r"), CREDENTIALS[credential])).__name__)
+
+
+@when("I make a federated token of a service account credential")
+def federated_of_key(ctx):
+    ctx.attempt(lambda: FederatedToken(Caller("r"), {"type": "service_account"}))
+
+
+@when("I read the ingest's Google credential and its Deployment in k8s/")
+def read_k8s(ctx):
+    def facts():
+        configmap = yaml.safe_load((ROOT / "k8s" / "google-credential.yaml").read_text(encoding="utf-8"))
+        credential = json.loads(configmap["data"]["credential.json"])
+        deployment = next(d for d in yaml.safe_load_all((ROOT / "k8s" / "ingest.yaml").read_text(encoding="utf-8"))
+                          if d and d["kind"] == "Deployment")
+        spec = deployment["spec"]["template"]["spec"]
+        (volume,) = [v for v in spec["volumes"] if v["name"] == "google-token"]
+        (source,) = volume["projected"]["sources"]
+        (container,) = spec["containers"]
+        mounts = {m["name"]: m["mountPath"] for m in container["volumeMounts"]}
+        env = {e["name"]: e.get("value") for e in container["env"]}
+        return {
+            "audience": credential["audience"], "project": project_of(credential),
+            "token": type(google_token(Caller("integrations", "ingest"), credential)).__name__,
+            "service account": spec["serviceAccountName"], "automounts a token": spec["automountServiceAccountToken"],
+            "projected token's audience": source["serviceAccountToken"]["audience"],
+            "projected token's file": f"{mounts['google-token']}/{source['serviceAccountToken']['path']}",
+            "credential's token file": credential["credential_source"]["file"],
+            "INGEST_KEY_FILE": env["INGEST_KEY_FILE"],
+            "credential's file": f"{mounts['google-credential']}/credential.json",
+        }
+    ctx.attempt(facts)

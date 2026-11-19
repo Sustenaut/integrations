@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timedelta, timezone
-from email.utils import format_datetime
 import io
 import json
+import time
+import tomllib
 import urllib.error
 from dataclasses import asdict
 from pathlib import Path
@@ -17,395 +17,232 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from integrations import __version__, registry
-from integrations.calls import (Caller, Check, JsonlSink, MemorySink, Network, Recording, Refused, Replay, Request,
-                                Response, Unavailable, health, read_modes)
+from integrations.calls import (Caller, Check, JsonlSink, Network, NullSink, Recording, Replay, Request, Response,
+                                health, read_modes)
 from integrations.clients.github_app_token import AppToken, FakeAppToken
-from integrations.clients.github_edit_pr import Change, Conflict, EditPullRequests, FakeEditPullRequests, next_branch
-from pytest_bdd import scenarios, then
+from integrations.clients.github_edit_pr import Change, EditPullRequests, FakeEditPullRequests, next_branch
+from pytest_bdd import given, parsers, scenarios, then, when
+
+from .providers import providers, records
 
 scenarios("calls.feature")
 
 RECORD_SCHEMA = registry.load(registry.SCHEMAS / "call-record.schema.json")
-PLUGIN = "github.edit-pr"
-URL = "https://api.example/x"
 
 
-def caller(responses=None, **kw):
-    sink = MemorySink()
-    transport = Replay(responses or {})
-    naps = []
-    # random 1.0, the top of the jitter's range, so the waits are 2**n.
-    made = Caller("a-repo", "web", sink=sink, transport=transport, sleep=naps.append, new_id=lambda: "id-1",
-                  **{"random": lambda: 1.0, **kw})
-    return made, sink, transport, naps
+# --- the caller -----------------------------------------------------------------
+
+class Dropping:
+    """The fake providers, but for the tries a Given says get no answer."""
+
+    def __init__(self, ctx):
+        self.ctx, self.tries = ctx, 0
+
+    def send(self, request, timeout):
+        self.tries += 1
+        if self.tries in getattr(self.ctx, "dropped", set()):
+            return Response(None, error="no answer")
+        return providers(self.ctx).send(request, timeout)
 
 
-@then("a record says who called what and how it ended")
-def a_record_says_who_called_what_and_how_it_ended():
-    made, sink, _, _ = caller({f"POST {URL}": {"status": 201, "json": {"ok": True}}})
-    response = made.call(PLUGIN, "open-pr", Request("POST", URL, {"Authorization": "secret"}, b"12345"))
-    assert response.json() == {"ok": True}
-    record = asdict(sink.records[0])
-    jsonschema.validate(record, RECORD_SCHEMA)
-    assert (record["repo"], record["app"], record["plugin"], record["operation"]) == ("a-repo", "web", PLUGIN, "open-pr")
-    assert (record["request_id"], record["status"], record["outcome"]) == ("id-1", 201, "ok")
-    assert (record["bytes_out"], record["bytes_in"], record["retries"]) == (5, len(response.body), 0)
-    assert (record["mode"], record["route"]) == ("required", "routed")
+def made_caller(ctx, repo: str | None = None) -> Caller:
+    """The scenario's caller, as its Givens set it up: new ids are id-1, and the
+    jitter's random source gives 1.0, the top of its range, so the waits are 2**n."""
+    ctx.naps = getattr(ctx, "naps", [])
+    clock = getattr(ctx, "clock", None)
+
+    def sleep(seconds):
+        ctx.naps.append(seconds)
+        if clock is not None:
+            ctx.now += seconds
+
+    extra = {"clock": clock} if clock is not None else {}
+    return Caller(repo or ctx.repo, ctx.app, sink=getattr(ctx, "call_sink", None) or records(ctx),
+                  transport=getattr(ctx, "transport", None) or Dropping(ctx), modes=getattr(ctx, "modes", None),
+                  sleep=sleep, new_id=lambda: "id-1", random=lambda: getattr(ctx, "random", 1.0), **extra)
 
 
-@then("a record holds no body url or token")
-def a_record_holds_no_body_url_or_token():
-    made, sink, _, _ = caller({f"POST {URL}": {"status": 201, "json": {"secret-answer": 1}}})
-    made.call(PLUGIN, "open-pr", Request("POST", URL, {"Authorization": "secret-token"}, b"secret-body"))
-    text = json.dumps(asdict(sink.records[0]))
-    for leak in ("secret", "api.example"):
-        assert leak not in text
+@given(parsers.parse('a caller for "{repo}" in the app "{app}"'))
+def a_caller(ctx, repo, app):
+    ctx.repo, ctx.app = repo, app
+    ctx.headers_sent, ctx.body = {}, None
 
 
-@then("an app may give the request id so a slow save can be traced")
-def an_app_may_give_the_request_id_so_a_slow_save_can_be_traced():
-    made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
-    made.call(PLUGIN, "open-pr", Request("GET", URL), request_id="from-the-app")
-    assert sink.records[0].request_id == "from-the-app"
+@given(parsers.parse("the caller's random source gives {value:g}"))
+def random_source(ctx, value):
+    ctx.random = value
 
 
-@then("an operation not in the registry is refused")
-def an_operation_not_in_the_registry_is_refused():
-    made, sink, _, _ = caller()
-    with pytest.raises(ValueError, match="not a registered operation"):
-        made.call(PLUGIN, "nope", Request("GET", URL))
-    assert not sink.records
+@given("the caller takes its modes from the repository")
+def modes_from_repository(ctx):
+    ctx.modes = read_modes(ctx.directory)
 
 
-@then("a refusal comes back to the client and is recorded")
-def a_refusal_comes_back_to_the_client_and_is_recorded():
-    made, sink, _, _ = caller({f"GET {URL}": {"status": 404, "json": {}}})
-    assert made.call(PLUGIN, "open-pr", Request("GET", URL)).status == 404
-    assert sink.records[0].outcome == "refused"
+@given("the caller keeps its records the default way")
+def default_sink(ctx):
+    ctx.call_sink = NullSink()
 
 
-@then("no answer or a failure raises and is recorded")
-def no_answer_or_a_failure_raises_and_is_recorded():
-    """Every case of the parametrized test this was, in turn."""
-    for answer in [{"error": "no answer: down"}, {"status": 500, "json": {}}, {"status": 429, "json": {}}]:
-        answer = answer.values[0] if type(answer).__name__ == "ParameterSet" else answer
-        _case_no_answer_or_a_failure_raises_and_is_recorded(answer=answer)
+@given(parsers.parse('the caller keeps its records in the file "{path}"'))
+def file_sink(ctx, path):
+    ctx.call_sink = JsonlSink(ctx.directory / path)
 
 
-def _case_no_answer_or_a_failure_raises_and_is_recorded(answer):
-    made, sink, _, _ = caller({f"GET {URL}": answer})
-    with pytest.raises(Unavailable):
-        made.call(PLUGIN, "open-pr", Request("GET", URL))
-    assert sink.records[0].outcome == "unavailable"
-
-
-@then("a call a person waits on is not retried")
-def a_call_a_person_waits_on_is_not_retried():
-    made, _, transport, naps = caller({f"GET {URL}": {"status": 503, "json": {}}})
-    with pytest.raises(Unavailable):
-        made.call(PLUGIN, "open-pr", Request("GET", URL))
-    assert len(transport.sent) == 1 and not naps
-
-
-@then("a scheduled call is retried with backoff and the retries recorded")
-def a_scheduled_call_is_retried_with_backoff_and_the_retries_recorded():
-    answers = [{"status": 503, "json": {}}, {"error": "no answer"}, {"status": 200, "json": {}}]
-    made, sink, transport, naps = caller({f"GET {URL}": answers})
-    assert made.call(PLUGIN, "check", Request("GET", URL)).ok
-    assert len(transport.sent) == 3 and naps == [1, 2]
-    assert sink.records[0].retries == 2 and sink.records[0].outcome == "ok"
-
-
-@then("a call not safe to repeat is not retried unless it says so")
-def a_call_not_safe_to_repeat_is_not_retried_unless_it_says_so():
-    made, _, transport, _ = caller({f"POST {URL}": {"status": 503, "json": {}}})
-    with pytest.raises(Unavailable):
-        made.call(PLUGIN, "check", Request("POST", URL))
-    assert len(transport.sent) == 1
-    with pytest.raises(Unavailable):
-        made.call(PLUGIN, "check", Request("POST", URL, repeatable=True))
-    assert len(transport.sent) == 4
-
-
-@then("a body that cant be read is left to the client")
-def a_body_that_cant_be_read_is_left_to_the_client():
-    class Plain:
-        def send(self, request, timeout):
-            return Response(200, b"<html>")
-
-    sink = MemorySink()
-    made = Caller("a-repo", sink=sink, transport=Plain())
-    made.call(PLUGIN, "open-pr", Request("GET", URL), refused=lambda r: bool(r.json()))
-    assert sink.records[0].outcome == "ok"
-
-
-@then("a note is a record of time that wasnt a call")
-def a_note_is_a_record_of_time_that_wasnt_a_call():
-    made, sink, transport, _ = caller()
-    made.note(PLUGIN, "service-total", request_id="r", latency_ms=9, status=200, outcome="ok")
-    record = sink.records[0]
-    assert (record.operation, record.latency_ms, record.route, record.bytes_in) == ("service-total", 9, "none", 0)
-    assert not transport.sent
-    with pytest.raises(ValueError, match="not a registered operation"):
-        made.note(PLUGIN, "nope", request_id="r", latency_ms=1, status=None, outcome="ok")
-
-
-@then("a refusal is not retried")
-def a_refusal_is_not_retried():
-    made, _, transport, _ = caller({f"GET {URL}": {"status": 403, "json": {}}})
-    made.call(PLUGIN, "check", Request("GET", URL))
-    assert len(transport.sent) == 1
-
-
-@then("a sink that fails loses the record not the call")
-def a_sink_that_fails_loses_the_record_not_the_call(capsys):
+@given(parsers.parse('the caller keeps its records in a sink that fails, saying "{text}"'))
+def failing_sink(ctx, text):
     class Broken:
         def write(self, record):
-            raise OSError("disk full")
+            raise OSError(text)
 
-    made = Caller("a-repo", sink=Broken(), transport=Replay({f"GET {URL}": {"status": 200, "json": {}}}))
-    assert made.call(PLUGIN, "open-pr", Request("GET", URL)).ok
-    assert "disk full" in capsys.readouterr().err
+    ctx.call_sink = Broken()
 
 
-@then("the default sink keeps nothing and the file sink appends")
-def the_default_sink_keeps_nothing_and_the_file_sink_appends(tmp_path):
-    responses = {f"GET {URL}": {"status": 200, "json": {}}}
-    assert Caller("a-repo", transport=Replay(responses)).call(PLUGIN, "open-pr", Request("GET", URL)).ok
-    path = tmp_path / "calls.jsonl"
-    made = Caller("a-repo", sink=JsonlSink(path), transport=Replay(responses))
-    made.call(PLUGIN, "open-pr", Request("GET", URL))
-    made.call(PLUGIN, "open-pr", Request("GET", URL))
-    lines = path.read_text().splitlines()
-    assert len(lines) == 2
-    jsonschema.validate(json.loads(lines[0]), RECORD_SCHEMA)
+@given(parsers.parse("try {number:d} of the call has no answer"))
+def try_has_no_answer(ctx, number):
+    ctx.dropped = getattr(ctx, "dropped", set()) | {number}
 
 
-@then("the network transport says who it is as cloudflare refuses urllibs name")
-def the_network_transport_says_who_it_is_as_cloudflare_refuses_urllibs_name(monkeypatch):
-    seen = []
+@given("a provider that never answers, each try taking all the time it is given")
+def silent_provider(ctx):
+    ctx.now, ctx.timeouts = 0.0, []
+    ctx.clock = lambda: ctx.now
 
-    def answers(outgoing, timeout):
-        seen.append(outgoing.get_header("User-agent"))
-        return Answer()
+    class Silent:
+        def send(self, request, timeout):
+            ctx.timeouts.append(timeout)
+            ctx.now += timeout
+            return Response(None, error="no answer: timed out")
 
-    monkeypatch.setattr("urllib.request.urlopen", answers)
-    Network().send(Request("GET", "https://api.example/x"), 1)
-    assert seen == [f"integrations/{__version__}"]
-
-
-@then("the network transport sends only over https")
-def the_network_transport_sends_only_over_https():
-    answer = Network().send(Request("GET", "http://api.example/x"), 1)
-    assert answer.error == "not https" and answer.status is None
+    ctx.transport = Silent()
 
 
-@then("a recording can be replayed and keeps no token")
-def a_recording_can_be_replayed_and_keeps_no_token(tmp_path):
-    recording = Recording(Replay({f"GET {URL}": {"status": 200, "json": {"a": 1}}}))
-    recording.send(Request("GET", URL, {"Authorization": "secret"}), 1)
-    recording.send(Request("GET", "https://nothing.example/"), 1)
-    path = tmp_path / "recorded.json"
-    recording.save(path)
-    assert "secret" not in path.read_text()
-    replay = Replay.from_file(path)
-    assert replay.send(Request("GET", URL), 1).json() == {"a": 1}
-    assert replay.send(Request("GET", "https://nothing.example/"), 1).error == "not recorded"
+@given(parsers.parse("a provider that answers {status:d} after {seconds:g} seconds, asking for a retry after {wait}"))
+def slow_provider(ctx, status, seconds, wait):
+    ctx.now, ctx.timeouts = 0.0, []
+    ctx.clock = lambda: ctx.now
+
+    class Slow:
+        def send(self, request, timeout):
+            ctx.timeouts.append(timeout)
+            ctx.now += seconds
+            return Response(status, b"{}", retry_after=wait)
+
+    ctx.transport = Slow()
 
 
-@then("an empty body reads as nothing")
-def an_empty_body_reads_as_nothing():
-    assert Response(204).json() is None
+@given(parsers.parse('the call carries the header "{name}" set to "{value}"'))
+def call_header(ctx, name, value):
+    ctx.headers_sent = {**getattr(ctx, "headers_sent", {}), name: value}
 
 
-@then("mode comes from the repositorys file and reaches the record")
-def mode_comes_from_the_repositorys_file_and_reaches_the_record(tmp_path):
-    (tmp_path / "integrations.json").write_text(json.dumps({
-        "uses": [{"plugin": PLUGIN, "paths": ["a"], "mode": "advisory"},
-                 {"plugin": "slack.post", "paths": ["a"]},
-                 {"plugin": "linear.sync", "paths": ["a"], "mode": "advisory"},
-                 {"plugin": "linear.sync", "paths": ["b"]}],
-        "terraform": [{"dir": "infra", "plugins": ["terraform.hetzner"], "runs": [], "mode": "advisory"}]}))
-    modes = read_modes(tmp_path)
-    assert modes == {PLUGIN: "advisory", "slack.post": "required", "linear.sync": "required",
-                     "terraform.hetzner": "advisory"}
-    made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}}, modes=modes)
-    made.call(PLUGIN, "open-pr", Request("GET", URL))
-    assert sink.records[0].mode == "advisory"
+@given(parsers.parse('the call\'s body is "{body}"'))
+def call_body(ctx, body):
+    ctx.body = body.encode()
 
 
-@then("required down is unhealthy and advisory down only alerts")
-def required_down_is_unhealthy_and_advisory_down_only_alerts():
-    modes = {"a.required": "required", "b.advisory": "advisory"}
-    up = [Check("a.required", True), Check("b.advisory", True)]
-    assert health(up, modes).healthy
-    advisory_down = health([Check("a.required", True), Check("b.advisory", False, "down")], modes)
-    assert advisory_down.healthy and [c.plugin for c in advisory_down.alerts] == ["b.advisory"]
-    required_down = health([Check("a.required", False), Check("not.listed", False)], modes)
-    assert not required_down.healthy and len(required_down.unhealthy) == 2
+@given("the call says it is safe to repeat")
+def call_repeatable(ctx):
+    ctx.repeatable = True
 
 
-@then("the version is the same in both places")
-def the_version_is_the_same_in_both_places():
-    text = (Path(__file__).parents[2] / "pyproject.toml").read_text()
-    assert f'version = "{__version__}"' in text
+@given(parsers.parse('the call gives the request id "{request_id}"'))
+def call_request_id(ctx, request_id):
+    ctx.request_id = request_id
 
 
-@then("a plugin with a client has a settings schema")
-def a_plugin_with_a_client_has_a_settings_schema():
-    """Every case of the parametrized test this was, in turn."""
-    for plugin in ["github.edit-pr", "github.app-token"]:
-        plugin = plugin.values[0] if type(plugin).__name__ == "ParameterSet" else plugin
-        _case_a_plugin_with_a_client_has_a_settings_schema(plugin=plugin)
+@given("the call takes any JSON body as a refusal")
+def call_refused_rule(ctx):
+    ctx.refused_rule = lambda response: bool(response.json())
 
 
-def _case_a_plugin_with_a_client_has_a_settings_schema(plugin):
-    jsonschema.Draft202012Validator.check_schema(registry.load(registry.PLUGINS / f"{plugin}.json")["settings"])
+def request(ctx, asked: str) -> Request:
+    method, url = asked.split(" ", 1)
+    return Request(method, url, getattr(ctx, "headers_sent", {}), getattr(ctx, "body", None),
+                   getattr(ctx, "repeatable", False))
 
 
-API = "https://api.github.com/repos/o/r"
-SHA = "base-sha"
+@when(parsers.parse('the caller calls "{plugin}" "{operation}" with "{asked}"'))
+def the_caller_calls(ctx, plugin, operation, asked):
+    made = getattr(ctx, "caller", None) or made_caller(ctx)
+    ctx.caller = made
+    ctx.attempt(lambda: made.call(plugin, operation, request(ctx, asked), request_id=getattr(ctx, "request_id", None),
+                                  refused=getattr(ctx, "refused_rule", None)))
 
 
-def github(**extra):
-    """What GitHub answers while an edit to a.md becomes a pull request."""
-    content = base64.b64encode(b"old text").decode()
-    return {
-        f"GET {API}/git/ref/heads/main": {"status": 200, "json": {"object": {"sha": SHA}}},
-        f"GET {API}/contents/a.md?ref={SHA}": {"status": 200, "json": {"content": content, "sha": "blob-a"}},
-        f"GET {API}/contents/new.md?ref={SHA}": {"status": 404, "json": {}},
-        f"GET {API}/git/matching-refs/heads/edit/card-": {
-            "status": 200, "json": [{"ref": "refs/heads/edit/card-1"}, {"ref": "refs/heads/edit/card-7"}]},
-        f"POST {API}/git/refs": {"status": 201, "json": {}},
-        f"PUT {API}/contents/a.md": {"status": 200, "json": {}},
-        f"PUT {API}/contents/new.md": {"status": 201, "json": {}},
-        f"POST {API}/pulls": {"status": 201, "json": {"html_url": "https://github.com/o/r/pull/9"}},
-        **extra,
-    }
+@when(parsers.parse('the caller for "{repo}" calls "{plugin}" "{operation}" with "{asked}"'))
+def the_caller_for_calls(ctx, repo, plugin, operation, asked):
+    made = getattr(ctx, "caller", None) or made_caller(ctx)
+    ctx.caller = made
+    ctx.attempt(lambda: made.for_repo(repo).call(plugin, operation, request(ctx, asked)))
 
 
-def editor(responses):
-    made, sink, transport, _ = caller(responses)
-    return EditPullRequests(made, lambda: "a-token", "o/r"), sink, transport
+@when(parsers.parse('the caller notes "{operation}" of "{plugin}" taking {ms:d} ms with the status {status:d}'))
+def the_caller_notes(ctx, operation, plugin, ms, status):
+    made = made_caller(ctx)
+    ctx.attempt(lambda: made.note(plugin, operation, request_id="r", latency_ms=ms, status=status, outcome="ok"))
 
 
-def sent_json(transport, method, url):
-    return next(json.loads(r.body) for r in transport.sent if (r.method, r.url) == (method, url))
+@then(parsers.parse('the caller\'s sleeps were "{naps}"'))
+def sleeps_were(ctx, naps):
+    assert ctx.naps == json.loads(naps), f"the caller slept {ctx.naps}"
 
 
-@then("an edit becomes a pull request on the next free branch")
-def an_edit_becomes_a_pull_request_on_the_next_free_branch():
-    pulls, sink, transport = editor(github())
-    url = pulls.propose(stem="edit/card-", changes=[Change("a.md", "old text", "new text"), Change("new.md", None, "n")],
-                        title="T", body="B", request_id="from-the-app")
-    assert url == "https://github.com/o/r/pull/9"
-    assert sent_json(transport, "POST", f"{API}/git/refs") == {"ref": "refs/heads/edit/card-8", "sha": SHA}
-    put = sent_json(transport, "PUT", f"{API}/contents/a.md")
-    assert (put["branch"], put["sha"]) == ("edit/card-8", "blob-a")
-    assert base64.b64decode(put["content"]) == b"new text"
-    assert "sha" not in sent_json(transport, "PUT", f"{API}/contents/new.md")
-    assert sent_json(transport, "POST", f"{API}/pulls") == {"title": "T", "head": "edit/card-8", "base": "main", "body": "B"}
-    assert {r.plugin for r in sink.records} == {"github.edit-pr"}
-    assert {r.request_id for r in sink.records} == {"from-the-app"}
-    assert all(r.headers["Authorization"] == "Bearer a-token" for r in transport.sent)
+@then(parsers.parse('the tries were given "{timeouts}" seconds'))
+def tries_given(ctx, timeouts):
+    assert ctx.timeouts == json.loads(timeouts), f"the tries were given {ctx.timeouts}"
 
 
-@then("an edit of a file that moved is a conflict and changes nothing")
-def an_edit_of_a_file_that_moved_is_a_conflict_and_changes_nothing():
-    pulls, _, transport = editor(github())
-    with pytest.raises(Conflict, match="a.md"):
-        pulls.propose(stem="edit/card-", changes=[Change("a.md", "what I saw", "new")], title="T", body="B")
-    assert all(r.method == "GET" for r in transport.sent)
+@then(parsers.parse('"{seconds}" seconds passed'))
+def seconds_passed(ctx, seconds):
+    assert ctx.now == json.loads(seconds), f"{ctx.now} seconds passed"
 
 
-@then("a new file that now exists is a conflict")
-def a_new_file_that_now_exists_is_a_conflict():
-    pulls, _, _ = editor(github())
-    with pytest.raises(Conflict):
-        pulls.propose(stem="edit/card-", changes=[Change("a.md", None, "new")], title="T", body="B")
+@then(parsers.parse('no call record mentions "{text}"'))
+def no_record_mentions(ctx, text):
+    kept = [json.dumps(asdict(r)) for r in records(ctx).records]
+    assert kept, "no call was recorded"
+    assert not [r for r in kept if text in r], f"a record mentions {text}: {kept}"
 
 
-@then("a refusal from github is refused and names no query")
-def a_refusal_from_github_is_refused_and_names_no_query():
-    pulls, _, _ = editor(github(**{f"POST {API}/pulls": {"status": 422, "json": {}}}))
-    with pytest.raises(Refused, match="POST /pulls: HTTP 422"):
-        pulls.propose(stem="edit/card-", changes=[Change("a.md", "old text", "new")], title="T", body="B")
+@then(parsers.parse('the file "{path}" holds {count:d} call records, each meeting its schema'))
+def file_holds_records(ctx, path, count):
+    lines = (ctx.directory / path).read_text().splitlines()
+    assert len(lines) == count, f"{path} holds {len(lines)} lines"
+    for line in lines:
+        jsonschema.validate(json.loads(line), RECORD_SCHEMA)
 
 
-@then("check says whether the repository can be read")
-def check_says_whether_the_repository_can_be_read():
-    pulls, sink, _ = editor({f"GET {API}": {"status": 200, "json": {}}})
-    assert pulls.check() == Check("github.edit-pr", True)
-    assert sink.records[0].operation == "check"
-    pulls, _, _ = editor({f"GET {API}": {"status": 404, "json": {}}})
-    assert not pulls.check().ok
-    pulls, _, _ = editor({f"GET {API}": {"error": "no answer"}})
-    assert not pulls.check().ok
+# --- the fake providers' requests ---------------------------------------------
+
+def _requests(ctx, name):
+    fakes = getattr(ctx, "fakes", {})
+    assert name in fakes, f"there is no fake {name} service"
+    asked = fakes[name].requests
+    assert asked, f"{name} was asked nothing"
+    return asked
 
 
-@then("the branch number ignores other names")
-def the_branch_number_ignores_other_names():
-    assert next_branch("s-", []) == "s-1"
-    assert next_branch("s-", ["s-2", "s-x", "s-2-b", "other-9"]) == "s-3"
+@then(parsers.parse('the "{name}" service was asked nothing but "{method}"'))
+def asked_only(ctx, name, method):
+    asked = [f"{r['method']} {r['path']}" for r in _requests(ctx, name)]
+    assert all(a.startswith(f"{method} ") for a in asked), f"{name} was asked {asked}"
 
 
-@then("the fake answers as the client does")
-def the_fake_answers_as_the_client_does():
-    fake = FakeEditPullRequests(files={"a.md": "old"}, repo="o/r")
-    first = fake.propose(stem="s-", changes=[Change("a.md", "old", "new")], title="T", body="B")
-    second = fake.propose(stem="s-", changes=[Change("b.md", None, "new")], title="T", body="B")
-    assert first == "https://github.com/o/r/pull/1" and second.endswith("/2")
-    assert [p["branch"] for p in fake.proposals] == ["s-1", "s-2"]
-    with pytest.raises(Conflict):
-        fake.propose(stem="s-", changes=[Change("a.md", "moved", "new")], title="T", body="B")
-    assert fake.check().ok and not FakeEditPullRequests(working=False).check().ok
+@then(parsers.parse('the token sent to the "{name}" service has the claim "{claim}" set to "{value}"'))
+def token_claim(ctx, name, claim, value):
+    tokens = [{k.lower(): v for k, v in r["headers"].items()}.get("authorization", "") for r in _requests(ctx, name)]
+    claims = []
+    for token in tokens:
+        _head, part, _signature = token.removeprefix("Bearer ").split(".")
+        claims.append(json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))))
+    assert any(str(c.get(claim)) == value for c in claims), f"the claims were {claims}"
 
 
-@pytest.fixture(scope="module")
-def pem():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                             serialization.NoEncryption()).decode()
-
-
-MINT = "POST https://api.github.com/app/installations/9/access_tokens"
-
-
-@then("a token is minted once and reused until well before it expires")
-def a_token_is_minted_once_and_reused_until_well_before_it_expires(pem):
-    now = [1000.0]
-    answers = [{"status": 201, "json": {"token": "first"}}, {"status": 201, "json": {"token": "second"}}]
-    made, sink, transport, _ = caller({MINT: answers})
-    token = AppToken(made, "5", pem, "9", clock=lambda: now[0])
-    assert token() == "first" and token() == "first"
-    assert len(transport.sent) == 1
-    head, claims, _signature = transport.sent[0].headers["Authorization"].removeprefix("Bearer ").split(".")
-    decoded = json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))
-    assert decoded["iss"] == "5" and decoded["exp"] == 1540
-    assert sink.records[0].plugin == "github.app-token" and sink.records[0].route == "routed"
-    now[0] += 46 * 60
-    assert token() == "second"
-
-
-@then("a refused token is refused and check says so")
-def a_refused_token_is_refused_and_check_says_so(pem):
-    made, _, _, _ = caller({MINT: {"status": 401, "json": {}}})
-    with pytest.raises(Refused):
-        AppToken(made, "5", pem, "9")()
-    assert not AppToken(made, "5", pem, "9").check().ok
-    made, _, _, _ = caller({MINT: {"status": 201, "json": {"token": "t"}}})
-    assert AppToken(made, "5", pem, "9").check().ok
-
-
-@then("the fake token signs nothing")
-def the_fake_token_signs_nothing():
-    assert FakeAppToken()() == "fake-token" and FakeAppToken().check().ok
-    assert not FakeAppToken(working=False).check().ok
-
+# --- the network transport ------------------------------------------------------
 
 class Answer:
-    status = 200
-    headers = {"ETag": '"tag"'}
+    def __init__(self, status, etag, body):
+        self.status, self.headers, self.body = status, {"ETag": etag}, body
 
     def __enter__(self):
         return self
@@ -414,92 +251,237 @@ class Answer:
         return False
 
     def read(self):
-        return b"body"
+        return self.body
 
 
-@then("the network transport reads an answer a refusal and silence")
-def the_network_transport_reads_an_answer_a_refusal_and_silence(monkeypatch):
-    def answers(outgoing, timeout):
-        assert (outgoing.method, outgoing.data, timeout) == ("POST", b"out", 7)
-        return Answer()
+def network(ctx, monkeypatch, answer):
+    ctx.outgoing = []
 
-    request = Request("POST", "https://api.example/x", {}, b"out")
-    monkeypatch.setattr("urllib.request.urlopen", answers)
-    assert Network().send(request, 7) == Response(200, b"body", etag='"tag"')
+    def urlopen(outgoing, timeout):
+        ctx.outgoing.append((outgoing, timeout))
+        return answer(outgoing)
 
-    def refuses(outgoing, timeout):
-        raise urllib.error.HTTPError(outgoing.full_url, 403, "no", {}, io.BytesIO(b"why"))
-
-    monkeypatch.setattr("urllib.request.urlopen", refuses)
-    assert Network().send(request, 7) == Response(403, b"why")
-
-    def silent(outgoing, timeout):
-        raise urllib.error.URLError("down")
-
-    monkeypatch.setattr("urllib.request.urlopen", silent)
-    assert Network().send(request, 7) == Response(None, error="no answer: down")
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
 
 
-@then("a caller for a project records that project")
-def a_caller_for_a_project_records_that_project():
-    made, sink, _, _ = caller({f"GET {URL}": {"status": 200, "json": {}}})
-    made.for_repo("o/theirs").call(PLUGIN, "open-pr", Request("GET", URL))
-    assert sink.records[0].repo == "o/theirs" and made.repo == "a-repo"
+@given(parsers.parse('the network answers {status:d} with the ETag "{etag}" and the body "{body}"'))
+def network_answers(ctx, monkeypatch, status, etag, body):
+    network(ctx, monkeypatch, lambda outgoing: Answer(status, etag, body.encode()))
 
 
-@then("the wait is random up to 2 to the n")
-def the_wait_is_random_up_to_2_to_the_n():
-    answers = [{"status": 503, "json": {}}] * 2 + [{"status": 200, "json": {}}]
-    made, _, _, naps = caller({f"GET {URL}": answers}, random=lambda: 0.25)
-    made.call(PLUGIN, "check", Request("GET", URL))
-    assert naps == [0.25, 0.5]
+@given(parsers.parse('the network refuses with {status:d}, saying "{body}"'))
+def network_refuses(ctx, monkeypatch, status, body):
+    def refuse(outgoing):
+        raise urllib.error.HTTPError(outgoing.full_url, status, "no", {}, io.BytesIO(body.encode()))
+    network(ctx, monkeypatch, refuse)
 
 
-@then("a retry after date is waited for up to the timeout")
-def a_retry_after_date_is_waited_for_up_to_the_timeout():
-    future = format_datetime(datetime.now(timezone.utc) + timedelta(hours=1), usegmt=True)
-    past = format_datetime(datetime.now(timezone.utc) - timedelta(hours=1), usegmt=True)
-    for header, waited in ((future, 30), (past, 0.0)):
-        answers = [{"status": 503, "json": {}, "headers": {"Retry-After": header}}, {"status": 200, "json": {}}]
-        made, _, _, naps = caller({f"GET {URL}": answers})
-        made.call(PLUGIN, "check", Request("GET", URL))
-        assert naps == [waited]
+@given(parsers.parse('the network is down, saying "{reason}"'))
+def network_down(ctx, monkeypatch, reason):
+    def down(outgoing):
+        raise urllib.error.URLError(reason)
+    network(ctx, monkeypatch, down)
 
 
-@then("a call never runs past its timeout times its tries")
-def a_call_never_runs_past_its_timeout_times_its_tries():
-    now = [0.0]
-    timeouts = []
-
-    class Silent:
-        """Nothing answers: each try takes all the time it is given."""
-
-        def send(self, request, timeout):
-            timeouts.append(timeout)
-            now[0] += timeout
-            return Response(None, error="no answer: timed out")
-
-    def nap(seconds):
-        now[0] += seconds
-
-    made = Caller("a-repo", transport=Silent(), clock=lambda: now[0], sleep=nap, random=lambda: 1.0)
-    with pytest.raises(Unavailable):
-        made.call("github.repo-ops", "call", Request("GET", URL))  # E: 60 s, four tries
-    assert timeouts == [60, 60, 60, 53] and now[0] == 240
+def answered(response: Response) -> dict:
+    return {"status": response.status, "body": response.body.decode(), "error": response.error,
+            "etag": response.etag, "retry_after": response.retry_after}
 
 
-@then("no try starts that the deadline leaves no time for")
-def no_try_starts_that_the_deadline_leaves_no_time_for():
-    now = [0.0]
-    sent = []
+@when(parsers.parse('the network transport sends "{asked}" with a timeout of {timeout:d} seconds'))
+def network_sends(ctx, asked, timeout):
+    ctx.attempt(lambda: answered(Network().send(request(ctx, asked), timeout)))
 
-    class Slow:
-        def send(self, request, timeout):
-            sent.append(timeout)
-            now[0] += 29.5
-            return Response(503, b"{}", retry_after="30")
 
-    made = Caller("a-repo", transport=Slow(), clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s))
-    with pytest.raises(Unavailable):
-        made.call(PLUGIN, "check", Request("GET", URL))  # S: 30 s, three tries, 90 s in all
-    assert sent == [30, 30]  # the third would start at 89 s, with no time left to wait 30
+@then(parsers.parse('the network was sent "{method}" with the body "{body}" and a timeout of {timeout:d} seconds'))
+def network_sent(ctx, method, body, timeout):
+    seen = [(o.method, o.data, t) for o, t in ctx.outgoing]
+    assert (method, body.encode(), timeout) in seen, f"the network was sent {seen}"
+
+
+@then("the network was told the caller is integrations at its version")
+def network_user_agent(ctx):
+    seen = [o.get_header("User-agent") for o, _ in ctx.outgoing]
+    assert seen == [f"integrations/{__version__}"], f"the network was told {seen}"
+
+
+# --- recordings -----------------------------------------------------------------
+
+@given(parsers.parse('a recording of answers where "{asked}" is {status:d} with:'))
+def a_recording(ctx, asked, status, docstring):
+    ctx.recording = Recording(Replay({asked: {"status": status, "json": json.loads(docstring)}}))
+
+
+@when(parsers.parse('the recording sends "{asked}" with the header "{name}" set to "{value}"'))
+def recording_sends_with(ctx, asked, name, value):
+    method, url = asked.split(" ", 1)
+    ctx.attempt(lambda: ctx.recording.send(Request(method, url, {name: value}), 1))
+
+
+@when(parsers.parse('the recording sends "{asked}"'))
+def recording_sends(ctx, asked):
+    method, url = asked.split(" ", 1)
+    ctx.attempt(lambda: ctx.recording.send(Request(method, url), 1))
+
+
+@when(parsers.parse('the recording is saved as "{path}"'))
+def recording_saved(ctx, path):
+    ctx.attempt(lambda: ctx.recording.save(ctx.directory / path))
+
+
+@when(parsers.parse('a replay of "{path}" sends "{asked}"'))
+def replay_sends(ctx, path, asked):
+    method, url = asked.split(" ", 1)
+    ctx.attempt(lambda: Replay.from_file(ctx.directory / path).send(Request(method, url), 1))
+
+
+@when(parsers.parse("I read an empty answer with the status {status:d} as JSON"))
+def empty_answer(ctx, status):
+    ctx.attempt(lambda: Response(status).json())
+
+
+# --- modes, health, the package -----------------------------------------------
+
+@when("I read the repository's modes")
+def read_repository_modes(ctx):
+    ctx.attempt(lambda: read_modes(ctx.directory))
+
+
+@given("the plugins' modes:")
+def plugins_modes(ctx, datatable):
+    ctx.modes = {row[0]: row[1] for row in datatable[1:]}
+
+
+@given("the checks:")
+def the_checks(ctx, datatable):
+    ctx.checks = [Check(row[0], row[1] == "true", row[2]) for row in datatable[1:]]
+
+
+@when("I judge the health")
+def judge_health(ctx):
+    def judged():
+        made = health(ctx.checks, ctx.modes)
+        return {"healthy": made.healthy, "unhealthy": [c.plugin for c in made.unhealthy],
+                "alerts": [c.plugin for c in made.alerts]}
+    ctx.attempt(judged)
+
+
+@when("I read the package's version and pyproject.toml's")
+def versions(ctx):
+    pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text())
+    ctx.attempt(lambda: sorted({__version__, pyproject["project"]["version"]}))
+
+
+@when(parsers.parse('I check the settings schema of "{plugin}"'))
+def settings_schema(ctx, plugin):
+    ctx.attempt(lambda: jsonschema.Draft202012Validator.check_schema(
+        registry.load(registry.PLUGINS / f"{plugin}.json")["settings"]))
+
+
+# --- github.edit-pr ---------------------------------------------------------------
+
+@given(parsers.parse('GitHub edits of "{repo}" with the token "{token}"'))
+def github_edits(ctx, repo, token):
+    ctx.edits = lambda: EditPullRequests(made_caller(ctx), lambda: token, repo)
+
+
+@given("the edit:")
+def the_edit(ctx, datatable):
+    old = lambda cell: None if cell == "nothing" else cell  # noqa: E731
+    ctx.changes = [Change(row[0], old(row[1]), row[2]) for row in datatable[1:]]
+
+
+@when(parsers.parse('I propose the edit on the stem "{stem}" as "{title}" with "{body}"'))
+def propose_edit(ctx, stem, title, body):
+    ctx.attempt(lambda: ctx.edits().propose(stem=stem, changes=ctx.changes, title=title, body=body,
+                                            request_id=getattr(ctx, "request_id", None)))
+
+
+@when("I check GitHub edits")
+def check_edits(ctx):
+    ctx.attempt(lambda: asdict(ctx.edits().check()))
+
+
+@when(parsers.parse("I take the next branch on the stem \"{stem}\" after '{taken}'"))
+def take_next_branch(ctx, stem, taken):
+    ctx.attempt(lambda: next_branch(stem, json.loads(taken)))
+
+
+@given(parsers.parse('a fake of GitHub edits of "{repo}" whose base holds "{path}" as "{text}"'))
+def fake_edits(ctx, repo, path, text):
+    ctx.fake_edits = FakeEditPullRequests(files={path: text}, repo=repo)
+
+
+@given(parsers.parse("a fake of GitHub edits that is {state}"))
+def fake_edits_set(ctx, state):
+    ctx.fake_edits = FakeEditPullRequests(working=state == "working")
+
+
+@when(parsers.parse('the fake proposes changing "{path}" from "{old}" to "{new}" on the stem "{stem}"'))
+def fake_proposes_change(ctx, path, old, new, stem):
+    ctx.attempt(lambda: ctx.fake_edits.propose(stem=stem, changes=[Change(path, old, new)], title="T", body="B"))
+
+
+@when(parsers.parse('the fake proposes adding "{path}" holding "{new}" on the stem "{stem}"'))
+def fake_proposes_adding(ctx, path, new, stem):
+    ctx.attempt(lambda: ctx.fake_edits.propose(stem=stem, changes=[Change(path, None, new)], title="T", body="B"))
+
+
+@when("I ask the fake for its proposals' branches")
+def fake_branches(ctx):
+    ctx.attempt(lambda: [p["branch"] for p in ctx.fake_edits.proposals])
+
+
+@when("I check the fake of GitHub edits")
+def check_fake_edits(ctx):
+    ctx.attempt(lambda: ctx.fake_edits.check())
+
+
+# --- github.app-token ---------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def pem():
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                             serialization.NoEncryption()).decode()
+
+
+@given(parsers.parse('a GitHub App "{app_id}" with a private key, installed as "{installation}"'))
+def github_app(ctx, pem, app_id, installation):
+    ctx.now = time.time()
+    ctx.app_token = AppToken(made_caller(ctx), app_id, pem, installation, clock=lambda: ctx.now)
+
+
+@given(parsers.parse("the clock reads {now:g}"))
+def clock_reads(ctx, now):
+    ctx.now = now
+
+
+@when("I ask for the app's token")
+def ask_app_token(ctx):
+    ctx.attempt(ctx.app_token)
+
+
+@when(parsers.parse("{minutes:d} minutes pass"))
+def minutes_pass(ctx, minutes):
+    ctx.now += minutes * 60
+
+
+@when("I check the app's token")
+def check_app_token(ctx):
+    ctx.attempt(ctx.app_token.check)
+
+
+@when("I ask the fake app for its token")
+def ask_fake_app_token(ctx):
+    ctx.attempt(FakeAppToken())
+
+
+@given(parsers.parse("a fake app token that is {state}"))
+def fake_app_token(ctx, state):
+    ctx.fake_app_token = FakeAppToken(working=state == "working")
+
+
+@when("I check the fake app token")
+def check_fake_app_token(ctx):
+    ctx.attempt(ctx.fake_app_token.check)

@@ -1,24 +1,32 @@
-"""CI's wait times and compute load: the ci-jobs poller and the cluster sampler."""
+"""CI's wait times and compute load: the ci-jobs poller and the cluster sampler.
+
+GitHub is FakeGitHub, the transport of a Caller, since its runs are found by the
+day a query names; storage is FakeStore, which keeps what it is given in the
+scenario's scratch directory, so pubtest's file steps read it."""
 
 from __future__ import annotations
 
 import base64
 import json
+import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import pytest
-from pytest_bdd import scenarios, then
+from pubtest.core import dig, matches, same, show
+from pubtest.steps.standins import standins
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from integrations.avrofile import decode_ci_jobs, decode_cluster_usage, encode_ci_jobs, encode_cluster_usage
-from integrations.calls import Caller, MemorySink, Refused, Response
+from integrations.calls import Caller, MemorySink, Response
 from integrations.ci_usage.cluster import Cgroups, Sampler, millicores, octets
-from integrations.ci_usage.jobs import GitHub, Poller, board, installed
+from integrations.ci_usage.jobs import GitHub, Poller, State, board, installed, row
 
 scenarios("ci-usage.feature")
 
 NOW = datetime(2027, 1, 15, 12, 0, tzinfo=timezone.utc)
 REPO = "example-org/app"
+LIMIT = 1048576
 
 
 def at(minutes: int) -> str:
@@ -69,13 +77,20 @@ class FakeGitHub:
 
 
 class FakeStore:
-    """The ci-jobs tenant's head and the ci-usage tenant's buffer."""
+    """The ci-jobs tenant's head and the ci-usage tenant's buffer, kept in `root`:
+    uploads/ what was uploaded, state.json what the head holds, buffer/ the buffer's
+    files, and rows.json the rows they hold, in name order."""
 
-    def __init__(self):
+    def __init__(self, root: Path, decode=decode_ci_jobs):
+        self.root, self.decode = root, decode
         self.files: dict[str, bytes] = {}
         self.head: str | None = None
         self.buffer: dict[str, bytes] = {}
-        self.moves = 0
+
+    def _keep(self, path: str, data: bytes) -> None:
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
 
     def get_head(self, name):
         from integrations.clients.storage import NotFound
@@ -87,10 +102,11 @@ class FakeStore:
     def upload_file(self, data, *, name):
         from integrations.clients.storage import StorageError
 
-        if len(data) > 1048576:
-            raise StorageError("write", 413, f"{name} is over 1048576 bytes")
+        if len(data) > LIMIT:
+            raise StorageError("write", 413, f"{name} is over {LIMIT} bytes")
         key = f"h{len(self.files)}"
         self.files[key] = data
+        self._keep(f"uploads/{key}", data)
         return {"id": key}
 
     def move_head(self, name, hash, *, if_match=None):  # noqa: A002
@@ -99,114 +115,248 @@ class FakeStore:
         if if_match != self.head:
             raise StorageError("write", 412, "written moved just now")
         self.head = hash
-        self.moves += 1
+        self._keep("state.json", self.files[hash])
         return {"hash": hash}
 
     def put_buffer(self, place, data):
         self.buffer[place] = data
+        self._keep(f"buffer/{place}", data)
+        self._keep("rows.json", json.dumps(self.rows(), default=str).encode())
         return {}
 
     def rows(self):
-        return [r for name in sorted(self.buffer) for r in decode_ci_jobs(self.buffer[name])]
+        return [r for name in sorted(self.buffer) for r in self.decode(self.buffer[name])]
 
 
-def poller(github, store, *, now=NOW, sleeps=None):
-    caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=github, sleep=lambda _: None)
-    gh = GitHub(caller, lambda: "app-token", sleep=(sleeps.append if sleeps is not None else lambda _: None))
-    return Poller(gh, store, store, [REPO], clock=lambda: now, report=lambda _: None)
+def poller(ctx, now=NOW):
+    caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=ctx.github, sleep=lambda _: None)
+    gh = GitHub(caller, lambda: "app-token", sleep=ctx.sleeps.append)
+    return Poller(gh, ctx.store, ctx.store, [REPO], clock=lambda: now, report=lambda _: None)
 
 
-@then("the poller writes each finished job once, with its wait, and saves what it wrote")
-def the_poller_writes_each_finished_job_once():
-    github, store = FakeGitHub(), FakeStore()
-    github.run()
-    github.jobs[7] = [job(1), job(2, queued=-60, started=-25, done=-12, labels=["ubuntu-latest"],
-                                 runner="GitHub Actions 3", runner_group_name="GitHub Actions")]
-    assert poller(github, store).poll() == 2
-    rows = {r["job_id"]: r for r in store.rows()}
-    assert rows[1]["wait_seconds"] == 600 and rows[1]["run_seconds"] == 600 and rows[1]["runner_group"] == "private"
-    assert rows[2]["wait_seconds"] == 2100 and rows[2]["labels"] == ["ubuntu-latest"]
-    assert rows[1]["repository"] == REPO and rows[1]["event"] == "pull_request" and rows[1]["head_branch"] == "main"
-    assert all(name.startswith("inbox/ci-jobs/2027-01-15/120000-ci-jobs-20270115-") for name in store.buffer)
-    saved = json.loads(store.files[store.head])
-    assert sorted(saved["written"]) == ["1", "2"] and list(saved["finished"]) == ["7"]
+@given("storage for CI's usage")
+def storage(ctx):
+    ctx.github, ctx.store, ctx.sleeps = FakeGitHub(), FakeStore(ctx.directory), []
 
 
-@then("a second pass writes nothing and saves nothing")
-def a_second_pass_writes_nothing_and_saves_nothing():
-    github, store = FakeGitHub(), FakeStore()
-    github.run()
-    github.jobs[7] = [job(1)]
-    poller(github, store).poll()
-    moves, asked = store.moves, len(github.asked)
-    assert poller(github, store, now=NOW + timedelta(minutes=10)).poll() == 0
-    assert store.moves == moves and len(store.buffer) == 1
-    assert not any(path.endswith("/jobs") for path in github.asked[asked:]), "a finished run isn't read again"
+def cell(text: str):
+    return None if text == "none" else text
 
 
-@then("a job still running is written once it completes")
-def a_job_still_running_is_written_once_it_completes():
-    github, store = FakeGitHub(), FakeStore()
-    github.run(status="in_progress")
-    github.jobs[7] = [job(1), job(2, status="in_progress", done=None)]
-    assert poller(github, store).poll() == 1
-    assert json.loads(store.files[store.head])["finished"] == {}
-    github.runs[0].update(status="completed", updated_at=at(5))
-    github.jobs[7][1] = job(2, done=4)
-    assert poller(github, store, now=NOW + timedelta(minutes=10)).poll() == 1
-    assert sorted(r["job_id"] for r in store.rows()) == [1, 2]
+def jobs_from(datatable) -> list[dict]:
+    keys, rows = datatable[0], datatable[1:]
+    made = []
+    for values in rows:
+        given_ = {k: cell(v) for k, v in zip(keys, values, strict=True)}
+        n = int(given_.pop("id"))
+        for k in ("queued", "started", "done"):
+            if k in given_ and given_[k] is not None:
+                given_[k] = int(given_[k])
+        if "labels" in given_:
+            given_["labels"] = given_["labels"].split(",")
+        made.append(job(n, **given_))
+    return made
 
 
-@then("a job no runner took has no wait")
-def a_job_no_runner_took_has_no_wait():
-    github, store = FakeGitHub(), FakeStore()
-    github.run()
-    github.jobs[7] = [job(1, runner=None, started=None, conclusion="cancelled")]
-    poller(github, store).poll()
-    (only,) = store.rows()
-    assert only["wait_seconds"] is None and only["started_at"] is None and only["runner_name"] is None
-    assert only["conclusion"] == "cancelled"
+@given(parsers.parse("a finished run {run:d}, created {created:d} minutes ago and updated {updated:d} minutes ago, "
+                     "with the jobs:"))
+def finished_run(ctx, run, created, updated, datatable):
+    ctx.github.run(run, created=-created, updated=-updated)
+    ctx.github.jobs[run] = jobs_from(datatable)
 
 
-@then("a rate limit is waited out")
-def a_rate_limit_is_waited_out():
-    github, store, sleeps = FakeGitHub(), FakeStore(), []
-    github.run()
-    github.jobs[7] = [job(1)]
-    github.refuse = [Response(403, b'{"message": "API rate limit exceeded for installation"}')]
-    assert poller(github, store, sleeps=sleeps).poll() == 1
-    assert sleeps == [60]
+@given(parsers.parse("a run {run:d} in progress, created {created:d} minutes ago and updated {updated:d} minutes ago, "
+                     "with the jobs:"))
+def run_in_progress(ctx, run, created, updated, datatable):
+    ctx.github.run(run, status="in_progress", created=-created, updated=-updated)
+    ctx.github.jobs[run] = jobs_from(datatable)
 
 
-@then("a refusal that is no rate limit stops the pass before anything is saved")
-def a_refusal_that_is_no_rate_limit_stops_the_pass():
-    github, store = FakeGitHub(), FakeStore()
-    github.refuse = [Response(404, b'{"message": "Not Found"}')]
-    with pytest.raises(Refused, match="HTTP 404"):
-        poller(github, store).poll()
-    assert store.head is None and not store.buffer
+@given("the poller has made a pass")
+def has_made_a_pass(ctx):
+    poller(ctx).poll()
 
 
-@then("a backfill writes a file for each day of runs")
-def a_backfill_writes_a_file_for_each_day_of_runs():
-    github, store = FakeGitHub(), FakeStore()
-    for n, days_ago in ((7, 0), (8, 2), (9, 40)):
-        created = -days_ago * 24 * 60 - 40
-        github.run(n, created=created, updated=created + 30)
-        github.jobs[n] = [job(n, queued=created + 1, started=created + 2, done=created + 20)]
-    assert poller(github, store).poll(since_days=90) == 3
-    days = sorted(name.split("/")[3].split("-")[3] for name in store.buffer)
-    assert days == ["20261206", "20270113", "20270115"]
-    assert sorted(json.loads(store.files[store.head])["written"]) == ["7", "8"], "only the look back's are kept"
+@given(parsers.parse("run {run:d} has since finished, updated {updated:d} minutes from now, "
+                     "with its job {n:d} done {done:d} minutes from now"))
+def run_since_finished(ctx, run, updated, n, done):
+    found = next(r for r in ctx.github.runs if r["id"] == run)
+    found.update(status="completed", updated_at=at(updated))
+    jobs = ctx.github.jobs[run]
+    jobs[next(i for i, j in enumerate(jobs) if j["id"] == n)] = job(n, done=done)
 
 
-@then("the board's repositories come from state.json")
-def the_boards_repositories_come_from_state_json():
-    github = FakeGitHub()
-    caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=github)
-    state = json.loads(GitHub(caller, lambda: "app-token").file("example-org/release-state", "state.json"))
-    assert board(state) == ["example-org/app"]
+@given(parsers.parse("run {run:d} has since been re-run, updated {updated:d} minutes from now, with the new job:"))
+def run_rerun(ctx, run, updated, datatable):
+    next(r for r in ctx.github.runs if r["id"] == run)["updated_at"] = at(updated)
+    ctx.github.jobs[run] += jobs_from(datatable)
 
+
+@given(parsers.parse("GitHub first answers {status:d} with:"))
+def github_first_answers(ctx, status, docstring):
+    ctx.github.refuse = [Response(status, docstring.encode())]
+
+
+def other_pass_saves(store, job_id, move=None):
+    """The ten-minute CronJob's pass, saving its state while the backfill runs."""
+    theirs = json.loads(store.files[store.head]) if store.head else {"written": {}, "finished": {}}
+    theirs["written"][job_id] = at(-1)
+    stored = store.upload_file(json.dumps(theirs).encode(), name="written.json")
+    (move or store.move_head)("written", stored["id"], if_match=store.head)
+
+
+@given(parsers.parse("the ten-minute CronJob saves job {job_id} each time the pass writes a file"))
+def cronjob_between_files(ctx, job_id):
+    store, put = ctx.store, ctx.store.put_buffer
+
+    def cronjob_between(place, data):
+        put(place, data)
+        other_pass_saves(store, job_id)
+    store.put_buffer = cronjob_between
+
+
+@given("the ten-minute CronJob saves before each move of the head")
+def cronjob_before_each_move(ctx):
+    store, move = ctx.store, ctx.store.move_head
+    ctx.moves = []
+
+    def always_moved(name, hash, *, if_match=None):  # noqa: A002
+        ctx.moves.append(hash)
+        other_pass_saves(store, f"x{len(ctx.moves)}", move)
+        return move(name, hash, if_match=if_match)
+    store.move_head = always_moved
+
+
+@given(parsers.parse("storage refuses to move the head with {status:d}"))
+def refuses_to_move(ctx, status):
+    from integrations.clients.storage import StorageError
+
+    def forbidden(name, hash, *, if_match=None):  # noqa: A002
+        raise StorageError("write", status, "not on the tenant's write list")
+    ctx.store.move_head = forbidden
+
+
+@given("the head holds 90 days of jobs, one each 10 minutes, three times over")
+def head_of_90_days(ctx):
+    store = ctx.store
+    old = State({str(n): (NOW - timedelta(minutes=10 * n)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                 for n in range(90 * 144 * 3)})
+    assert len(old.encode()) > LIMIT, "too big to store as it is"
+    seeded = store.upload_file(json.dumps({"written": {}, "finished": {}}).encode(), name="written.json")
+    store.head = seeded["id"]
+    store.files[seeded["id"]] = old.encode()  # as a backfill left it, before the limit
+
+
+@when("the poller makes a pass")
+def makes_a_pass(ctx):
+    ctx.asked_before = len(ctx.github.asked)
+    ctx.attempt(lambda: poller(ctx).poll())
+
+
+@when(parsers.parse("the poller makes a pass {minutes:d} minutes later"))
+def makes_a_pass_later(ctx, minutes):
+    ctx.asked_before = len(ctx.github.asked)
+    ctx.attempt(lambda: poller(ctx, NOW + timedelta(minutes=minutes)).poll())
+
+
+@when(parsers.parse("the poller makes a backfill pass of {days:d} days"))
+def makes_a_backfill(ctx, days):
+    ctx.attempt(lambda: poller(ctx).poll(since_days=days))
+
+
+@when(parsers.parse("the poller saves the state of job {n}"))
+def saves_state(ctx, n):
+    ctx.attempt(lambda: poller(ctx).save(State({n: at(0)}), None))
+
+
+def reader():
+    return GitHub(Caller("integrations", "ci-jobs", sink=MemorySink(), transport=FakeGitHub()), lambda: "app-token")
+
+
+@when("the board is read from release-state's state.json")
+def board_is_read(ctx):
+    ctx.attempt(lambda: board(json.loads(reader().file("example-org/release-state", "state.json"))))
+
+
+@when("the installation's repositories are read")
+def installation_read(ctx):
+    ctx.attempt(lambda: installed(reader()))
+
+
+@then(parsers.parse("GitHub was asked for no run's jobs since the pass began"))
+def no_jobs_read_again(ctx):
+    since = ctx.github.asked[ctx.asked_before:]
+    assert not any(path.endswith("/jobs") for path in since), f"a finished run was read again: {since}"
+
+
+@then(parsers.parse("it slept {seconds:d} seconds, once"))
+def slept_once(ctx, seconds):
+    assert ctx.sleeps == [seconds], f"it slept {ctx.sleeps}"
+
+
+@then(parsers.parse("the head was asked to move {count:d} times"))
+def head_moves(ctx, count):
+    assert len(ctx.moves) == count, f"the head was asked to move {len(ctx.moves)} times"
+
+
+@then("the rows written are:")
+def rows_written(ctx, datatable):
+    """A row per row the buffer's files hold, in name order; the header names the
+    fields, each cell compared as pubtest compares a step's value."""
+    got = ctx.store.rows()
+    keys, rows = datatable[0], datatable[1:]
+    assert len(got) == len(rows), f"{len(got)} rows were written: {show(got)}"
+    for item, values in zip(got, rows, strict=True):
+        for key, wanted in zip(keys, values, strict=True):
+            assert same(dig(item, key), wanted), f"a row's {key} is {dig(item, key)!r}, not {wanted}: {show(item)}"
+
+
+@then(parsers.parse('the directory "{path}" holds files named:'))
+def directory_holds_named(ctx, path, docstring):
+    """The names in the directory, in name order, each the pattern on its line."""
+    names = sorted(p.name for p in (ctx.directory / path).iterdir())
+    patterns = [line.strip() for line in docstring.splitlines() if line.strip()]
+    assert len(names) == len(patterns) and all(matches(p, n) for p, n in zip(patterns, names, strict=True)), \
+        f"{path} holds {names}"
+
+
+@then(parsers.parse('the file "{path}" is smaller than {size:d} bytes'))
+def smaller_than(ctx, path, size):
+    got = (ctx.directory / path).stat().st_size
+    assert got < size, f"{path} is {got} bytes"
+
+
+@then(parsers.parse('every job in "{path}" was written in the {days:d} days before now'))
+def written_within(ctx, path, days):
+    kept = json.loads((ctx.directory / path).read_text())["written"]
+    old = {k: t for k, t in kept.items() if datetime.fromisoformat(t.replace("Z", "+00:00")) < NOW - timedelta(days=days)}
+    assert not old, f"{len(old)} older jobs are kept"
+
+
+# --- the backfill's wait -------------------------------------------------------
+
+SSH = """#!/usr/bin/env bash
+# ssh, as it treats its arguments: options aside, the host, then one line for a remote shell.
+while [[ $1 == -* ]]; do shift 2; done
+shift
+exec bash -c "$*"
+"""
+
+
+@given(parsers.parse('an "{name}" that runs what it is sent in a local shell'))
+def ssh_runs_locally(ctx, tmp_path, name):
+    found = standins(ctx, tmp_path)
+    (found.bin / name).write_text(SSH, encoding="utf-8")
+    (found.bin / name).chmod(0o755)
+    os.environ["PATH"] = found.path()
+
+
+@then("stderr is empty")
+def stderr_is_empty(ctx):
+    assert ctx.outcome.stderr == "", ctx.outcome.describe()
+
+
+# --- the sampler ---------------------------------------------------------------
 
 class FakeKube:
     def __init__(self, answers):
@@ -256,206 +406,60 @@ def kube():
     })
 
 
-@then("the sampler writes node, namespace, ci and runner rows")
-def the_sampler_writes_node_namespace_ci_and_runner_rows(tmp_path):
-    for cid, peak in ((RUNNER_ID, 734003200), (DIND_ID, 52428800)):
-        where = tmp_path / "kubepods" / "burstable" / "podx" / cid
+@given("a cluster of one node, with a runner pod, an app pod and a finished pod")
+def cluster(ctx, tmp_path):
+    ctx.kube, ctx.cgroups = kube(), tmp_path / "cgroups"
+    ctx.store = FakeStore(ctx.directory, decode_cluster_usage)
+
+
+@given(parsers.parse("the runner's container peaked at {runner:d} bytes and its dind at {dind:d}"))
+def peaks(ctx, runner, dind):
+    for cid, peak in ((RUNNER_ID, runner), (DIND_ID, dind)):
+        where = ctx.cgroups / "kubepods" / "burstable" / "podx" / cid
         where.mkdir(parents=True)
         (where / "memory.peak").write_text(f"{peak}\n")
-    store = FakeStore()
-    sampler = Sampler(kube(), Cgroups(tmp_path), store, clock=lambda: NOW, report=lambda _: None)
-    assert sampler.sample() == 5
-    (name,) = store.buffer
-    assert name.startswith("inbox/cluster-usage/2027-01-15/120000-usage-")
-    rows = {(r["kind"], r["namespace"]): r for r in decode_cluster_usage(store.buffer[name])}
-    node = rows[("node", None)]
-    assert node["cpu_millicores"] == 472 and node["cpu_capacity_millicores"] == 4000
-    assert node["memory_capacity_bytes"] == 8073416 * 1024
-    auth = rows[("namespace", "auth")]
-    assert auth["memory_requests_bytes"] == 1300 * 2**20 and auth["cpu_requests_millicores"] == 100, "a finished pod asks nothing"
-    assert rows[("namespace", "ci")]["cpu_requests_millicores"] == 250 and rows[("namespace", "ci")]["memory_bytes"] == 125 * 2**20
-    ci = rows[("ci", "ci")]
-    assert (ci["quota_memory_used"], ci["quota_memory_hard"]) == (768 * 2**20, 3584 * 2**20)
-    assert (ci["runners_running"], ci["runners_pending"], ci["runners_max"]) == (1, 1, 4)
-    runner = rows[("runner", "ci")]
-    assert runner["runner_name"] == "sustenaut-ci-runner-a" and runner["node"] == "sustenaut"
-    assert (runner["runner_memory_peak_bytes"], runner["dind_memory_peak_bytes"]) == (734003200, 52428800)
 
 
-@then("kubernetes quantities read as millicores and bytes")
-def kubernetes_quantities_read_as_millicores_and_bytes(tmp_path):
-    assert [millicores(q) for q in ("2", "250m", "1.5", "123456789n", "3600u", None)] == [2000, 250, 1500, 123, 4, None]
-    assert [octets(q) for q in ("512Mi", "1Gi", "123Ki", "1e3", "2G", "100", None)] == [
-        512 * 2**20, 2**30, 123 * 1024, 1000, 2 * 10**9, 100, None]
-    assert Cgroups(tmp_path / "none").peak("containerd://" + "c" * 64) is None
-    assert Cgroups(tmp_path).peak(None) is None
+@when("the sampler takes a sample")
+def takes_a_sample(ctx):
+    ctx.attempt(lambda: Sampler(ctx.kube, Cgroups(ctx.cgroups), ctx.store, clock=lambda: NOW,
+                                report=lambda _: None).sample())
 
 
-@then("ci jobs and cluster usage are the same bytes for the same rows")
-def ci_jobs_and_cluster_usage_are_the_same_bytes_for_the_same_rows():
-    from integrations.ci_usage.jobs import row
+@when(parsers.parse('the CPU quantity "{quantity}" is read'))
+def cpu_quantity(ctx, quantity):
+    ctx.attempt(lambda: millicores(quantity))
 
+
+@when(parsers.parse('the memory quantity "{quantity}" is read'))
+def memory_quantity(ctx, quantity):
+    ctx.attempt(lambda: octets(quantity))
+
+
+@when(parsers.parse("no {kind} quantity is read"))
+def no_quantity(ctx, kind):
+    ctx.attempt(lambda: (millicores if kind == "CPU" else octets)(None))
+
+
+@when("the memory peak of a container with no cgroup is read")
+def peak_without_cgroup(ctx, tmp_path):
+    ctx.attempt(lambda: Cgroups(tmp_path / "none").peak("containerd://" + "c" * 64))
+
+
+@when("the memory peak of no container is read")
+def peak_of_none(ctx, tmp_path):
+    ctx.attempt(lambda: Cgroups(tmp_path).peak(None))
+
+
+@when("two CI job rows are encoded, as they are and as copies, and read back")
+def ci_rows_encoded(ctx):
     rows = [row(REPO, {"event": "push"}, job(1), NOW), row(REPO, {"event": "push"}, job(2, runner=None, started=None), NOW)]
-    assert encode_ci_jobs(rows) == encode_ci_jobs([dict(r) for r in rows])
-    assert decode_ci_jobs(encode_ci_jobs(rows)) == rows
+    ctx.attempt(lambda: {"same bytes": encode_ci_jobs(rows) == encode_ci_jobs([dict(r) for r in rows]),
+                         "read back as they were": decode_ci_jobs(encode_ci_jobs(rows)) == rows})
+
+
+@when("a cluster usage row is encoded, as it is and as a copy, and read back")
+def usage_encoded(ctx):
     usage = [{"observed_at": NOW, "kind": "node", "node": "n", "cpu_millicores": 5}]
-    decoded = decode_cluster_usage(encode_cluster_usage(usage))
-    assert decoded[0]["cpu_millicores"] == 5 and decoded[0]["quota_cpu_hard"] is None
-    assert encode_cluster_usage(usage) == encode_cluster_usage([dict(u) for u in usage])
-
-
-@then("the poller reads every repository the installation sees, archived ones aside")
-def the_poller_reads_every_repository_the_installation_sees():
-    caller = Caller("integrations", "ci-jobs", sink=MemorySink(), transport=FakeGitHub())
-    assert installed(GitHub(caller, lambda: "app-token")) == ["example-org/app", "example-org/infra"]
-
-
-def other_pass_saves(store, job_id, move=None):
-    """The ten-minute CronJob's pass, saving its state while the backfill runs."""
-    theirs = json.loads(store.files[store.head]) if store.head else {"written": {}, "finished": {}}
-    theirs["written"][job_id] = at(-1)
-    stored = store.upload_file(json.dumps(theirs).encode(), name="written.json")
-    (move or store.move_head)("written", stored["id"], if_match=store.head)
-
-
-@then("a save the CronJob got in first is merged with it and tried again")
-def a_save_the_cronjob_got_in_first_is_merged_with_it():
-    github, store = FakeGitHub(), FakeStore()
-    for n, days_ago in ((7, 0), (8, 1)):
-        created = -days_ago * 24 * 60 - 40
-        github.run(n, created=created, updated=created + 30)
-        github.jobs[n] = [job(n, queued=created + 1, started=created + 2, done=created + 20)]
-    put = store.put_buffer
-
-    def cronjob_between(place, data):
-        put(place, data)
-        other_pass_saves(store, "99")
-    store.put_buffer = cronjob_between
-    assert poller(github, store).poll() == 2
-    assert sorted(json.loads(store.files[store.head])["written"]) == ["7", "8", "99"], "both passes' jobs stay written"
-
-
-@then("a save refused every time stops after a few tries")
-def a_save_refused_every_time_stops_after_a_few_tries():
-    from integrations.ci_usage.jobs import SAVE_TRIES, State
-    from integrations.clients.storage import StorageError
-
-    store, moves = FakeStore(), []
-    move = store.move_head
-
-    def always_moved(name, hash, *, if_match=None):  # noqa: A002
-        moves.append(hash)
-        other_pass_saves(store, f"x{len(moves)}", move)
-        return move(name, hash, if_match=if_match)
-    store.move_head = always_moved
-    with pytest.raises(StorageError, match="412"):
-        poller(FakeGitHub(), store).save(State({"1": at(0)}), None)
-    assert len(moves) == SAVE_TRIES
-
-
-@then("a refusal that is no conflict is not tried again")
-def a_refusal_that_is_no_conflict_is_not_tried_again():
-    from integrations.ci_usage.jobs import State
-    from integrations.clients.storage import StorageError
-
-    store = FakeStore()
-
-    def forbidden(name, hash, *, if_match=None):  # noqa: A002
-        raise StorageError("write", 403, "not on the tenant's write list")
-    store.move_head = forbidden
-    with pytest.raises(StorageError, match="403"):
-        poller(FakeGitHub(), store).save(State({"1": at(0)}), None)
-    assert len(store.files) == 1
-
-
-def wait_for_job(tmp_path, conditions: list[str]):
-    """Runs scripts/wait-for-job.sh with an ssh that does what the real one does with its
-    arguments: joins them into one line and runs that in a remote shell (bash -c), where a
-    k3s stand-in answers each look with the Job's JSON, its true conditions the next of
-    `conditions`, and the log once asked."""
-    import os
-    import subprocess
-    from pathlib import Path
-
-    answers = tmp_path / "answers"
-    answers.write_text("\n".join(conditions) + "\n")
-    ssh = tmp_path / "ssh"
-    ssh.write_text("""#!/usr/bin/env bash
-while [[ $1 == -* ]]; do shift 2; done
-shift
-exec bash -c "$*"
-""")
-    k3s = tmp_path / "k3s"
-    k3s.write_text("""#!/usr/bin/env bash
-case " $* " in
-  *" logs "*) printf '{"call":"record"}\\nsaved 40 jobs\\nstorage.api write: HTTP 412 written moved just now\\n' ;;
-  *" get job "*)
-    types=$(head -n 1 "$ANSWERS"); sed -i 1d "$ANSWERS"
-    items=$(for t in $types; do printf '{"type": "%s", "status": "True"},' "$t"; done)
-    printf '{"status": {"conditions": [%s {"type": "Suspended", "status": "False"}]}}' "$items" ;;
-  *) echo "k3s: unexpected $*" >&2; exit 2 ;;
-esac
-""")
-    for tool in (ssh, k3s):
-        tool.chmod(0o755)
-    script = Path(__file__).resolve().parents[2] / "scripts" / "wait-for-job.sh"
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "ANSWERS": str(answers), "WAIT_SECONDS": "0"}
-    return subprocess.run([str(script), "integrations", "ci-jobs-backfill"], env=env, capture_output=True, text=True,
-                          timeout=30)
-
-
-@then("the backfill's wait ends when the Job completes")
-def the_backfills_wait_ends_when_the_job_completes(tmp_path):
-    ran = wait_for_job(tmp_path, ["", "", "Complete "])
-    assert ran.returncode == 0 and not ran.stderr
-
-
-@then("the backfill's wait fails with the end of its log when the Job fails")
-def the_backfills_wait_fails_when_the_job_fails(tmp_path):
-    ran = wait_for_job(tmp_path, ["", "Failed "])
-    assert ran.returncode == 1
-    assert "Job ci-jobs-backfill failed" in ran.stderr and "HTTP 412" in ran.stderr
-    assert '{"call"' not in ran.stderr, "call records stay out"
-
-
-@then("a state of 90 days of jobs is pruned to the look back when it is saved")
-def a_state_of_90_days_of_jobs_is_pruned_when_saved():
-    from integrations.ci_usage.jobs import State
-
-    store = FakeStore()
-    old = State({str(n): (NOW - timedelta(minutes=10 * n)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                 for n in range(90 * 144 * 3)})
-    assert len(old.encode()) > 1048576, "too big to store as it is"
-    seeded = store.upload_file(json.dumps({"written": {}, "finished": {}}).encode(), name="written.json")
-    store.head = seeded["id"]
-    store.files[seeded["id"]] = old.encode()  # as a backfill left it, before the limit
-    github = FakeGitHub()
-    github.run()
-    github.jobs[7] = [job(999_999)]
-    assert poller(github, store).poll() == 1
-    saved = store.files[store.head]
-    kept = json.loads(saved)["written"]
-    assert len(saved) < 1048576 and "999999" in kept and "1" in kept, "the look back's ids stay"
-    assert all(datetime.fromisoformat(t.replace("Z", "+00:00")) >= NOW - timedelta(days=4) for t in kept.values())
-
-
-@then("a job listed again inside the look back is not written twice")
-def a_job_listed_again_inside_the_look_back_is_not_written_twice():
-    github, store = FakeGitHub(), FakeStore()
-    github.run(created=-2 * 24 * 60, updated=-2 * 24 * 60 + 30)
-    github.jobs[7] = [job(1, queued=-2 * 24 * 60 + 1, started=-2 * 24 * 60 + 2, done=-2 * 24 * 60 + 20)]
-    poller(github, store).poll()
-    github.runs[0]["updated_at"] = at(5)  # re-run: listed and read again
-    github.jobs[7].append(job(2, queued=1, started=2, done=4))
-    assert poller(github, store, now=NOW + timedelta(minutes=10)).poll() == 1
-    assert sorted(r["job_id"] for r in store.rows()) == [1, 2]
-
-
-@then("a backfill writes a run two days' queries list only once")
-def a_backfill_writes_a_run_two_days_queries_list_only_once():
-    github, store = FakeGitHub(), FakeStore()
-    midnight = (NOW - timedelta(days=30)).replace(hour=0, minute=0, second=0)
-    minutes = int((midnight - NOW).total_seconds() // 60)
-    github.run(9, created=minutes, updated=minutes + 30)
-    github.jobs[9] = [job(9, queued=minutes, started=minutes + 1, done=minutes + 20)]
-    assert poller(github, store).poll(since_days=90) == 1
+    ctx.attempt(lambda: {"same bytes": encode_cluster_usage(usage) == encode_cluster_usage([dict(u) for u in usage]),
+                         "read back": decode_cluster_usage(encode_cluster_usage(usage))})

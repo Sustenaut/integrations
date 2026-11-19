@@ -1,103 +1,76 @@
-"""The Linear client, against recorded answers."""
+"""The Linear client, against a fake Linear (providers.py); its fake, in memory."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 
-import pytest
+from pytest_bdd import given, parsers, scenarios, when
 
-from integrations.calls import Caller, Check, MemorySink, Refused, Replay, Response, Unavailable
-from integrations.clients.linear import API, FakeLinear, LinearClient
-from pytest_bdd import scenarios, then
+from integrations.clients.linear import FakeLinear, LinearClient
+
+from .providers import caller
 
 scenarios("linear.feature")
 
-KEY = f"POST {API}"
+
+@given(parsers.parse('the Linear key "{key}"'))
+def linear_key(ctx, key):
+    ctx.key, ctx.operation = key, "sync"
 
 
-def client(answers, operation="sync"):
-    sink, transport = MemorySink(), Replay({KEY: answers})
-    made = Caller("a-repo", sink=sink, transport=transport, sleep=lambda _: None)
-    return LinearClient(made, lambda: "a-key", operation), sink, transport
+@given("the Linear client reads for a person")
+def reads_for_a_person(ctx):
+    ctx.operation = "read"
 
 
-@then("a query answers its data and sends the key as linear wants")
-def a_query_answers_its_data_and_sends_the_key_as_linear_wants():
-    linear, sink, transport = client({"status": 200, "json": {"data": {"viewer": {"id": "1"}}}})
-    assert linear.query("{ viewer { id } }", {"a": 1}) == {"viewer": {"id": "1"}}
-    assert transport.sent[0].headers["Authorization"] == "a-key"
-    assert json.loads(transport.sent[0].body) == {"query": "{ viewer { id } }", "variables": {"a": 1}}
-    assert (sink.records[0].plugin, sink.records[0].operation) == ("linear.sync", "sync")
+def client(ctx) -> LinearClient:
+    return LinearClient(caller(ctx), lambda: ctx.key, ctx.operation)
 
 
-@then("operation says who is waiting")
-def operation_says_who_is_waiting():
-    linear, sink, _ = client({"status": 200, "json": {"data": {}}}, "read")
-    linear.query("{ a }", request_id="from-the-app")
-    assert (sink.records[0].operation, sink.records[0].request_id) == ("read", "from-the-app")
+@when(parsers.parse('the query "{query}" is sent'))
+def query_sent(ctx, query):
+    ctx.attempt(lambda: client(ctx).query(query))
 
 
-@then("errors beside a 200 and in a 400 are refusals with linears reason")
-def errors_beside_a_200_and_in_a_400_are_refusals_with_linears_reason():
-    linear, sink, _ = client({"status": 200, "json": {"errors": [{"message": "no such field"}]}})
-    with pytest.raises(Refused, match="no such field"):
-        linear.query("{ a }")
-    assert sink.records[0].outcome == "refused"
-    linear, _, _ = client({"status": 400, "json": {"errors": [{"message": "bad"}, {"message": "worse"}]}})
-    with pytest.raises(Refused, match="bad; worse"):
-        linear.query("{ a }")
-    linear, _, _ = client({"status": 401, "json": {}})
-    with pytest.raises(Refused, match="HTTP 401"):
-        linear.query("{ a }")
+@when(parsers.parse('the query "{query}" is sent with the variables:'))
+def query_with_variables(ctx, query, docstring):
+    ctx.attempt(lambda: client(ctx).query(query, json.loads(docstring)))
 
 
-@then("a refusal with a body that is not json still says its status")
-def a_refusal_with_a_body_that_is_not_json_still_says_its_status():
-    class Plain:
-        def send(self, request, timeout):
-            return Response(403, b"<html>")
-
-    linear = LinearClient(Caller("a-repo", transport=Plain()), lambda: "a-key")
-    with pytest.raises(Refused, match="HTTP 403"):
-        linear.query("{ a }")
+@when(parsers.parse('the query "{query}" is sent with the request id "{request_id}"'))
+def query_with_id(ctx, query, request_id):
+    ctx.attempt(lambda: client(ctx).query(query, request_id=request_id))
 
 
-@then("a query is retried on a timer and a mutation is not")
-def a_query_is_retried_on_a_timer_and_a_mutation_is_not():
-    linear, _, transport = client({"status": 503, "json": {}})
-    with pytest.raises(Unavailable):
-        linear.query("{ a }")
-    assert len(transport.sent) == 3
-    linear, _, transport = client({"status": 503, "json": {}})
-    with pytest.raises(Unavailable):
-        linear.query("  mutation { a }")
-    assert len(transport.sent) == 1
+@when("the Linear client is checked")
+def client_checked(ctx):
+    ctx.attempt(lambda: asdict(client(ctx).check()))
 
 
-@then("a query a person waits on is not retried")
-def a_query_a_person_waits_on_is_not_retried():
-    linear, _, transport = client({"status": 503, "json": {}}, "read")
-    with pytest.raises(Unavailable):
-        linear.query("{ a }")
-    assert len(transport.sent) == 1
+@given("a Linear fake that answers:")
+def fake_answers(ctx, docstring):
+    ctx.fake = FakeLinear(answers=json.loads(docstring))
 
 
-@then("check says whether the key works")
-def check_says_whether_the_key_works():
-    linear, _, _ = client({"status": 200, "json": {"data": {"viewer": {"id": "1"}}}})
-    assert linear.check() == Check("linear.sync", True)
-    linear, _, _ = client({"status": 401, "json": {}})
-    assert not linear.check().ok
+@given(parsers.parse("a Linear fake that is {state}"))
+def fake_set(ctx, state):
+    ctx.fake = FakeLinear(working=state == "working")
 
 
-@then("the fake answers in turn and keeps what was asked")
-def the_fake_answers_in_turn_and_keeps_what_was_asked():
-    fake = FakeLinear(answers=[{"a": 1}])
-    assert fake.query("{ a }", {"x": 1}) == {"a": 1}
-    assert fake.query("{ b }") == {}
-    assert fake.asked == [("{ a }", {"x": 1}), ("{ b }", {})]
-    assert fake.check().ok
-    broken = FakeLinear(working=False)
-    with pytest.raises(Refused):
-        broken.query("{ a }")
-    assert not broken.check().ok
+@when(parsers.parse('the fake is asked "{first}" with {variables} and then "{second}"'))
+def fake_asked_twice(ctx, first, variables, second):
+    def ask():
+        answers = [ctx.fake.query(first, json.loads(variables)), ctx.fake.query(second)]
+        return {"answers": answers, "asked": [list(a) for a in ctx.fake.asked]}
+    ctx.attempt(ask)
+
+
+@when(parsers.re(r'the fake is asked "(?P<query>[^"]*)"'))
+def fake_asked(ctx, query):
+    ctx.attempt(lambda: ctx.fake.query(query))
+
+
+@when("the Linear fake is checked")
+def fake_checked(ctx):
+    ctx.attempt(lambda: asdict(ctx.fake.check()))

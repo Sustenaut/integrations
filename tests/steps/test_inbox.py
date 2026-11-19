@@ -1,162 +1,36 @@
-"""The scanner: files in storage reach BigQuery once and leave, whatever stops partway."""
+"""The scanner: files in storage reach BigQuery once and leave, whatever stops partway.
+
+Storage and BigQuery are in-memory fakes (FakeBuffer, PickyBigQuery): a scanner
+lists, reads, writes and deletes, and BigQuery loads and reports jobs, so each
+is state a Given sets up, not a list of recorded answers. A pass leaves, as its
+result, what the world then holds (`seen`), which pubtest's result steps check.
+"""
 
 from __future__ import annotations
 
 import json
-from urllib.parse import parse_qs, urlparse
-
-import pytest
-
+import re
 from datetime import datetime, timezone
 
-from integrations.avrofile import decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubrules_checks, decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states, encode_pubrules_checks, encode_signals, file_status
-from integrations.calls import Caller, MemorySink, Response
+from integrations.avrofile import (decode_need_states,
+                                   decode_pubrules_checks, decode_signals, encode, encode_ci_jobs,
+                                   encode_cluster_usage, encode_need_states, encode_pubrules_checks, encode_signals,
+                                   file_status)
+from integrations.calls import Caller, MemorySink
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
-from integrations.ingest.inbox import CI_JOBS, CLUSTER_USAGE, MAX_BATCH_BYTES, MAX_BATCH_FILES, NEED_STATES, PUBRULES_CHECKS, SIGNALS, Inbox, Scanner, StorageDown, Waiting
+from integrations.ingest.inbox import KINDS, Inbox, Scanner, Waiting
 from integrations.ingest.main import buffers, named_buffers, need_states, pubrules_checks, scan, signals
+from pubtest.core import dig, show
+from pytest_bdd import given, parsers, scenarios, then, when
 
-from .test_ingest import BASE, FakeBigQuery, record
-from pytest_bdd import scenarios, then
+from .providers import providers
+from .stores import BASE, FakeBuffer, PickyBigQuery, record
 
 scenarios("inbox.feature")
 
-DATASET = "ds"
 AVRO = b"Obj\x01"
-
-
-class FakeBuffer:
-    """A tenant's folders, as the storage service lists them."""
-
-    def __init__(self):
-        self.files: dict[str, bytes] = {}
-        self.uploaded = "2027-01-15T07:50:00.000Z"
-        self.down_for: set[str] = set()
-        self.sent: list[tuple[str, str]] = []
-
-    def send(self, request, timeout):
-        url = urlparse(request.url)
-        tenant, _, path = url.path.lstrip("/").partition("/")
-        assert tenant and request.headers["Authorization"] == "Bearer pod-token"
-        self.sent.append((request.method, path))
-        if request.method in self.down_for:
-            return Response(None, error="no answer")
-        if path == "list":
-            prefix = parse_qs(url.query)["prefix"][0]
-            names = sorted(n for n in self.files if n.startswith(prefix))
-            return Response(200, json.dumps({
-                "files": [{"name": n, "size": len(self.files[n]), "uploaded": self.uploaded} for n in names],
-                "cursor": None}).encode())
-        if request.method == "PUT":
-            self.files[path] = request.body
-            return Response(200, b"{}")
-        if request.method == "DELETE":
-            self.files.pop(path, None)
-            return Response(204)
-        return Response(200, self.files[path]) if path in self.files else Response(404, b"{}")
-
-    def inbox(self):
-        """What senders left: the pod's own report is left out."""
-        return sorted(n for n in self.files if n.startswith("inbox/") and "-ingest-" not in n)
-
-    def under(self, folder):
-        return sorted(n for n in self.files if n.startswith(folder))
-
-
-class PickyBigQuery(FakeBigQuery):
-    """Rejects any job holding a row marked bad; `fail_jobs` jobs end in a failure that may pass."""
-
-    def __init__(self):
-        super().__init__()
-        self.ended: dict[str, dict] = {}
-        self.fail_jobs = 0
-        self.fail_status = 0
-        self.refuse_status = False
-        self.call_jobs: list[str] = []
-        self.status_jobs: list[str] = []
-        self.status_rows: list[dict] = []
-        self.signal_rows: list[dict] = []
-        self.need_state_rows: list[dict] = []
-        self.pubrules_check_rows: list[dict] = []
-        self.ci_job_rows: list[dict] = []
-        self.cluster_usage_rows: list[dict] = []
-        self.datasets: list[str] = []
-        self.tables: list[str] = []
-
-    def send(self, request, timeout):
-        if request.method == "POST" and self.answer == "ok":
-            head, _, tail = request.body.partition(b"application/octet-stream\r\n\r\n")
-            config = json.loads(head[head.index(b"{"):head.rindex(b"}") + 1])
-            job = config["jobReference"]["jobId"]
-            table = config["configuration"]["load"]["destinationTable"]["tableId"]
-            if job in self.jobs:
-                return Response(409, b"{}")
-            data = tail[:tail.rindex(b"\r\n--")]
-            self.jobs[job] = data
-            self.tables.append(table)
-            self.datasets.append(config["configuration"]["load"]["destinationTable"]["datasetId"])
-            if table == "signals":
-                self.signal_rows += decode_signals(data)
-                return Response(200, b"{}")
-            if table == "need_states":
-                self.need_state_rows += decode_need_states(data)
-                return Response(200, b"{}")
-            if table == "ci_jobs":
-                self.ci_job_rows += decode_ci_jobs(data)
-                return Response(200, b"{}")
-            if table == "cluster_usage":
-                self.cluster_usage_rows += decode_cluster_usage(data)
-                return Response(200, b"{}")
-            if table == "pubrules_checks":
-                self.pubrules_check_rows += decode_pubrules_checks(data)
-                return Response(200, b"{}")
-            rows = decode(data)
-            if table == STATUS_TABLE:
-                self.status_jobs.append(job)
-                if self.refuse_status:
-                    self.ended[job] = {"reason": "invalid"}
-                elif self.fail_status:
-                    self.fail_status -= 1
-                    self.ended[job] = {"reason": "backendError"}
-                else:
-                    self.status_rows += rows
-                return Response(200, b"{}")
-            self.posts += 1
-            self.call_jobs.append(job)
-            if any(r["operation"] == "bad" for r in rows):
-                self.ended[job] = {"reason": "invalid"}
-            elif self.fail_jobs:
-                self.fail_jobs -= 1
-                self.ended[job] = {"reason": "backendError"}
-            else:
-                self.rows += rows
-            return Response(200, b"{}")
-        if request.method == "GET" and self.answer == "ok":
-            error = self.ended.get(request.url.rsplit("/", 1)[1])
-            return Response(200, json.dumps({"status": {"state": "DONE", **({"errorResult": error} if error else {})}}).encode())
-        return super().send(request, timeout)
-
-
-@pytest.fixture
-def world():
-    buffer, bigquery = FakeBuffer(), PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    statuses: list[dict] = []
-    clock = lambda: 1_800_000_000.0  # noqa: E731 - a moment after the files' upload time
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock)
-    return scanner, buffer, bigquery, statuses
-
-
-def waiting(buffer, n, status=None, **fields):
-    name = f"inbox/calls/2027-01-15/0750{n:02d}-web-{n}.avro"
-    buffer.files[name] = encode([record(n, **fields)], status)
-    return name
-
-
-def left(buffer):
-    """Anything of the senders' still in the buffer, in any folder."""
-    return [n for n in buffer.files if "-ingest-" not in n and not n.startswith("batches/")] + buffer.under("batches/")
+MOMENT = datetime(2027, 1, 15, 7, 50, tzinfo=timezone.utc)
+CHECKED = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
 
 
 def report(sender="web-1", calls=1, **fields):
@@ -165,603 +39,375 @@ def report(sender="web-1", calls=1, **fields):
             "buffer_size": 1, "storage_failures": 0, **fields}
 
 
-def ids(bigquery):
-    return sorted(r["request_id"] for r in bigquery.rows)
-
-
-@then("waiting files load as one job and leave")
-def waiting_files_load_as_one_job_and_leave(world):
-    scanner, buffer, bigquery, statuses = world
-    for n in (1, 2, 3):
-        waiting(buffer, n)
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2", "r3"] and bigquery.posts == 1
-    assert not left(buffer)
-    status = statuses[0]
-    assert status["kind"] == "ingest" and status["dataset"] == DATASET and status["loaded_files"] == 3 and status["jobs_today"] == 1
-    assert status["inbox_files"] == 0 and status["inbox_oldest_seconds"] is None and status["storage_ok"]
-
-
-@then("an empty inbox spends no job and still reports")
-def an_empty_inbox_spends_no_job_and_still_reports(world):
-    scanner, _, bigquery, statuses = world
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and len(statuses) == 1 and statuses[0]["inbox_files"] == 0
-
-
-@then("a file with no records just leaves")
-def a_file_with_no_records_just_leaves(world):
-    scanner, buffer, bigquery, _ = world
-    buffer.files["inbox/calls/2027-01-15/empty.avro"] = encode([])
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and not left(buffer)
-
-
-@then("a crash after the load doesnt load again")
-def a_crash_after_the_load_doesnt_load_again(world):
-    scanner, buffer, bigquery, _ = world
-    waiting(buffer, 1)
-    waiting(buffer, 2)
-    buffer.down_for = {"DELETE"}
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2"] and len(buffer.inbox()) == 2 and len(buffer.under("batches/")) == 1
-    buffer.down_for = set()
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2"] and not left(buffer)
-
-
-@then("a crash partway through deleting finishes with what is left")
-def a_crash_partway_through_deleting_finishes_with_what_is_left(world):
-    scanner, buffer, bigquery, _ = world
-    first = waiting(buffer, 1)
-    waiting(buffer, 2)
-    buffer.down_for = {"DELETE"}
-    scanner.tick([DATASET])
-    buffer.down_for = set()
-    del buffer.files[first]
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2"] and not left(buffer)
-
-
-@then("a crash while splitting a rejected batch loads nothing twice")
-def a_crash_while_splitting_a_rejected_batch_loads_nothing_twice(world):
-    scanner, buffer, bigquery, _ = world
-    for n in (1, 2, 3):
-        waiting(buffer, n)
-    bad = waiting(buffer, 4, operation="bad")
-    buffer.down_for = {"DELETE"}
-    scanner.tick([DATASET])
-    buffer.down_for = set()
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2", "r3"] and buffer.inbox() == []
-    assert buffer.under("batches/") == [] and bad.replace("inbox/", "rejected/") in buffer.files
-
-
-@then("a batch whose files have all gone only loses its record")
-def a_batch_whose_files_have_all_gone_only_loses_its_record(world):
-    scanner, buffer, bigquery, _ = world
-    buffer.files["batches/old.json"] = json.dumps({"files": ["inbox/calls/gone.avro"], "attempt": 0}).encode()
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and not left(buffer)
-
-
-@then("new files wait while an unfinished batch does")
-def new_files_wait_while_an_unfinished_batch_does(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    bigquery.answer = "running"
-    scanner.tick([DATASET])
-    assert len(buffer.under("batches/")) == 1
-    waiting(buffer, 2)
-    jobs = len(bigquery.call_jobs)
-    scanner.tick([DATASET])
-    assert len(bigquery.call_jobs) == jobs and len(buffer.inbox()) == 2
-    assert "did not finish" in statuses[-1]["problems"] and statuses[-1]["inbox_files"] == 3  # the pod's own last report waits too
-
-
-@then("a job that failed in a way that may pass goes again as a new job")
-def a_job_that_failed_in_a_way_that_may_pass_goes_again_as_a_new_job(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    bigquery.fail_jobs = 1
-    scanner.tick([DATASET])
-    assert bigquery.rows == [] and len(buffer.inbox()) == 1
-    assert json.loads(buffer.files[buffer.under("batches/")[0]])["attempt"] == 1
-    assert "backendError" in statuses[0]["problems"]
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and not left(buffer) and len(bigquery.call_jobs) == 2
-
-
-@then("bad files alone move to rejected")
-def bad_files_alone_move_to_rejected(world):
-    scanner, buffer, bigquery, statuses = world
-    for n in (1, 2, 4):
-        waiting(buffer, n)
-    bad = waiting(buffer, 3, operation="bad")
-    held = buffer.files[bad]
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1", "r2", "r4"] and buffer.inbox() == []
-    assert buffer.files["rejected/calls/2027-01-15/075003-web-3.avro"] == held
-    assert buffer.under("batches/") == []
-    assert statuses[0]["rejected_now"] == 1 and statuses[0]["rejected_files"] == 1
-    assert statuses[0]["rejected_oldest_seconds"] > 0 and "invalid" in statuses[0]["problems"]
-
-
-@then("finding a bad file takes few jobs")
-def finding_a_bad_file_takes_few_jobs(world):
-    scanner, buffer, bigquery, _ = world
-    for n in range(1, 17):
-        waiting(buffer, n)
-    waiting(buffer, 17, operation="bad")
-    scanner.tick([DATASET])
-    assert len(ids(bigquery)) == 16 and bigquery.posts <= 12
-
-
-@then("a file that isnt avro or isnt call records is rejected without a job")
-def a_file_that_isnt_avro_or_isnt_call_records_is_rejected_without_a_job(world):
-    scanner, buffer, bigquery, statuses = world
-    buffer.files["inbox/calls/2027-01-15/broken.avro"] = AVRO + b"junk"
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and buffer.under("rejected/") == ["rejected/calls/2027-01-15/broken.avro"]
-    assert "can't be read" in statuses[0]["problems"]
-
-
-@then("rows that cant be call records are rejected")
-def rows_that_cant_be_call_records_are_rejected(world, monkeypatch):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    monkeypatch.setattr("integrations.ingest.inbox.encode", lambda rows, status=None: (_ for _ in ()).throw(ValueError("no")))
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and len(buffer.under("rejected/")) == 1
-    assert "not call records" in statuses[0]["problems"]
-
-
-@then("the days job limit keeps files waiting")
-def the_days_job_limit_keeps_files_waiting(world):
-    scanner, buffer, bigquery, statuses = world
-    for _ in range(JOBS_PER_TABLE_PER_DAY):
-        scanner.jobs.spend(DATASET)
-    waiting(buffer, 1)
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and len(buffer.inbox()) == 1
-    assert statuses[0]["jobs_today"] == JOBS_PER_TABLE_PER_DAY and "load jobs" in statuses[0]["problems"]
-
-
-@then("a batch is kept to what fits in memory")
-def a_batch_is_kept_to_what_fits_in_memory(world):
-    scanner, _, _, _ = world
-    many = [Waiting(f"f{n}", 1, 0.0) for n in range(MAX_BATCH_FILES + 5)]
-    assert len(scanner._choose(many)) == MAX_BATCH_FILES
-    big = [Waiting("a", MAX_BATCH_BYTES, 0.0), Waiting("b", 1, 0.0)]
-    assert scanner._choose(big) == ["a"]
-    assert scanner._choose([Waiting("huge", MAX_BATCH_BYTES + 1, 0.0)]) == ["huge"]
-
-
-@then("storage down leaves everything and says so")
-def storage_down_leaves_everything_and_says_so(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    buffer.down_for = {"GET"}
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and len(buffer.inbox()) == 1
-    assert statuses[0]["storage_ok"] is False and "no answer" in statuses[0]["problems"]
-
-
-@then("a batch record that cant be written means no load")
-def a_batch_record_that_cant_be_written_means_no_load(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    buffer.down_for = {"PUT"}
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and statuses[0]["storage_ok"] is False
-    assert "no answer" in statuses[0]["problems"]
-
-
-@then("a refusal says what was refused")
-def a_refusal_says_what_was_refused():
-    class Refusing:
-        def send(self, request, timeout):
-            return Response(403, b"{}")
-    with pytest.raises(StorageDown, match="write: HTTP 403"):
-        Inbox(Refusing(), lambda: "pod-token", BASE).put(DATASET, "inbox/calls/a.avro", AVRO)
-
-
-@then("one projects bad day doesnt stop the next")
-def one_projects_bad_day_doesnt_stop_the_next(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    real = scanner._work
-    def work(dataset, status, problems):
-        if dataset == "broken":
-            raise RuntimeError("boom")
-        real(dataset, status, problems)
-    scanner._work = work
-    scanner.tick(["broken", DATASET])
-    assert "RuntimeError: boom" in statuses[0]["problems"]
-    assert ids(bigquery) == ["r1"] and statuses[1]["dataset"] == DATASET
-
-
-@then("backlog is reported with its age")
-def backlog_is_reported_with_its_age(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1)
-    waiting(buffer, 2)
-    bigquery.answer = "busy"
-    scanner.tick([DATASET])
-    status = statuses[0]
-    assert status["inbox_files"] == 2 and status["inbox_bytes"] > 0 and status["inbox_more"] is False
-    assert status["inbox_oldest_seconds"] == 600
-
-
-@then("a senders report reaches the status table and not calls")
-def a_senders_report_reaches_the_status_table_and_not_calls(world):
-    scanner, buffer, bigquery, _ = world
-    waiting(buffer, 1, report(calls=1, drops=3))
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and not left(buffer)
-    assert [(r["sender"], r["calls"], r["drops"]) for r in bigquery.status_rows] == [("web-1", 1, 3)]
-    assert scanner.jobs.used(DATASET) == 1 and scanner.jobs.used(DATASET, STATUS_TABLE) == 1
-
-
-@then("an idle senders file has a report and spends no calls job")
-def an_idle_senders_file_has_a_report_and_spends_no_calls_job(world):
-    scanner, buffer, bigquery, _ = world
-    buffer.files["inbox/calls/2027-01-15/075000-web-idle.avro"] = encode([], report(calls=0))
-    scanner.tick([DATASET])
-    assert bigquery.posts == 0 and not left(buffer)
-    assert [r["calls"] for r in bigquery.status_rows] == [0]
-
-
-@then("many reports are one job")
-def many_reports_are_one_job(world):
-    scanner, buffer, bigquery, _ = world
-    for n in (1, 2, 3):
-        waiting(buffer, n, report(sender=f"web-{n}"))
-    scanner.tick([DATASET])
-    assert len(bigquery.status_jobs) == 1 and len(bigquery.status_rows) == 3
-
-
-@then("the pod reports each cycle and it loads on the next")
-def the_pod_reports_each_cycle_and_it_loads_on_the_next(world):
-    scanner, buffer, bigquery, _ = world
-    scanner.tick([DATASET])
-    own = [n for n in buffer.files if "-ingest-" in n]
-    assert len(own) == 1
-    held = file_status(buffer.files[own[0]])
-    assert held["kind"] == "ingest" and held["inbox_files"] == 0 and "dataset" not in held
-    scanner.tick([DATASET])
-    assert [r["kind"] for r in bigquery.status_rows] == ["ingest"]
-    assert own[0] not in buffer.files and bigquery.posts == 0
-
-
-@then("the pods report says what went wrong")
-def the_pods_report_says_what_went_wrong(world):
-    scanner, buffer, _, statuses = world
-    buffer.files["inbox/calls/2027-01-15/broken.avro"] = AVRO + b"junk"
-    scanner.tick([DATASET])
-    own = [n for n in buffer.files if "-ingest-" in n]
-    assert "can't be read" in file_status(buffer.files[own[0]])["problems"]
-    assert "can't be read" in statuses[0]["problems"]
-
-
-@then("reports arent loaded twice when the calls go again")
-def reports_arent_loaded_twice_when_the_calls_go_again(world):
-    scanner, buffer, bigquery, _ = world
-    waiting(buffer, 1, report())
-    bigquery.fail_jobs = 1
-    scanner.tick([DATASET])
-    assert len(bigquery.status_rows) == 1 and bigquery.rows == []
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and [r["sender"] for r in bigquery.status_rows if r["kind"] == "sender"] == ["web-1"]
-
-
-@then("a crash after the reports loaded doesnt load them again")
-def a_crash_after_the_reports_loaded_doesnt_load_them_again(world):
-    scanner, buffer, bigquery, _ = world
-    waiting(buffer, 1, report())
-    buffer.down_for = {"DELETE"}
-    scanner.tick([DATASET])
-    buffer.down_for = set()
-    scanner.tick([DATASET])
-    assert [r["sender"] for r in bigquery.status_rows if r["kind"] == "sender"] == ["web-1"]
-    assert ids(bigquery) == ["r1"] and not left(buffer)
-
-
-@then("a report job that failed goes again before the calls")
-def a_report_job_that_failed_goes_again_before_the_calls(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1, report())
-    bigquery.fail_status = 1
-    scanner.tick([DATASET])
-    assert bigquery.rows == [] and bigquery.status_rows == [] and "backendError" in statuses[0]["problems"]
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and not left(buffer)
-    assert len([r for r in bigquery.status_rows if r["kind"] == "sender"]) == 1
-
-
-@then("rejected reports dont hold up the calls")
-def rejected_reports_dont_hold_up_the_calls(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1, report())
-    bigquery.refuse_status = True
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and not left(buffer) and "reports rejected" in statuses[0]["problems"]
-
-
-@then("a report that isnt one only loses the report")
-def a_report_that_isnt_one_only_loses_the_report(world):
-    scanner, buffer, bigquery, statuses = world
-    waiting(buffer, 1, {"kind": "sender"})
-    scanner.tick([DATASET])
-    assert ids(bigquery) == ["r1"] and bigquery.status_rows == [] and "bad report" in statuses[0]["problems"]
-
-
-@then("the status table has its own days jobs")
-def the_status_table_has_its_own_days_jobs(world):
-    scanner, buffer, bigquery, statuses = world
-    for _ in range(JOBS_PER_TABLE_PER_DAY):
-        scanner.jobs.spend(DATASET, STATUS_TABLE)
-    assert scanner.jobs.may_load(DATASET)
-    waiting(buffer, 1, report())
-    scanner.tick([DATASET])
-    assert bigquery.rows == [] and len(buffer.inbox()) == 1 and "load jobs" in statuses[0]["problems"]
-    assert statuses[0]["status_jobs_today"] == JOBS_PER_TABLE_PER_DAY
-
-
-
 def signal(n: int, **fields) -> dict:
-    moment = datetime(2027, 1, 15, 7, 50, tzinfo=timezone.utc)
     return {"rule_id": "drops", "rule_version": "1", "subject": f"example/app{n}", "severity": "warning",
-            "started_at": moment, "ended_at": None, "evidence": '{"dropped": 3}', "emitted_at": moment, **fields}
-
-
-@pytest.fixture
-def signals_world():
-    buffer, bigquery = FakeBuffer(), PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    statuses: list[dict] = []
-    clock = lambda: 1_800_000_000.0  # noqa: E731
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"observability": "signals"}),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock, kinds={"observability": SIGNALS})
-    return scanner, buffer, bigquery, statuses
-
-
-@then("signals load into their own table from their own tenant and leave")
-def signals_load_into_their_own_table_from_their_own_tenant_and_leave(signals_world):
-    scanner, buffer, bigquery, statuses = signals_world
-    for n in (1, 2):
-        buffer.files[f"inbox/signals/2027-01-15/0750{n:02d}-evaluator-{n}.avro"] = encode_signals([signal(n)])
-    scanner.tick(["observability"])
-    assert bigquery.tables == ["signals"]
-    assert sorted(r["subject"] for r in bigquery.signal_rows) == ["example/app1", "example/app2"]
-    assert bigquery.signal_rows[0]["evidence"] == '{"dropped": 3}'
-    # Its report goes to the log only: the tenant keeps nothing but signals.
-    assert buffer.files == {}
-    assert statuses[0]["dataset"] == "observability" and statuses[0]["loaded_files"] == 2
-    assert statuses[0]["problems"] is None
-    assert all(path.startswith(("list", "inbox/", "batches/")) for _, path in buffer.sent)
-
-
-@then("a file in the signals inbox that isnt signals is rejected")
-def a_file_in_the_signals_inbox_that_isnt_signals_is_rejected(signals_world):
-    scanner, buffer, bigquery, statuses = signals_world
-    name = "inbox/signals/2027-01-15/075000-evaluator-x.avro"
-    buffer.files[name] = encode([record(1)])
-    scanner.tick(["observability"])
-    assert bigquery.signal_rows == []
-    assert buffer.under("rejected/") == ["rejected/signals/2027-01-15/075000-evaluator-x.avro"]
-    assert "not signals" in statuses[0]["problems"]
-
-
-@then("signals are the same bytes for the same rows")
-def signals_are_the_same_bytes_for_the_same_rows():
-    rows = [signal(1), signal(2, ended_at=datetime(2027, 1, 15, 8, 0, tzinfo=timezone.utc))]
-    assert encode_signals(rows) == encode_signals([dict(r) for r in rows])
-    assert decode_signals(encode_signals(rows)) == rows
-
-
-@then("ingest signals names the tenant and dataset")
-def ingest_signals_names_the_tenant_and_dataset():
-    """Every case of the parametrized test this was, in turn."""
-    for case0 in [
-    ("", {}), ("  ", {}), ('{"tenant": "signals", "dataset": "observability"}', {"observability": "signals"})]:
-        case0 = case0.values if type(case0).__name__ == "ParameterSet" else case0
-        _case_ingest_signals_names_the_tenant_and_dataset(text=case0[0], tenants=case0[1])
-
-
-def _case_ingest_signals_names_the_tenant_and_dataset(text, tenants):
-    found, kinds = signals(text)
-    assert found == tenants
-    assert kinds == {dataset: SIGNALS for dataset in tenants}
-
-
-@then("a wrong ingest signals is refused")
-def a_wrong_ingest_signals_is_refused():
-    """Every case of the parametrized test this was, in turn."""
-    for text in ['["signals"]', '{"tenant": "signals"}', '{"tenant": "", "dataset": "observability"}']:
-        text = text.values[0] if type(text).__name__ == "ParameterSet" else text
-        _case_a_wrong_ingest_signals_is_refused(text=text)
-
-
-def _case_a_wrong_ingest_signals_is_refused(text):
-    with pytest.raises(ValueError, match="INGEST_SIGNALS is"):
-        signals(text)
+            "started_at": MOMENT, "ended_at": None, "evidence": '{"dropped": 3}', "emitted_at": MOMENT, **fields}
 
 
 def need_state(n: int, **fields) -> dict:
-    moment = datetime(2027, 1, 15, 7, 50, tzinfo=timezone.utc)
-    return {"observed_at": moment, "repository": "example-org/app", "unit": "app", "need": f"k8s.secret:s{n}",
+    return {"observed_at": MOMENT, "repository": "example-org/app", "unit": "app", "need": f"k8s.secret:s{n}",
             "type": "k8s.secret", "name": f"s{n}", "grade": "auto", "state": "ready", "walked_from": "plane",
-            "walk_started_at": moment, **fields}
-
-
-@then("need states load into their own table from their own tenant and leave")
-def need_states_load_into_their_own_table_from_their_own_tenant_and_leave():
-    buffer, bigquery = FakeBuffer(), PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    statuses: list[dict] = []
-    clock = lambda: 1_800_000_000.0  # noqa: E731
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"convergence": "need-states"}),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock, kinds={"convergence": NEED_STATES})
-    buffer.files["inbox/need-states/2027-01-15/075000-example-org.app.app-1.avro"] = encode_need_states(
-        [need_state(1), need_state(2, state="missing")])
-    buffer.files["inbox/need-states/2027-01-15/075001-example-org.app.app-2.avro"] = encode_signals([signal(1)])
-    scanner.tick(["convergence"])
-    assert bigquery.tables == ["need_states"]
-    assert sorted((r["need"], r["state"]) for r in bigquery.need_state_rows) == [
-        ("k8s.secret:s1", "ready"), ("k8s.secret:s2", "missing")]
-    assert buffer.under("rejected/") == ["rejected/need-states/2027-01-15/075001-example-org.app.app-2.avro"]
-    # Read against the need-state schema, so a file of anything else is set aside alone.
-    assert "can't be read" in statuses[0]["problems"]
-
-
-@then("need states are the same bytes for the same rows")
-def need_states_are_the_same_bytes_for_the_same_rows():
-    rows = [need_state(1), need_state(2, state="drift")]
-    assert encode_need_states(rows) == encode_need_states([dict(r) for r in rows])
-    assert decode_need_states(encode_need_states(rows)) == rows
-
-
-@then("ingest need states names its tenant and dataset beside the signals")
-def ingest_need_states_names_its_tenant_and_dataset_beside_the_signals():
-    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
-                             '{"tenant": "need-states", "dataset": "convergence"}')
-    assert tenants == {"observability": "signals", "convergence": "need-states"}
-    assert kinds == {"observability": SIGNALS, "convergence": NEED_STATES}
-    assert named_buffers("", "") == ({}, {})
-    with pytest.raises(ValueError, match="INGEST_NEED_STATES is"):
-        need_states('{"tenant": "need-states"}')
-    with pytest.raises(ValueError, match="name the same dataset"):
-        named_buffers('{"tenant": "signals", "dataset": "x"}', '{"tenant": "need-states", "dataset": "x"}')
+            "walk_started_at": MOMENT, **fields}
 
 
 def pubrules_check(n: int, **fields) -> dict:
-    moment = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
-    return {"observed_at": moment, "repository": f"example-org/repo{n}", "check": "pin", "status": "pass",
+    return {"observed_at": CHECKED, "repository": f"example-org/repo{n}", "check": "pin", "status": "pass",
             "pinned": "0.37.0", "latest": "0.37.0", "main_commit": "abc123", "run_url": "", "fix": "",
-            "run_started_at": moment, **fields}
+            "run_started_at": CHECKED, **fields}
 
 
-@then("pubrules checks load into their own table from their own tenant and leave")
-def pubrules_checks_load_into_their_own_table_from_their_own_tenant_and_leave():
-    buffer, bigquery = FakeBuffer(), PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    statuses: list[dict] = []
-    clock = lambda: 1_800_000_000.0  # noqa: E731
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, {"platform": "pubrules-checks"}),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock, kinds={"platform": PUBRULES_CHECKS})
-    buffer.files["inbox/pubrules-checks/2027-01-15/024100-nightly-1.avro"] = encode_pubrules_checks(
+def ci_job() -> bytes:
+    from integrations.ci_usage.jobs import row  # noqa: PLC0415
+    job = {"id": 1, "run_id": 2, "name": "test", "created_at": "2027-01-15T02:30:00Z",
+           "started_at": "2027-01-15T02:35:00Z", "completed_at": "2027-01-15T02:40:00Z", "runner_name": "r"}
+    return encode_ci_jobs([row("o/r", {"event": "push"}, job, CHECKED)])
+
+
+# What a file in storage may hold, by the words a Given uses for it.
+CONTENTS = {
+    "call record 1": lambda: encode([record(1)]),
+    "no records": lambda: encode([]),
+    "no records and an idle sender's report": lambda: encode([], report(calls=0)),
+    "no Avro": lambda: AVRO + b"junk",
+    "signal 1": lambda: encode_signals([signal(1)]),
+    "signal 2": lambda: encode_signals([signal(2)]),
+    "need state 1 ready and need state 2 missing": lambda: encode_need_states(
+        [need_state(1), need_state(2, state="missing")]),
+    "pubrules check 1 passing and pubrules check 2 failing": lambda: encode_pubrules_checks(
         [pubrules_check(1), pubrules_check(2, status="fail", pinned="0.35.1",
-                                       fix="`git latest && ./pubrules bump`, then open its PR")])
-    buffer.files["inbox/pubrules-checks/2027-01-15/024101-nightly-2.avro"] = encode_signals([signal(1)])
-    scanner.tick(["platform"])
-    assert bigquery.tables == ["pubrules_checks"]
-    assert sorted((r["repository"], r["status"]) for r in bigquery.pubrules_check_rows) == [
-        ("example-org/repo1", "pass"), ("example-org/repo2", "fail")]
-    assert buffer.under("rejected/") == ["rejected/pubrules-checks/2027-01-15/024101-nightly-2.avro"]
-    assert "can't be read" in statuses[0]["problems"]
+                                          fix="`git latest && ./pubrules bump`, then open its PR")]),
+    "a CI job that waited 5 minutes": ci_job,
+    "a node using 400 millicores": lambda: encode_cluster_usage(
+        [{"observed_at": CHECKED, "kind": "node", "node": "n", "cpu_millicores": 400}]),
+}
+
+# The rows a scenario writes twice and reads back, by their words.
+ROWS = {
+    "signals": (encode_signals, decode_signals,
+                lambda: [signal(1), signal(2, ended_at=datetime(2027, 1, 15, 8, 0, tzinfo=timezone.utc))]),
+    "need states": (encode_need_states, decode_need_states, lambda: [need_state(1), need_state(2, state="drift")]),
+    "pubrules checks": (encode_pubrules_checks, decode_pubrules_checks,
+                        lambda: [pubrules_check(1), pubrules_check(2, check="sync", status="fail")]),
+}
+
+VARIABLES = {"INGEST_SIGNALS": signals, "INGEST_NEED_STATES": need_states,
+             "INGEST_PUBRULES_CHECKS": pubrules_checks, "INGEST_BUFFERS": buffers}
 
 
-@then("pubrules checks are the same bytes for the same rows")
-def pubrules_checks_are_the_same_bytes_for_the_same_rows():
-    rows = [pubrules_check(1), pubrules_check(2, check="sync", status="fail")]
-    assert encode_pubrules_checks(rows) == encode_pubrules_checks([dict(r) for r in rows])
-    assert decode_pubrules_checks(encode_pubrules_checks(rows)) == rows
+
+def world(ctx, buffers_to_scan, tenants=None, kinds=None):
+    ctx.buffer, ctx.bigquery, ctx.statuses = FakeBuffer(), PickyBigQuery(), []
+    ctx.buffers = buffers_to_scan
+    ctx.put, ctx.own_before = {}, []
+    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=ctx.bigquery, sleep=lambda _: None)
+    clock = lambda: 1_800_000_000.0  # noqa: E731 - a moment after the files' upload time
+    ctx.scanner = Scanner(Inbox(ctx.buffer, lambda: "pod-token", BASE, tenants),
+                          BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
+                          JobBudget(clock), ctx.statuses.append, clock, kinds=kinds or {})
 
 
-@then("ingest pubrules checks names its tenant and dataset beside the others")
-def ingest_pubrules_checks_names_its_tenant_and_dataset_beside_the_others():
-    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
-                                   '{"tenant": "need-states", "dataset": "convergence"}',
-                                   '{"tenant": "pubrules-checks", "dataset": "platform"}')
-    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubrules-checks"}
-    assert kinds["platform"] == PUBRULES_CHECKS
-    with pytest.raises(ValueError, match="INGEST_PUBRULES_CHECKS is"):
-        pubrules_checks('{"dataset": "platform"}')
-    with pytest.raises(ValueError, match="INGEST_NEED_STATES and INGEST_PUBRULES_CHECKS name the same dataset"):
-        named_buffers("", '{"tenant": "need-states", "dataset": "x"}', '{"tenant": "pubrules-checks", "dataset": "x"}')
+def seen(ctx) -> dict:
+    """What storage, BigQuery and the scanner's reports hold now."""
+    buffer, bigquery = ctx.buffer, ctx.bigquery
+    batches, own = buffer.under("batches/"), sorted(n for n in buffer.files if "-ingest-" in n)
+    dataset = ctx.buffers[-1].partition(".")[0]
+    return {
+        "loaded": sorted(r["request_id"] for r in bigquery.rows),
+        "posts": bigquery.posts,
+        "calls jobs": len(bigquery.call_jobs),
+        "status jobs": len(bigquery.status_jobs),
+        "status rows": bigquery.status_rows,
+        "status kinds": [r["kind"] for r in bigquery.status_rows],
+        "senders": [r["sender"] for r in bigquery.status_rows if r["kind"] == "sender"],
+        "tables": bigquery.tables,
+        "datasets": bigquery.datasets,
+        "signals": sorted(r["subject"] for r in bigquery.rows_of["signals"]),
+        "signal evidence": [r["evidence"] for r in bigquery.rows_of["signals"]],
+        "need states": sorted([r["need"], r["state"]] for r in bigquery.rows_of["need_states"]),
+        "pubrules checks": sorted([r["repository"], r["status"]] for r in bigquery.rows_of["pubrules_checks"]),
+        "CI job waits": [r["wait_seconds"] for r in bigquery.rows_of["ci_jobs"]],
+        "cluster millicores": [r["cpu_millicores"] for r in bigquery.rows_of["cluster_usage"]],
+        "files": sorted(buffer.files),
+        "inbox": buffer.inbox(),
+        "batches": batches,
+        "batch count": len(batches),
+        "batch": json.loads(buffer.files[batches[0]]) if batches else None,
+        "rejected": buffer.under("rejected/"),
+        "rejected as they came": [n for n in buffer.under("rejected/")
+                                  if ctx.put.get(n.replace("rejected/", "inbox/", 1)) == buffer.files[n]],
+        "left": buffer.left(),
+        "own reports": own,
+        "own report count": len(own),
+        "own report": file_status(buffer.files[own[0]]) if own else None,
+        "own report fields": sorted(file_status(buffer.files[own[0]])) if own else None,
+        "earlier own reports kept": [n for n in ctx.own_before if n in buffer.files],
+        "storage folders asked": sorted({path.split("?")[0].split("/")[0] for _, path in buffer.sent}),
+        "report count": len(ctx.statuses),
+        "reports": ctx.statuses,
+        "reported": sorted({f"{s['dataset']}.{s['table']}" if "table" in s else s["dataset"] for s in ctx.statuses}),
+        "jobs used": ctx.scanner.jobs.used(dataset),
+        "status jobs used": ctx.scanner.jobs.used(dataset, STATUS_TABLE),
+    }
 
 
-@then("the scan passes once at start and then each interval")
-def the_scan_passes_once_at_start_and_then_each_interval():
+# --- the world --------------------------------------------------------------------------------------------------
+
+@given(parsers.parse('a scanner of the calls of "{dataset}"'))
+def calls_scanner(ctx, dataset):
+    world(ctx, [dataset])
+
+
+@given(parsers.parse('a scanner of the {table} of "{dataset}", in the tenant "{tenant}"'))
+def kind_scanner(ctx, table, dataset, tenant):
+    world(ctx, [dataset], {dataset: tenant}, {dataset: KINDS[table.replace(" ", "_")]})
+
+
+@given(parsers.parse("a scanner of the buffers INGEST_PUBRULES_CHECKS and INGEST_BUFFERS name:"))
+def named_scanner(ctx, datatable):
+    given_ = dict(datatable)
+    tenants, kinds = named_buffers("", "", given_.get("INGEST_PUBRULES_CHECKS", ""), given_.get("INGEST_BUFFERS", ""))
+    world(ctx, list(tenants), tenants, kinds)
+
+
+def numbers(text: str) -> list[int]:
+    found = re.fullmatch(r"(\d+) to (\d+)", text)
+    if found:
+        return list(range(int(found[1]), int(found[2]) + 1))
+    return [int(n) for n in re.split(r", | and ", text)]
+
+
+def waiting(ctx, n, status=None, **fields):
+    name = f"inbox/calls/2027-01-15/0750{n:02d}-web-{n}.avro"
+    ctx.buffer.files[name] = ctx.put[name] = encode([record(n, **fields)], status)
+    return name
+
+
+@given(parsers.re(r"calls files? (?P<which>[\d, and to]+) (?:is|are) waiting"))
+def calls_waiting(ctx, which):
+    for n in numbers(which):
+        waiting(ctx, n)
+
+
+@when(parsers.re(r"calls file (?P<n>\d+) arrives"))
+def calls_arrive(ctx, n):
+    waiting(ctx, int(n))
+
+
+@given(parsers.parse("calls file {n:d} is waiting with a bad record"))
+def bad_waiting(ctx, n):
+    waiting(ctx, n, operation="bad")
+
+
+@given(parsers.parse('calls file {n:d} is waiting with a report from "{sender}"'))
+def reported_waiting(ctx, n, sender):
+    waiting(ctx, n, report(sender=sender))
+
+
+@given(parsers.parse("calls file {n:d} is waiting with a report of {calls:d} call and {drops:d} drops"))
+def counted_waiting(ctx, n, calls, drops):
+    waiting(ctx, n, report(calls=calls, drops=drops))
+
+
+@given(parsers.parse("calls file {n:d} is waiting with a report that is not one"))
+def unreported_waiting(ctx, n):
+    waiting(ctx, n, {"kind": "sender"})
+
+
+@given(parsers.parse('storage holds "{path}", with {what}'))
+def storage_holds(ctx, path, what):
+    ctx.buffer.files[path] = CONTENTS[what]()
+
+
+@given(parsers.parse('storage holds the batch record "{path}":'))
+def batch_record(ctx, path, docstring):
+    ctx.buffer.files[path] = json.dumps(json.loads(docstring)).encode()
+
+
+@given(parsers.parse('storage does not answer a "{method}"'))
+def storage_silent(ctx, method):
+    ctx.buffer.down_for.add(method)
+
+
+@when("storage answers again")
+def storage_answers(ctx):
+    ctx.buffer.down_for = set()
+
+
+@when(parsers.parse('"{path}" is gone from storage'))
+def gone(ctx, path):
+    del ctx.buffer.files[path]
+
+
+@given("BigQuery leaves its load jobs running")
+def jobs_running(ctx):
+    ctx.bigquery.answer = "running"
+
+
+@given("BigQuery is busy")
+def bigquery_busy(ctx):
+    ctx.bigquery.answer = "busy"
+
+
+@given("BigQuery's next calls job fails in a way that may pass")
+def calls_job_fails(ctx):
+    ctx.bigquery.fail_jobs = 1
+
+
+@given("BigQuery's next report job fails in a way that may pass")
+def report_job_fails(ctx):
+    ctx.bigquery.fail_status = 1
+
+
+@given("BigQuery rejects the reports")
+def reports_rejected(ctx):
+    ctx.bigquery.refuse_status = True
+
+
+@given("the day's load jobs of the calls are used")
+def calls_jobs_used(ctx):
+    for _ in range(JOBS_PER_TABLE_PER_DAY):
+        ctx.scanner.jobs.spend(ctx.buffers[0])
+
+
+@given("the day's load jobs of the status table are used")
+def status_jobs_used(ctx):
+    for _ in range(JOBS_PER_TABLE_PER_DAY):
+        ctx.scanner.jobs.spend(ctx.buffers[0], STATUS_TABLE)
+
+
+@given("call records can't be encoded")
+def no_encoding(monkeypatch):
+    monkeypatch.setattr("integrations.ingest.inbox.encode",
+                        lambda rows, status=None: (_ for _ in ()).throw(ValueError("no")))
+
+
+@given(parsers.parse('the work on "{dataset}" fails with "{message}"'))
+def work_fails(ctx, dataset, message):
+    real = ctx.scanner._work
+
+    def work(name, status, problems):
+        if name == dataset:
+            raise RuntimeError(message)
+        real(name, status, problems)
+
+    ctx.scanner._work = work
+
+
+# --- the actions ------------------------------------------------------------------------------------------------
+
+def passes(ctx, keys=None):
+    ctx.own_before = sorted(n for n in ctx.buffer.files if "-ingest-" in n)
+    ctx.attempt(lambda: (ctx.scanner.tick(keys or ctx.buffers), seen(ctx))[1])
+
+
+@when("the scanner passes")
+def scanner_passes(ctx):
+    passes(ctx)
+
+
+@when("the scanner passes again")
+def scanner_passes_again(ctx):
+    passes(ctx)
+
+
+@when(parsers.parse('the scanner passes over "{keys}"'))
+def scanner_passes_over(ctx, keys):
+    passes(ctx, [k.strip() for k in keys.split(",")])
+
+
+@when("I ask whether the calls may load")
+def may_load(ctx):
+    ctx.attempt(lambda: ctx.scanner.jobs.may_load(ctx.buffers[0]))
+
+
+@when(parsers.parse("the scanner chooses a batch from {n:d} files of {size:d} byte"))
+def choose_many(ctx, n, size):
+    scanner = Scanner(None, None, None, None)
+    ctx.attempt(lambda: scanner._choose([Waiting(f"f{i}", size, 0.0) for i in range(n)]))
+
+
+@when("the scanner chooses a batch from:")
+def choose_from(ctx, datatable):
+    scanner = Scanner(None, None, None, None)
+    ctx.attempt(lambda: scanner._choose([Waiting(name, int(size), 0.0) for name, size in datatable[1:]]))
+
+
+@when(parsers.parse('the inbox writes "{name}" for "{dataset}"'))
+def inbox_writes(ctx, name, dataset):
+    ctx.attempt(lambda: Inbox(providers(ctx), lambda: "pod-token", BASE).put(dataset, name, AVRO))
+
+
+def kinds_by_table(found):
+    tenants, kinds = found
+    return {"tenants": tenants, "kinds": {key: kind.table for key, kind in kinds.items()}}
+
+
+@when(parsers.re(r'(?P<variable>INGEST_[A-Z_]+) is "(?P<text>.*)"'))
+def variable_is(ctx, variable, text):
+    ctx.attempt(lambda: kinds_by_table(VARIABLES[variable](text)))
+
+
+@when("the ingest buffers are read from:")
+def buffers_read(ctx, datatable):
+    given_ = dict(datatable)
+    ctx.attempt(lambda: kinds_by_table(named_buffers(
+        given_.get("INGEST_SIGNALS", ""), given_.get("INGEST_NEED_STATES", ""),
+        given_.get("INGEST_PUBRULES_CHECKS", ""), given_.get("INGEST_BUFFERS", ""))))
+
+
+@when(parsers.parse("INGEST_BUFFERS names the ci_jobs buffer of platform twice"))
+def buffers_twice(ctx):
+    given_ = [{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
+              {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]
+    ctx.attempt(lambda: kinds_by_table(buffers(json.dumps(given_ + given_[:1]))))
+
+
+@when(parsers.parse("{what} are written twice and read back"))
+def written_twice(ctx, what):
+    write, read, rows = ROWS[what]
+    ctx.attempt(lambda: {"the same bytes": write(rows()) == write([dict(r) for r in rows()]),
+                         "read back unchanged": read(write(rows())) == rows()})
+
+
+@when(parsers.parse('the scan runs over "{keys}" until its second sleep, at the moment {moment:g}'))
+def scan_runs(ctx, keys, moment):
     events: list[str] = []
+    ticked = [0.0]
 
     class Stop(Exception):
         pass
 
     class Ticking:
-        def tick(self, buffers):
-            events.append(f"tick {','.join(buffers)}")
+        def tick(self, buffers_):
+            events.append(f"tick {','.join(buffers_)}")
 
     def sleep(seconds):
         events.append(f"sleep {seconds}")
         if events.count(f"sleep {seconds}") == 2:
             raise Stop
 
-    ticked = [0.0]
-    with pytest.raises(Stop):
-        scan(Ticking(), ["a", "b"], ticked, sleep=sleep, clock=lambda: 42.0)
-    assert events == ["tick a,b", "sleep 120", "tick a,b", "sleep 120"]
-    assert ticked == [42.0]
+    def run():
+        try:
+            scan(Ticking(), keys.split(","), ticked, sleep=sleep, clock=lambda: moment)
+        except Stop:
+            return {"events": events, "ticked": ticked}
+        raise AssertionError("the scan stopped by itself")
+
+    ctx.attempt(run)
 
 
-@then("ci jobs and cluster usage share a tenant and load into their own tables")
-def ci_jobs_and_cluster_usage_share_a_tenant_and_load_into_their_own_tables():
-    from integrations.ci_usage.jobs import row
+# --- checks pubtest has no step for ----------------------------------------------------------------------------
 
-    buffer, bigquery = FakeBuffer(), PickyBigQuery()
-    caller = Caller("integrations", "ingest", sink=MemorySink(), transport=bigquery, sleep=lambda _: None)
-    statuses: list[dict] = []
-    clock = lambda: 1_800_000_000.0  # noqa: E731
-    tenants, kinds = named_buffers("", "", '{"tenant": "pubrules-checks", "dataset": "platform"}', json.dumps([
-        {"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
-        {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]))
-    scanner = Scanner(Inbox(buffer, lambda: "pod-token", BASE, tenants),
-                      BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
-                      JobBudget(clock), statuses.append, clock, kinds=kinds)
-    moment = datetime(2027, 1, 15, 2, 41, tzinfo=timezone.utc)
-    job = {"id": 1, "run_id": 2, "name": "test", "created_at": "2027-01-15T02:30:00Z",
-           "started_at": "2027-01-15T02:35:00Z", "completed_at": "2027-01-15T02:40:00Z", "runner_name": "r"}
-    buffer.files["inbox/ci-jobs/2027-01-15/024100-ci-jobs-1.avro"] = encode_ci_jobs([row("o/r", {"event": "push"}, job, moment)])
-    buffer.files["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"] = encode_cluster_usage(
-        [{"observed_at": moment, "kind": "node", "node": "n", "cpu_millicores": 400}])
-    # A batch of the other Kind's, left by a pod stopped partway, is not this one's to resume.
-    buffer.files["batches/cluster_usage-left.json"] = json.dumps(
-        {"files": ["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"], "attempt": 0, "status_attempt": 0,
-         "status_done": False}).encode()
-    scanner.tick(["platform.ci_jobs"])
-    assert bigquery.tables == ["ci_jobs"] and bigquery.datasets == ["platform"]
-    assert [r["wait_seconds"] for r in bigquery.ci_job_rows] == [300]
-    assert buffer.inbox() == ["inbox/cluster-usage/2027-01-15/024000-usage-1.avro"]
-    assert statuses[0]["dataset"] == "platform" and statuses[0]["table"] == "ci_jobs"
-    scanner.tick(["platform.cluster_usage", "platform"])
-    assert bigquery.tables == ["ci_jobs", "cluster_usage"] and [r["cpu_millicores"] for r in bigquery.cluster_usage_rows] == [400]
-    assert not buffer.inbox() and not buffer.under("batches/")
-    assert {(s["dataset"], s["table"]) for s in statuses} == {
-        ("platform", "ci_jobs"), ("platform", "cluster_usage"), ("platform", "pubrules_checks")}
+@then(parsers.re(r'the result\'s "(?P<key>[^"]+)" includes "(?P<text>[^"]*)"'))
+def result_key_includes(ctx, key, text):
+    assert ctx.refused is None, f"it was refused: {ctx.refused.message!r}"
+    got = dig(ctx.result, key)
+    assert got is not None and text in got, f"the result's {key} is {show(got)}, which does not include {text!r}"
 
 
-@then("INGEST_BUFFERS names more buffers beside the three single variables")
-def ingest_buffers_names_more_buffers_beside_the_three_single_variables():
-    given = [{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"},
-             {"tenant": "ci-usage", "dataset": "platform", "table": "cluster_usage"}]
-    tenants, kinds = named_buffers('{"tenant": "signals", "dataset": "observability"}',
-                                   '{"tenant": "need-states", "dataset": "convergence"}',
-                                   '{"tenant": "pubrules-checks", "dataset": "platform"}', json.dumps(given))
-    assert tenants == {"observability": "signals", "convergence": "need-states", "platform": "pubrules-checks",
-                       "platform.ci_jobs": "ci-usage", "platform.cluster_usage": "ci-usage"}
-    assert kinds["platform.ci_jobs"] == CI_JOBS and kinds["platform.cluster_usage"] == CLUSTER_USAGE
-    assert kinds["platform"] == PUBRULES_CHECKS
-    assert buffers("") == ({}, {})
-    for bad, says in (('{"tenant": "x"}', "INGEST_BUFFERS is"), ('[{"tenant": "x", "dataset": "d"}]', "INGEST_BUFFERS is"),
-                      ('[{"tenant": "x", "dataset": "d", "table": "calls"}]', "names table calls"),
-                      ('[{"tenant": "x", "dataset": "a.b", "table": "ci_jobs"}]', "can't hold a dot"),
-                      (json.dumps(given + given[:1]), "names platform.ci_jobs twice")):
-        with pytest.raises(ValueError, match=says):
-            buffers(bad)
-    with pytest.raises(ValueError, match="INGEST_PUBRULES_CHECKS and INGEST_BUFFERS both load platform.pubrules_checks"):
-        named_buffers("", "", '{"tenant": "pubrules-checks", "dataset": "platform"}',
-                      '[{"tenant": "p", "dataset": "platform", "table": "pubrules_checks"}]')
+@then(parsers.parse('the refusal is a "{name}"'))
+def refusal_is_a(ctx, name):
+    ctx.refusal_read = True
+    assert ctx.refused is not None, "it was not refused"
+    kinds = [k.__name__ for k in type(ctx.refused.error).__mro__]
+    assert name in kinds, f"the refusal is a {type(ctx.refused.error).__name__}"
