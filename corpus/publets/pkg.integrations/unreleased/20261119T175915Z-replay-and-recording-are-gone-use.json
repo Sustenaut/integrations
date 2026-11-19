@@ -1,4 +1,0 @@
-{
-  "category": "removed",
-  "change": "Replay and Recording are gone: use integrations.transports' Cassette and Recorder (one import to change); Cassette still reads the old {\"responses\": …} files"
-}

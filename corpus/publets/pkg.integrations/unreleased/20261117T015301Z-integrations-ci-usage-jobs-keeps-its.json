@@ -1,4 +1,0 @@
-{
-  "category": "fixed",
-  "change": "integrations ci-usage jobs keeps its state (the job ids written) to the look back on every save, so it stays well under storage's 1 MiB for a file: the 90-day backfill's state outgrew it and storage refused the save (413). Jobs a pass writes are also kept in memory for that pass, so a run two days' queries both list is written once"
-}

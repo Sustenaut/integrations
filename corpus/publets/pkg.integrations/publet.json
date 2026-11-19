@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.15.1 is released as v0.15.1 from commit d15c1a33a496ede1db136e2bf05d140dd154ff15.",
+      "content": "integrations 0.16.0 is released as v0.16.0 from commit 8beb1d984eff998d6790da72de6cafd27d4c506e.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.15.1",
+            "0.16.0",
             "",
             "",
-            "v0.15.1",
-            "d15c1a33a496ede1db136e2bf05d140dd154ff15"
+            "v0.16.0",
+            "8beb1d984eff998d6790da72de6cafd27d4c506e"
           ]
         ]
       },
-      "scope": "the published release v0.15.1 of integrations",
+      "scope": "the published release v0.16.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "d15c1a33a496ede1db136e2bf05d140dd154ff15"
+          "revision": "8beb1d984eff998d6790da72de6cafd27d4c506e"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.15.1 was released on 2026-11-16 from commit d15c1a33a496ede1db136e2bf05d140dd154ff15 with these changes.",
+      "content": "integrations 0.16.0 was released on 2026-11-19 from commit 8beb1d984eff998d6790da72de6cafd27d4c506e with these changes.",
       "data": {
         "columns": [
           {
@@ -58,23 +58,47 @@
         "rows": [
           [
             "fixed",
-            "integrations ci-usage jobs: a save storage refuses because another pass moved the written head (412: a backfill beside the ten-minute CronJob) reads that pass's state back, merges the jobs both wrote, and tries again, five times in all; the 90-day backfill stopped on the first such refusal"
+            "integrations ci-usage jobs keeps its state (the job ids written) to the look back on every save, so it stays well under storage's 1 MiB for a file: the 90-day backfill's state outgrew it and storage refused the save (413). Jobs a pass writes are also kept in memory for that pass, so a run two days' queries both list is written once"
+          ],
+          [
+            "internal",
+            "pubkit is now pubrules: the repository runs on pubrules 0.43.0 (pubrules.json, ./pubrules, the managed workflows and test pins)"
+          ],
+          [
+            "changed",
+            "The platform's nightly pubrules checks move to their new names: INGEST_PUBRULES_CHECKS (was INGEST_PUBKIT_CHECKS) names the pubrules-checks tenant, whose files load into platform.pubrules_checks (was pubkit_checks)"
+          ],
+          [
+            "internal",
+            "The test suite's scenarios, Python and JavaScript, are Given/When/Then on pubtest's steps"
+          ],
+          [
+            "changed",
+            "A Caller given no transport (in JS, no fetch) now calls through the current transport, the network unless INTEGRATIONS_MODE or a test harness says otherwise; and a mode other than live without PUBTEST_RUN makes every call refuse to start"
+          ],
+          [
+            "added",
+            "Record and replay: integrations.transports (and transports.js) with Cassette, Recorder, Faulty, current_transport() and use(), the integrations.cassette/1 format with its baseline and promote(), a plugin's record block and plugins/_github.json, Caller.opener and caller.fetch, and the opt-in integrations.testing pytest plugin"
+          ],
+          [
+            "removed",
+            "Replay and Recording are gone: use integrations.transports' Cassette and Recorder (one import to change); Cassette still reads the old {\"responses\": …} files"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.15.1 of integrations",
+      "scope": "the published release v0.16.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "d15c1a33a496ede1db136e2bf05d140dd154ff15"
+          "revision": "8beb1d984eff998d6790da72de6cafd27d4c506e"
         }
       ]
     }
   },
-  "created": "2026-11-16T00:00:00Z",
+  "created": "2026-11-19T00:00:00Z",
   "sections": [
     {
       "heading": "Identity",
