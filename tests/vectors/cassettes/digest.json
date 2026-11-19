@@ -1,0 +1,123 @@
+{
+  "description": "A request body over 64 KiB is written as its digest and matched by it",
+  "scenario": "vectors: digest",
+  "record": [
+    {
+      "status": 201,
+      "body": {
+        "json": {
+          "name": "a.txt"
+        }
+      }
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.txt",
+        "body": {
+          "repeat": "ab",
+          "times": 40000
+        }
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.txt",
+        "body": {
+          "repeat": "ba",
+          "times": 40000
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.txt",
+        "body": {
+          "repeat": "ab",
+          "times": 40000
+        }
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "name": "a.txt"
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: digest",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.repo-ops",
+                "operation": "call",
+                "request": {
+                  "method": "POST",
+                  "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.txt",
+                  "headers": {},
+                  "body": {
+                    "sha256": "443d63bee2b647505cfac35ec4d5eee1b6703ad8634fd919f287c7a2bfed25f3",
+                    "length": 80000
+                  }
+                },
+                "response": {
+                  "status": 201,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "name": "a.txt"
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "body: recorded 80000 bytes, sha256 443d63bee2b6, sent 80000 bytes, sha256",
+          "record it: pubtest record \"vectors: digest\""
+        ]
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "name": "a.txt"
+        }
+      }
+    ]
+  }
+}

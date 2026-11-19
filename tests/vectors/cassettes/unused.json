@@ -1,0 +1,94 @@
+{
+  "description": "A recorded call never made is listed, and closing the cassette fails on it",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: unused",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {}
+            }
+          },
+          "elapsed_ms": 40
+        },
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": []
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "unused": true
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {}
+      },
+      {
+        "unused": [
+          "github.board-read read GET https://api.github.com/repos/o/r/pulls"
+        ]
+      },
+      {
+        "raises": "UnusedCalls",
+        "mentions": [
+          "1 recorded call in vectors: unused never made:",
+          "  github.board-read read GET https://api.github.com/repos/o/r/pulls",
+          "record it: pubtest record \"vectors: unused\""
+        ]
+      }
+    ]
+  }
+}

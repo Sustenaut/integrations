@@ -1,0 +1,391 @@
+{
+  "description": "Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches",
+  "scenario": "vectors: volatile",
+  "record": [
+    {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8",
+        "ETag": "W/\"e1\"",
+        "Date": "Thu, 19 Nov 2026 09:00:00 GMT",
+        "X-GitHub-Request-Id": "AB:CD"
+      },
+      "body": {
+        "json": {
+          "ref": "refs/heads/main",
+          "node_id": "REF_kwDOA",
+          "object": {
+            "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+            "type": "commit"
+          }
+        }
+      },
+      "elapsed_ms": 40
+    },
+    {
+      "status": 201,
+      "headers": {
+        "Location": "https://api.github.com/repos/o/r/git/commits/e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+      },
+      "body": {
+        "json": {
+          "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "created_at": "2026-11-19T09:00:01Z",
+          "id": 123456789,
+          "parents": [
+            {
+              "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            }
+          ],
+          "tree": {
+            "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          }
+        }
+      },
+      "elapsed_ms": 55
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "object": {
+            "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+          }
+        }
+      },
+      "elapsed_ms": 30
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/ref/heads/main"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/commits",
+        "body": {
+          "json": {
+            "message": "m",
+            "parents": [
+              "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            ],
+            "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "PATCH",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/main",
+        "body": {
+          "json": {
+            "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+          }
+        }
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/ref/heads/main"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/commits",
+        "body": {
+          "json": {
+            "message": "m",
+            "parents": [
+              "{{5.json.object.sha}}"
+            ],
+            "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "PATCH",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/main",
+        "body": {
+          "json": {
+            "sha": "{{6.json.sha}}"
+          }
+        }
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "absent": [
+    "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+    "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "REF_kwDOA",
+    "AB:CD",
+    "2026-11-19T09:00:01Z",
+    "123456789"
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"e1\"",
+          "date": "Thu, 19 Nov 2026 09:00:00 GMT",
+          "x-github-request-id": "AB:CD"
+        },
+        "json": {
+          "ref": "refs/heads/main",
+          "node_id": "REF_kwDOA",
+          "object": {
+            "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+            "type": "commit"
+          }
+        }
+      },
+      {
+        "status": 201,
+        "headers": {
+          "location": "https://api.github.com/repos/o/r/git/commits/e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        },
+        "json": {
+          "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "created_at": "2026-11-19T09:00:01Z",
+          "id": 123456789,
+          "parents": [
+            {
+              "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            }
+          ],
+          "tree": {
+            "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          }
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+          }
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: volatile",
+          "current": {
+            "volatile": {
+              "⟦integrations:header:1⟧": {
+                "kind": "header",
+                "first": "calls.0.response.headers.ETag"
+              },
+              "⟦integrations:text:1⟧": {
+                "kind": "text",
+                "first": "calls.0.response.body.node_id"
+              },
+              "⟦integrations:sha:1⟧": {
+                "kind": "sha",
+                "first": "calls.0.response.body.object.sha"
+              },
+              "⟦integrations:sha:2⟧": {
+                "kind": "sha",
+                "first": "calls.1.request.body.tree"
+              },
+              "⟦integrations:sha:3⟧": {
+                "kind": "sha",
+                "first": "calls.1.response.headers.Location"
+              },
+              "⟦integrations:date:1⟧": {
+                "kind": "date",
+                "first": "calls.1.response.body.created_at"
+              },
+              "⟦integrations:id:1⟧": {
+                "kind": "id",
+                "first": "calls.1.response.body.id"
+              }
+            },
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/git/ref/heads/main",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "ETag": "⟦integrations:header:1⟧"
+                  },
+                  "body": {
+                    "json": {
+                      "ref": "refs/heads/main",
+                      "node_id": "⟦integrations:text:1⟧",
+                      "object": {
+                        "sha": "⟦integrations:sha:1⟧",
+                        "type": "commit"
+                      }
+                    }
+                  }
+                },
+                "elapsed_ms": 40
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "open-pr",
+                "request": {
+                  "method": "POST",
+                  "url": "https://api.github.com/repos/o/r/git/commits",
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "message": "m",
+                      "parents": [
+                        "⟦integrations:sha:1⟧"
+                      ],
+                      "tree": "⟦integrations:sha:2⟧"
+                    }
+                  }
+                },
+                "response": {
+                  "status": 201,
+                  "headers": {
+                    "Location": "https://api.github.com/repos/o/r/git/commits/⟦integrations:sha:3⟧"
+                  },
+                  "body": {
+                    "json": {
+                      "sha": "⟦integrations:sha:3⟧",
+                      "created_at": "⟦integrations:date:1⟧",
+                      "id": "⟦integrations:id:1⟧",
+                      "parents": [
+                        {
+                          "sha": "⟦integrations:sha:1⟧"
+                        }
+                      ],
+                      "tree": {
+                        "sha": "⟦integrations:sha:2⟧"
+                      }
+                    }
+                  }
+                },
+                "elapsed_ms": 55
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "open-pr",
+                "request": {
+                  "method": "PATCH",
+                  "url": "https://api.github.com/repos/o/r/git/refs/heads/main",
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "sha": "⟦integrations:sha:3⟧"
+                    }
+                  }
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "object": {
+                        "sha": "⟦integrations:sha:3⟧"
+                      }
+                    }
+                  }
+                },
+                "elapsed_ms": 30
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "header-21045ec16f88"
+        },
+        "json": {
+          "ref": "refs/heads/main",
+          "node_id": "text-d8851decac32",
+          "object": {
+            "sha": "09dae5a91514e437af04471fdc2c04da5e3ee302",
+            "type": "commit"
+          }
+        }
+      },
+      {
+        "status": 201,
+        "headers": {
+          "location": "https://api.github.com/repos/o/r/git/commits/4682ab3c75c059cef0257a8796aaf375c73ff579"
+        },
+        "json": {
+          "sha": "4682ab3c75c059cef0257a8796aaf375c73ff579",
+          "created_at": "2000-01-02T02:37:06Z",
+          "id": 7000001319,
+          "parents": [
+            {
+              "sha": "09dae5a91514e437af04471fdc2c04da5e3ee302"
+            }
+          ],
+          "tree": {
+            "sha": "c382a8fa741124531023e643c69cb41a655f3ab9"
+          }
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "4682ab3c75c059cef0257a8796aaf375c73ff579"
+          }
+        }
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

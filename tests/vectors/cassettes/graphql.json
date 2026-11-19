@@ -1,0 +1,110 @@
+{
+  "description": "A GraphQL request matches by its operation's name and variables, however its query is laid out",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: graphql",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {
+        "⟦integrations:text:1⟧": {
+          "kind": "text",
+          "first": "calls.0.response.body.data.organization.id"
+        }
+      },
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "POST",
+            "url": "https://api.github.com/graphql",
+            "headers": {},
+            "body": {
+              "json": {
+                "query": "query Board($owner: String!) { organization(login: $owner) { id } }",
+                "variables": {
+                  "owner": "o"
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "data": {
+                  "organization": {
+                    "id": "⟦integrations:text:1⟧"
+                  }
+                }
+              }
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "POST",
+        "url": "https://api.github.com/graphql",
+        "body": {
+          "json": {
+            "variables": {
+              "owner": "p"
+            },
+            "query": "query Board($owner: String!) { organization(login: $owner) { id } }"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "POST",
+        "url": "https://api.github.com/graphql",
+        "body": {
+          "json": {
+            "variables": {
+              "owner": "o"
+            },
+            "query": "query Board($owner: String!) {\n  organization(login: $owner) {\n    id\n  }\n}"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "body $.variables.owner: recorded \"o\", sent \"p\""
+        ]
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "data": {
+            "organization": {
+              "id": "text-d8851decac32"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

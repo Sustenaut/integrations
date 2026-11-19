@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "A Caller given no transport (in JS, no fetch) now calls through the current transport, the network unless INTEGRATIONS_MODE or a test harness says otherwise; and a mode other than live without PUBTEST_RUN makes every call refuse to start"
+}

@@ -30,6 +30,11 @@ Repository = "https://github.com/Sustenaut/integrations"
 [project.scripts]
 integrations = "integrations.cli:main"
 
+# The record/replay test harness, for a suite that sets integrations_testing = true
+# (integrations.testing): inert in every other.
+[project.entry-points.pytest11]
+"integrations.testing" = "integrations.testing.plugin"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

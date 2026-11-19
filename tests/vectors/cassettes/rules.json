@@ -1,0 +1,97 @@
+{
+  "description": "A plugin's record rules, its extends merged over the defaults; a plugin with none gets the defaults",
+  "steps": [
+    {
+      "rules": "github.edit-pr"
+    },
+    {
+      "rules": "slack.post"
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "rules": {
+          "keep_headers": [
+            "Content-Type",
+            "ETag",
+            "Location",
+            "Link",
+            "Retry-After",
+            "X-RateLimit-Remaining"
+          ],
+          "volatile": {
+            "headers": [
+              "Date",
+              "ETag",
+              "Last-Modified",
+              "X-GitHub-Request-Id",
+              "X-RateLimit-Reset"
+            ],
+            "json": [
+              "$..created_at",
+              "$..updated_at",
+              "$..pushed_at",
+              "$..closed_at",
+              "$..merged_at",
+              "$..expires_at",
+              "$..node_id",
+              "$..id"
+            ],
+            "values": {
+              "sha": "\\b[0-9a-f]{40}\\b"
+            }
+          },
+          "secret": {
+            "headers": [
+              "Authorization",
+              "Proxy-Authorization",
+              "Cookie",
+              "Set-Cookie"
+            ],
+            "json": [
+              "$.token",
+              "$..private_key",
+              "$..client_secret"
+            ],
+            "query": [
+              "access_token"
+            ]
+          },
+          "match": {
+            "url": "scheme+host+path+sorted-query",
+            "body": "json",
+            "graphql": "query-name+variables"
+          },
+          "customers": "github.test"
+        }
+      },
+      {
+        "rules": {
+          "keep_headers": [],
+          "volatile": {
+            "headers": [],
+            "json": [],
+            "values": {}
+          },
+          "secret": {
+            "headers": [
+              "Authorization",
+              "Proxy-Authorization",
+              "Cookie",
+              "Set-Cookie"
+            ],
+            "json": [],
+            "query": []
+          },
+          "match": {
+            "url": "scheme+host+path+sorted-query",
+            "body": "json",
+            "graphql": null
+          },
+          "customers": null
+        }
+      }
+    ]
+  }
+}

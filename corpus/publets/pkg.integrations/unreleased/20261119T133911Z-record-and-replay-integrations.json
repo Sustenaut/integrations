@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "Record and replay: integrations.transports (and transports.js) with Cassette, Recorder, Faulty, current_transport() and use(), the integrations.cassette/1 format with its baseline and promote(), a plugin's record block and plugins/_github.json, Caller.opener and caller.fetch, and the opt-in integrations.testing pytest plugin"
+}

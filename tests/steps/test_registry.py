@@ -19,7 +19,8 @@ from pytest_bdd import given as a_given, parsers, scenarios, when
 scenarios("registry.feature")
 
 HERE = Path(__file__).resolve().parent.parent
-PLUGIN_FILES = sorted(registry.PLUGINS.glob("*.json"))
+PLUGIN_FILES = registry.plugin_files()
+SHARED_FILES = sorted(registry.PLUGINS.glob("_*.json"))
 PLUGIN_SCHEMA = registry.load(registry.SCHEMAS / "plugin.schema.json")
 CONSUMER_SCHEMA = registry.load(registry.SCHEMAS / "consumer.schema.json")
 KNOWN = {"linear.sync", "inwx.registrar"}
@@ -50,6 +51,29 @@ def compiles(path):
 @when("I hold every plugin to the plugin schema")
 def every_plugin_schema(ctx):
     ctx.attempt(lambda: [f for path in PLUGIN_FILES for f in failures(path, meets_schema)])
+
+
+@when("I hold every shared record file to its schema")
+def every_shared_schema(ctx):
+    shared = {"$defs": PLUGIN_SCHEMA["$defs"], "$ref": "#/$defs/shared"}
+    ctx.attempt(lambda: [f for path in SHARED_FILES for f in failures(path, lambda p: jsonschema.validate(
+        registry.load(p), shared))] + ([] if SHARED_FILES else ["no shared record files"]))
+
+
+@when("I list the plugins")
+def list_plugins(ctx):
+    ctx.attempt(lambda: sorted(registry.plugins()))
+
+
+@a_given(parsers.parse('the plugin "{plugin}" with "extends" set to "{name}" at its top'))
+def plugin_extending_at_top(ctx, plugin, name):
+    ctx.plugin = registry.load(registry.PLUGINS / f"{plugin}.json") | {"extends": name}
+
+
+@when(parsers.parse('I read the record rules of "{plugin}" from the plugins in "{directory}"'))
+def record_rules_from(ctx, monkeypatch, plugin, directory):
+    monkeypatch.setattr(registry, "PLUGINS", ctx.directory / directory)
+    ctx.attempt(lambda: registry.record(plugin))
 
 
 @when("I compile every plugin's signatures")

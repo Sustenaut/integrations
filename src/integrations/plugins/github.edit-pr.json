@@ -65,5 +65,8 @@
         "default": "main"
       }
     }
+  },
+  "record": {
+    "extends": "_github"
   }
 }

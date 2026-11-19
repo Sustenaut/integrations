@@ -4,7 +4,9 @@ writes one record of it.
 A record says who called what, how long it took and how it ended. It never holds
 a body, a full URL or a token, so a sink can keep it anywhere. `Network` is the
 only thing that reaches the network; a client takes a `Caller` and nothing else,
-so its tests run on a `Replay` or a client's fake.
+so its tests run on a cassette (`integrations.transports`) or a client's fake. A
+`Caller` given no transport calls through `transports.current_transport()`: the
+network, unless a test harness says otherwise.
 
 The operation's class sets its timeout and how often it is tried, so a call a
 person is waiting on is not retried behind their back. A retry is only for a call
@@ -24,7 +26,7 @@ import urllib.error
 import urllib.request
 import uuid
 from copy import copy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -57,6 +59,10 @@ class Request:
     body: bytes | None = None
     # A call that is safe to repeat though its method does not say so.
     repeatable: bool = False
+    # The call's plugin and operation, which `Caller.call` sets, for a transport that
+    # answers by them (a Cassette, Faulty).
+    plugin: str = ""
+    operation: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,8 @@ class Response:
     error: str | None = None
     etag: str | None = None
     retry_after: str | None = None
+    # Every header of the answer, for a Recorder to keep the ones its rules name.
+    headers: dict[str, str] = field(default_factory=dict, compare=False)
 
     @property
     def ok(self) -> bool:
@@ -113,11 +121,20 @@ class Network:
                                           headers={"User-Agent": f"integrations/{__version__}", **request.headers})
         try:
             with urllib.request.urlopen(outgoing, timeout=timeout) as answer:  # noqa: S310 - https only
-                return Response(answer.status, answer.read(), etag=answer.headers.get("ETag"))
+                return Response(answer.status, answer.read(), etag=answer.headers.get("ETag"),
+                                headers=_headers(answer.headers))
         except urllib.error.HTTPError as e:
-            return Response(e.code, e.read(), retry_after=e.headers.get("Retry-After") if e.headers else None)
+            return Response(e.code, e.read(), retry_after=e.headers.get("Retry-After") if e.headers else None,
+                            headers=_headers(e.headers))
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             return Response(None, error=f"no answer: {getattr(e, 'reason', e)}")
+
+
+def _headers(headers: Any) -> dict[str, str]:
+    try:
+        return {k: v for k, v in headers.items()} if headers else {}
+    except AttributeError:
+        return {}
 
 
 def recorded_key(request: Request) -> str:
@@ -127,7 +144,10 @@ def recorded_key(request: Request) -> str:
 class Replay:
     """Recorded responses, by method and URL; one not recorded has no answer.
     A list of responses answers in turn, for a call whose answer changes. An answer's
-    "headers" may give its ETag and Retry-After."""
+    "headers" may give its ETag and Retry-After.
+
+    Deprecated, for one release: use `integrations.transports.Cassette`, which reads
+    this format too."""
 
     def __init__(self, responses: dict[str, Any]):
         self.responses = responses
@@ -148,12 +168,16 @@ class Replay:
             return Response(None, error=found["error"])
         headers = found.get("headers", {})
         body = found["text"].encode("utf-8") if "text" in found else json.dumps(found.get("json")).encode("utf-8")
-        return Response(found["status"], body, etag=headers.get("ETag"), retry_after=headers.get("Retry-After"))
+        return Response(found["status"], body, etag=headers.get("ETag"), retry_after=headers.get("Retry-After"),
+                        headers=dict(headers))
 
 
 class Recording:
     """`inner`'s answers, kept for a replay file. A token travels in a header,
-    so it is never kept."""
+    so it is never kept.
+
+    Deprecated, for one release: use `integrations.transports.Recorder`, which keeps
+    requests, headers and repeats, and never writes a secret."""
 
     def __init__(self, inner: Transport):
         self.inner = inner
@@ -263,10 +287,23 @@ class Caller:
                  random: Callable[[], float] = random.random):
         self.repo, self.app = repo, app
         self.sink = sink or NullSink()
-        self.transport = transport or Network()
+        self._transport = transport
         self.modes = modes or {}
         self.clock, self.sleep, self.new_id, self.random = clock, sleep, new_id, random
         self.classes = {(p.id, o["name"]): o for p in registry.plugins().values() for o in p.operations}
+
+    @property
+    def transport(self) -> Transport:
+        """The transport it was given, else the current one (`transports.current_transport()`),
+        looked up at each call so a harness's `use()` reaches a caller made before it."""
+        if self._transport is not None:
+            return self._transport
+        from .transports import current_transport
+        return current_transport()
+
+    @transport.setter
+    def transport(self, transport: Transport | None) -> None:
+        self._transport = transport
 
     def for_repo(self, repo: str) -> Caller:
         """The same caller, on behalf of a project, so its records are that project's."""
@@ -286,11 +323,15 @@ class Caller:
         registered = self.classes.get((plugin, operation))
         if registered is None:
             raise ValueError(f"{plugin} {operation} is not a registered operation")
+        from .transports import check_mode
+        check_mode()
+        transport = self.transport
+        request = replace(request, plugin=plugin, operation=operation)
         policy = _policy(registered)
         tries = policy.tries if request.repeatable or request.method in IDEMPOTENT else 1
         started = self.clock()
         deadline = started + policy.timeout * tries
-        response = self.transport.send(request, policy.timeout)
+        response = transport.send(request, policy.timeout)
         retries = 0
         while retries + 1 < tries and self._worth_retrying(response):
             wait = self._wait(response, retries, policy.timeout)
@@ -299,7 +340,7 @@ class Caller:
                 break
             self.sleep(wait)
             retries += 1
-            response = self.transport.send(request, min(policy.timeout, left))
+            response = transport.send(request, min(policy.timeout, left))
         latency = int((self.clock() - started) * 1000)
         failed = response.status is None or response.status >= 500 or response.status == 429
         self._keep(CallRecord(
@@ -313,6 +354,23 @@ class Caller:
             raise Unavailable(plugin, operation, response.error or f"HTTP {response.status}",
                               response if response.status is not None else None)
         return response
+
+    def opener(self, plugin: str, operation: str, *, refused: Callable[[Response], bool] | None = None,
+               repeatable: bool = False) -> Callable[..., Response]:
+        """A function `open(method, url, headers=None, body=None) -> Response` for code
+        that takes one in place of making its own requests: each request it opens is
+        `call(plugin, operation, ...)`, with the policy, retries, record and transport
+        that come with it. `body` is bytes or text. A refusal comes back as its
+        Response; no answer raises `Unavailable`."""
+        if (plugin, operation) not in self.classes:
+            raise ValueError(f"{plugin} {operation} is not a registered operation")
+
+        def open_(method: str, url: str, headers: dict[str, str] | None = None,
+                  body: bytes | str | None = None) -> Response:
+            data = body.encode("utf-8") if isinstance(body, str) else body
+            return self.call(plugin, operation, Request(method, url, dict(headers or {}), data, repeatable),
+                             refused=refused)
+        return open_
 
     def note(self, plugin: str, operation: str, *, request_id: str, latency_ms: int, status: int | None,
              outcome: str) -> None:

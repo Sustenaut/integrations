@@ -1,0 +1,78 @@
+{
+  "description": "The host is part of the match: api.github.com is not uploads.github.com",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: host",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.repo-ops",
+          "operation": "call",
+          "request": {
+            "method": "GET",
+            "url": "https://uploads.github.com/repos/o/r/releases/1/assets",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": [
+                {
+                  "name": "a.txt"
+                }
+              ]
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/releases/1/assets"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "GET",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets"
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "url: recorded https://uploads.github.com/repos/o/r/releases/1/assets, sent https://api.github.com/repos/o/r/releases/1/assets"
+        ]
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": [
+          {
+            "name": "a.txt"
+          }
+        ]
+      }
+    ]
+  }
+}

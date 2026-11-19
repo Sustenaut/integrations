@@ -4,6 +4,54 @@ Feature: The registry and the consumer format, held to their JSON schemas
     When I hold every plugin to the plugin schema
     Then the result is empty
 
+  Scenario: Every shared record file (plugins/_name.json) meets its part of the schema
+    When I hold every shared record file to its schema
+    Then the result is empty
+
+  Scenario: A shared record file is not a plugin
+    When I list the plugins
+    Then the result includes "github.edit-pr"
+    And the result does not include "_github"
+
+  Scenario: Only a record block extends shared rules
+    Given the plugin "github.edit-pr" with "extends" set to "_github" at its top
+    When I hold it to the plugin schema
+    Then it is refused, saying "Additional properties are not allowed ('extends' was unexpected)"
+
+  Scenario: A plugin's record rules are its own over what it extends, over the defaults
+    Given a scratch directory
+    And a file "plugins/_base.json" holding:
+      """
+      {"description": "shared", "record": {"keep_headers": ["ETag"], "secret": {"query": ["key"]}, "match": {"body": "text"}}}
+      """
+    And a file "plugins/x.y.json" holding:
+      """
+      {"record": {"extends": "_base", "keep_headers": ["Link", "ETag"], "secret": {"json": ["$.token"]}, "customers": "x.test"}}
+      """
+    When I read the record rules of "x.y" from the plugins in "plugins"
+    Then the result is:
+      """
+      {"keep_headers": ["ETag", "Link"],
+       "volatile": {"headers": [], "json": [], "values": {}},
+       "secret": {"headers": ["Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"], "json": ["$.token"], "query": ["key"]},
+       "match": {"url": "scheme+host+path+sorted-query", "body": "text", "graphql": null},
+       "customers": "x.test"}
+      """
+
+  Scenario: A record block extending nothing there is refused
+    Given a scratch directory
+    And a file "plugins/x.y.json" holding "{"record": {"extends": "_gone"}}"
+    When I read the record rules of "x.y" from the plugins in "plugins"
+    Then it is refused, saying "no plugin or shared record rules _gone"
+
+  Scenario: Shared record rules that extend themselves are refused
+    Given a scratch directory
+    And a file "plugins/_a.json" holding "{"record": {"extends": "_b"}}"
+    And a file "plugins/_b.json" holding "{"record": {"extends": "_a"}}"
+    And a file "plugins/x.y.json" holding "{"record": {"extends": "_a"}}"
+    When I read the record rules of "x.y" from the plugins in "plugins"
+    Then it is refused, saying "record rules extend themselves: x.y -> _a -> _b -> _a"
+
   Scenario: Every signature compiles
     When I compile every plugin's signatures
     Then the result is empty

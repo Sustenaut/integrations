@@ -1,0 +1,144 @@
+{
+  "description": "Real text holding the placeholders' prefix is written escaped, and replayed as it was",
+  "scenario": "vectors: escape",
+  "record": [
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "body": "a literal ⟦integrations:sha:1⟧ and ⟦integrations:escape⟧"
+        }
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "text": "plain ⟦integrations:x"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/contents/a.md"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/contents/b.txt"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/contents/a.md"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/contents/b.txt"
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "body": "a literal ⟦integrations:sha:1⟧ and ⟦integrations:escape⟧"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "text": "plain ⟦integrations:x"
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: escape",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/contents/a.md",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "body": "a literal ⟦integrations:escape⟧sha:1⟧ and ⟦integrations:escape⟧escape⟧"
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/contents/b.txt",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "text": "plain ⟦integrations:escape⟧x"
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "body": "a literal ⟦integrations:sha:1⟧ and ⟦integrations:escape⟧"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "text": "plain ⟦integrations:x"
+      }
+    ]
+  }
+}

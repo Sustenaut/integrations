@@ -9,6 +9,10 @@
 // and tries (classes.json) and each operation's class and route (plugins/*.json), so
 // both languages call the same way. CI fails when it differs from what they give.
 //
+// And transports.js: src/transports.js after each plugin's record block (plugins/*.json,
+// the shared _name.json files among them), which registry.record reads, so both languages
+// record and replay by the same rules.
+//
 //   npm run generate
 import { build } from "esbuild";
 import { createClient } from "@hey-api/openapi-ts";
@@ -119,8 +123,12 @@ const REGISTRY = "../../src/integrations";
 const classes = JSON.parse(await readFile(`${REGISTRY}/classes.json`, "utf8"));
 const policies = Object.fromEntries(Object.entries(classes).map(([id, c]) => [id, { timeout: c.timeout, tries: c.tries }]));
 const operations = {};
+const recordRules = {};
 for (const file of (await readdir(`${REGISTRY}/plugins`)).filter((f) => f.endsWith(".json")).sort()) {
   const plugin = JSON.parse(await readFile(`${REGISTRY}/plugins/${file}`, "utf8"));
+  // A file named _name.json is not a plugin: it holds record rules plugins extend.
+  if (plugin.record) recordRules[file.slice(0, -".json".length)] = plugin.record;
+  if (file.startsWith("_")) continue;
   operations[plugin.id] = Object.fromEntries(plugin.operations.map(({ name, ...o }) => [name, o]));
 }
 // One entry a line, so a change to the registry is a one-line change here.
@@ -137,6 +145,17 @@ await writeFile("caller.js", [
   `export const OPERATIONS = Object.freeze(${table(operations)});`,
   "",
   await readFile("src/caller.js", "utf8"),
+].join("\n"));
+
+await writeFile("transports.js", [
+  "// Generated from src/integrations/plugins/*.json and clients/js/src/transports.js by",
+  "// clients/js/generate.mjs: do not edit.",
+  "",
+  "// Each record block in the registry, by file: a plugin's, or a shared _name.json's that",
+  "// plugins extend. record(pluginId) merges them as registry.record does.",
+  `export const RECORD = Object.freeze(${table(recordRules)});`,
+  "",
+  await readFile("src/transports.js", "utf8"),
 ].join("\n"));
 
 // The storage service's routes, from its spec as vendored in openapi/storage.json at the

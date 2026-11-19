@@ -1,0 +1,111 @@
+{
+  "description": "The same request twice is answered by its recorded calls in order, each once",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: in order",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls/7",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "state": "open"
+              }
+            }
+          },
+          "elapsed_ms": 40
+        },
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls/7",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "state": "closed"
+              }
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls/7"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls/7"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls/7"
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "open"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "closed"
+        }
+      },
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "nearest: call 0, github.board-read read GET https://api.github.com/repos/o/r/pulls/7, already answered 1 time",
+          "record it: pubtest record \"vectors: in order\""
+        ]
+      }
+    ]
+  }
+}

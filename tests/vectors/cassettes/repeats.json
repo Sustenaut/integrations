@@ -1,0 +1,220 @@
+{
+  "description": "A request made again is kept again, in order, each with how long it took, and replayed in that order",
+  "scenario": "vectors: repeats",
+  "record": [
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "state": "pending"
+        }
+      },
+      "elapsed_ms": 120
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "state": "pending"
+        }
+      },
+      "elapsed_ms": 80
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "state": "success"
+        }
+      },
+      "elapsed_ms": 95
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/main/status"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "pending"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "pending"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "success"
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: repeats",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/commits/main/status",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "state": "pending"
+                    }
+                  }
+                },
+                "elapsed_ms": 120
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/commits/main/status",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "state": "pending"
+                    }
+                  }
+                },
+                "elapsed_ms": 80
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/commits/main/status",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "state": "success"
+                    }
+                  }
+                },
+                "elapsed_ms": 95
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "pending"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "pending"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "state": "success"
+        }
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

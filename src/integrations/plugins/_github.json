@@ -1,0 +1,54 @@
+{
+  "description": "GitHub's record rules, which every GitHub plugin that records extends: the headers worth keeping, what changes between two recordings of the same calls, what is never written, and how requests match",
+  "record": {
+    "keep_headers": [
+      "Content-Type",
+      "ETag",
+      "Location",
+      "Link",
+      "Retry-After",
+      "X-RateLimit-Remaining"
+    ],
+    "volatile": {
+      "headers": [
+        "Date",
+        "ETag",
+        "Last-Modified",
+        "X-GitHub-Request-Id",
+        "X-RateLimit-Reset"
+      ],
+      "json": [
+        "$..created_at",
+        "$..updated_at",
+        "$..pushed_at",
+        "$..closed_at",
+        "$..merged_at",
+        "$..expires_at",
+        "$..node_id",
+        "$..id"
+      ],
+      "values": {
+        "sha": "\\b[0-9a-f]{40}\\b"
+      }
+    },
+    "secret": {
+      "headers": [
+        "Authorization"
+      ],
+      "json": [
+        "$.token",
+        "$..private_key",
+        "$..client_secret"
+      ],
+      "query": [
+        "access_token"
+      ]
+    },
+    "match": {
+      "url": "scheme+host+path+sorted-query",
+      "body": "json",
+      "graphql": "query-name+variables"
+    },
+    "customers": "github.test"
+  }
+}

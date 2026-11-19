@@ -1,0 +1,949 @@
+"""Record and replay: the transports a test runs its calls on, and the one a
+process gets when it is given none.
+
+- `Cassette(path)` answers from a recording, `integrations.cassette/1` (or the
+  older `{"responses": ...}` files `Replay` reads), and raises `NoSnapshot` for a
+  call it has no recording of.
+- `Recorder(inner, path)` sends through `inner`, keeps every call, and `save()`
+  writes them as a cassette, normalised by each plugin's `record` rules
+  (`registry.record`): only the headers worth keeping, volatile values as
+  placeholders, secrets never.
+- `Faulty(inner, rules)` makes calls fail on purpose: no answer, a status, a slow
+  answer, a malformed body.
+- `current_transport()` is the transport a `Caller` given none uses: the one a
+  test harness installed with `use()`, else the one `INTEGRATIONS_MODE` names.
+
+The same in clients/js/src/transports.js, and the vectors in tests/vectors/cassettes/
+run on both.
+
+Placeholders. A value that changes between two recordings of the same calls (a
+sha, a date, an id, an ETag) is written `⟦integrations:KIND:N⟧`, the same
+placeholder wherever the same value is, and a different one for a different
+value. On replay each placeholder is answered as a stand-in of its kind, made
+from its name (a 40-hex sha, an ISO date, a numeric id, a ghs_ token), and a
+stand-in the code sends back is read as its placeholder again, so a sha one call
+answers and the next sends matches. Real text holding `⟦integrations:` is written
+`⟦integrations:escape⟧`, and read back as it was.
+"""
+
+from __future__ import annotations
+
+import atexit
+import base64
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+from . import __version__, registry
+from .calls import Network, Request, Response, Transport
+
+FORMAT = "integrations.cassette/1"
+# A request body over this many bytes is kept as its digest, and matched by it.
+DIGEST_OVER = 64 * 1024
+MODE = "INTEGRATIONS_MODE"
+CASSETTE = "INTEGRATIONS_CASSETTE"
+MARKER = "PUBTEST_RUN"
+MODES = ("live", "replay", "record")
+
+PREFIX = "⟦integrations:"
+ESCAPE = "⟦integrations:escape⟧"
+SECRET = "⟦integrations:secret⟧"
+PLACEHOLDER = re.compile(r"⟦integrations:(?:escape|secret|([a-z][a-z0-9-]*):(\d+|\?))⟧")
+# A known value is replaced where it is a whole value or a path segment from this
+# long, and inside other text from MIN_INSIDE, so a short one can't hit by chance.
+MIN_WHOLE = 4
+MIN_INSIDE = 8
+# A secret shorter than this is not looked for in what would be written.
+MIN_SECRET = 4
+
+URL = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#.*)?$")
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
+HTTP_DATE = re.compile(r"[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT")
+SHA = re.compile(r"[0-9a-f]{40}")
+TOKEN = re.compile(r"gh[opsur]_[A-Za-z0-9_]+")
+DIGITS = re.compile(r"[0-9]+")
+GRAPHQL_NAME = re.compile(r"^\s*(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)")
+STAND_IN_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+
+class NoSnapshot(LookupError):
+    """A call the cassette has no recording of. Its message says which, the
+    nearest recorded call and how they differ, and how to record it."""
+
+
+class UnusedCalls(NoSnapshot):
+    """Recorded calls the code never made: the code changed, or the cassette is stale."""
+
+
+class SecretInRecording(ValueError):
+    """A secret the recorder saw would be written: the recording is not saved."""
+
+
+class ModeError(RuntimeError):
+    """INTEGRATIONS_MODE asks for something this process may not do."""
+
+
+# --- values and placeholders --------------------------------------------------
+
+def kind_of(value: Any, default: str = "text") -> str | None:
+    """The kind of a volatile value, from its shape; None for one never replaced."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
+        return "id"
+    if isinstance(value, float):
+        return "number"
+    if not isinstance(value, str) or not value:
+        return None
+    for kind, shape in (("date", ISO_DATE), ("http-date", HTTP_DATE), ("sha", SHA), ("token", TOKEN),
+                        ("digits", DIGITS)):
+        if shape.fullmatch(value):
+            return kind
+    return default
+
+
+def stand_in(kind: str, n: int) -> Any:
+    """The value a placeholder is replayed as: made from its name alone, of its kind's
+    shape, and different for every name."""
+    seed = hashlib.sha256(f"integrations:{kind}:{n}".encode()).hexdigest()
+    number = 7_000_000_000 + n * 1000 + int(seed[:6], 16) % 1000
+    at = STAND_IN_EPOCH + timedelta(days=n, seconds=int(seed[:8], 16) % 86400)
+    if kind == "sha":
+        return seed[:40]
+    if kind in ("token", "secret"):
+        return f"ghs_{seed[:36]}"
+    if kind == "date":
+        return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if kind == "http-date":
+        return format_datetime(at, usegmt=True)
+    if kind == "id":
+        return number
+    if kind == "number":
+        return number + 0.5
+    if kind == "digits":
+        return str(number)
+    return f"{kind}-{seed[:12]}"
+
+
+def text_of(value: Any) -> str:
+    """A value as it reads inside text: a URL, a header, a string."""
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def _placeholder(kind: str, n: int | str) -> str:
+    return f"⟦integrations:{kind}:{n}⟧"
+
+
+def _pieces(text: str) -> list[tuple[bool, str]]:
+    """The text split into placeholders (True) and what lies between them."""
+    out, at = [], 0
+    for m in PLACEHOLDER.finditer(text):
+        if m.start() > at:
+            out.append((False, text[at:m.start()]))
+        out.append((True, m.group(0)))
+        at = m.end()
+    if at < len(text):
+        out.append((False, text[at:]))
+    return out
+
+
+def _sub_outside(text: str, pattern: re.Pattern, fn: Callable[[str], str]) -> str:
+    """`pattern` replaced by `fn(match)`, but never inside a placeholder."""
+    return "".join(p if held else pattern.sub(lambda m: fn(m.group(0)), p) for held, p in _pieces(text))
+
+
+def _escape(text: str) -> str:
+    return text.replace(PREFIX, ESCAPE)
+
+
+class _Map:
+    """Values to placeholders, for one cassette. The writer's assigns them to real
+    values as it meets them; the reader's knows each placeholder's stand-in and reads
+    a stand-in back as it, and any other volatile value as `⟦integrations:KIND:?⟧`."""
+
+    def __init__(self) -> None:
+        self.known: dict[str, str] = {}  # a value's text -> its placeholder
+        self._inside: re.Pattern | None = None
+
+    def known_text(self, text: str) -> str | None:
+        return self.known.get(text) if len(text) >= MIN_WHOLE else None
+
+    def inside(self) -> re.Pattern | None:
+        if self._inside is None:
+            long = sorted((k for k in self.known if len(k) >= MIN_INSIDE), key=lambda k: (-len(k), k))
+            self._inside = re.compile("|".join(re.escape(k) for k in long)) if long else re.compile(r"(?!)")
+        return self._inside
+
+    def _learnt(self) -> None:
+        self._inside = None
+
+
+class _Writer(_Map):
+    def __init__(self) -> None:
+        super().__init__()
+        self.by_value: dict[str, str] = {}
+        self.entries: dict[str, dict[str, str]] = {}
+        self.counts: dict[str, int] = {}
+        self.secrets: dict[str, str] = {}  # a secret value -> where it was seen
+
+    def volatile(self, value: Any, kind: str, where: str) -> str:
+        key = json.dumps(value)
+        if key not in self.by_value:
+            self.counts[kind] = self.counts.get(kind, 0) + 1
+            name = _placeholder(kind, self.counts[kind])
+            self.by_value[key] = name
+            self.entries[name] = {"kind": kind, "first": where}
+            if kind != "secret" and text_of(value) not in self.known:
+                self.known[text_of(value)] = name
+            self._learnt()
+        return self.by_value[key]
+
+    def secret(self, value: Any, side: str, where: str) -> str:
+        self.saw_secret(value, where)
+        if side == "request" or value is None:
+            return SECRET
+        return self.volatile(["secret", value], "secret", where)
+
+    def saw_secret(self, value: Any, where: str) -> None:
+        if isinstance(value, (dict, list)):
+            for v in value.values() if isinstance(value, dict) else value:
+                self.saw_secret(v, where)
+            return
+        if value is None or isinstance(value, bool):
+            return
+        text = text_of(value)
+        if len(text) >= MIN_SECRET:
+            self.secrets.setdefault(text, where)
+
+
+class _Reader(_Map):
+    def __init__(self, volatile: dict[str, dict]) -> None:
+        super().__init__()
+        self.values: dict[str, Any] = {}  # a placeholder -> its stand-in
+        for name, entry in volatile.items():
+            m = PLACEHOLDER.fullmatch(name)
+            if not m or not m.group(1) or m.group(2) == "?":
+                continue
+            value = stand_in(m.group(1), int(m.group(2)))
+            self.values[name] = value
+            self.known[text_of(value)] = name
+
+    def volatile(self, value: Any, kind: str, where: str) -> str:
+        return self.known.get(text_of(value)) or _placeholder(kind, "?")
+
+    def secret(self, value: Any, side: str, where: str) -> str:
+        return SECRET
+
+    def fill_text(self, text: str) -> str:
+        """Placeholders in recorded text as their stand-ins, the escape as it was."""
+        def one(m: re.Match) -> str:
+            if m.group(0) == ESCAPE:
+                return PREFIX
+            return text_of(self.stand_in(m.group(0)))
+        return PLACEHOLDER.sub(one, text)
+
+    def stand_in(self, name: str) -> Any:
+        if name in self.values:
+            return self.values[name]
+        m = PLACEHOLDER.fullmatch(name)
+        kind = m.group(1) if m and m.group(1) else "secret"
+        n = int(m.group(2)) if m and m.group(2) and m.group(2) != "?" else 0
+        return stand_in(kind, n)
+
+    def fill(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: self.fill(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self.fill(v) for v in value]
+        if isinstance(value, str):
+            if PLACEHOLDER.fullmatch(value) and value != ESCAPE:
+                return self.stand_in(value)
+            return self.fill_text(value)
+        return value
+
+
+# --- JSONPath-lite --------------------------------------------------------------
+
+def parse_path(text: str) -> list[tuple[str, str]]:
+    """`$.a.b`, `$..key`, `$.a[*].b`, `$.a.*` as steps: ("child", name),
+    ("any", name) for a name at any depth, ("index", "*")."""
+    steps, rest = [], text[1:] if text.startswith("$") else text
+    for m in re.finditer(r"\.\.([A-Za-z0-9_*-]+)|\.([A-Za-z0-9_*-]+)|\[\*\]", rest):
+        if m.group(1):
+            steps.append(("any", m.group(1)))
+        elif m.group(2):
+            steps.append(("child", m.group(2)))
+        else:
+            steps.append(("index", "*"))
+    return steps
+
+
+def path_matches(steps: list[tuple[str, str]], path: list) -> bool:
+    if not steps:
+        return not path
+    how, name = steps[0]
+    if how == "index":
+        return bool(path) and isinstance(path[0], int) and path_matches(steps[1:], path[1:])
+    if how == "child":
+        return bool(path) and (name == "*" or path[0] == name) and path_matches(steps[1:], path[1:])
+    return any((name == "*" or path[i] == name) and path_matches(steps[1:], path[i + 1:]) for i in range(len(path)))
+
+
+def _dotted(path: list) -> str:
+    return ".".join(str(p) for p in path)
+
+
+# --- normalising ----------------------------------------------------------------
+
+class _Normaliser:
+    """One plugin's rules, applied with a map: to a recorded call (the writer's
+    map) or to a request made on replay (the reader's)."""
+
+    def __init__(self, rules: dict, values: _Map):
+        self.rules, self.map = rules, values
+        self.volatile_paths = [parse_path(p) for p in rules["volatile"]["json"]]
+        self.secret_paths = [parse_path(p) for p in rules["secret"]["json"]]
+        self.patterns = [(kind, re.compile(rx)) for kind, rx in rules["volatile"]["values"].items()]
+        self.keep = {h.lower(): h for h in rules["keep_headers"]}
+        self.volatile_headers = {h.lower() for h in rules["volatile"]["headers"]}
+        self.secret_headers = {h.lower() for h in rules["secret"]["headers"]}
+        self.secret_query = set(rules["secret"]["query"])
+
+    def text(self, text: str, where: str) -> str:
+        text = _escape(text)
+        whole = self.map.known_text(text)
+        if whole:
+            return whole
+        text = _sub_outside(text, self.map.inside(), lambda v: self.map.known[v])
+        for kind, pattern in self.patterns:
+            text = _sub_outside(text, pattern, lambda v, kind=kind: self.map.volatile(v, kind, where))
+        return text
+
+    def url(self, url: str, where: str) -> str:
+        m = URL.match(url)
+        if not m:
+            return self.text(url, where)
+        scheme, host, path, query = m.group(1).lower(), m.group(2).lower(), m.group(3) or "/", m.group(4)
+        path = "/".join(self.text(segment, where) if segment else "" for segment in path.split("/"))
+        pairs = []
+        for pair in (query or "").split("&"):
+            if not pair:
+                continue
+            name, eq, value = pair.partition("=")
+            if name in self.secret_query:
+                value = self.map.secret(value, where.split(".")[2] if where.count(".") >= 2 else "request", where)
+            else:
+                value = self.text(value, where)
+            pairs.append((name, eq, value))
+        pairs.sort(key=lambda p: (p[0], p[2]))
+        return f"{scheme}://{host}{path}" + ("?" + "&".join(n + e + v for n, e, v in pairs) if pairs else "")
+
+    def headers(self, headers: dict[str, str], side: str, where: str) -> dict[str, str]:
+        lower = {name.lower(): value for name, value in headers.items()}
+        for name in self.rules["secret"]["headers"]:  # by the rules' names, in their order, in both languages
+            if name.lower() in lower:
+                self.secret_header(lower[name.lower()], f"{where}.{name}")
+        kept: dict[str, str] = {}
+        for out in self.rules["keep_headers"]:
+            low = out.lower()
+            if low in self.secret_headers or low not in lower or out in kept:
+                continue
+            value = lower[low]
+            if low in self.volatile_headers:
+                kept[out] = self.map.volatile(value, kind_of(value, "header") or "header", f"{where}.{out}")
+            else:
+                kept[out] = self.text(value, f"{where}.{out}")
+        return kept
+
+    def secret_header(self, value: str, where: str) -> None:
+        if isinstance(self.map, _Writer):
+            self.map.saw_secret(value, where)
+            parts = value.split(None, 1)
+            if len(parts) == 2:
+                self.map.saw_secret(parts[1], where)
+
+    def json(self, value: Any, side: str, where: str, path: list) -> Any:
+        if path and any(path_matches(s, path) for s in self.secret_paths) and value is not None:
+            return self.map.secret(value, side, f"{where}.{_dotted(path)}")
+        if isinstance(value, dict):
+            return {k: self.json(v, side, where, [*path, k]) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self.json(v, side, where, [*path, i]) for i, v in enumerate(value)]
+        if path and any(path_matches(s, path) for s in self.volatile_paths):
+            kind = kind_of(value)
+            if kind:
+                return self.map.volatile(value, kind, f"{where}.{_dotted(path)}")
+        if isinstance(value, str):
+            return self.text(value, f"{where}.{_dotted(path)}")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return self.map.known_text(json.dumps(value)) or value
+        return value
+
+    def body(self, raw: bytes | None, side: str, where: str) -> dict | None:
+        if not raw:
+            return None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"base64": base64.b64encode(raw).decode("ascii")}
+        if self.rules["match"].get("body", "json") == "json" and text.lstrip()[:1] in ("{", "["):
+            try:
+                return {"json": self.json(json.loads(text), side, f"{where}.body", [])}
+            except ValueError:
+                pass
+        return {"text": self.text(text, f"{where}.body")}
+
+    def request(self, request: Request, where: str) -> dict:
+        body = self.body(request.body, "request", where)
+        if request.body and len(request.body) > DIGEST_OVER:
+            body = digest(body)
+        return {"method": request.method.upper(), "url": self.url(request.url, f"{where}.url"),
+                "headers": self.headers(request.headers, "request", f"{where}.headers"), "body": body}
+
+    def response(self, response: Response, where: str) -> dict:
+        if response.status is None:
+            return {"status": None, "headers": {}, "body": None, "error": response.error or "no answer"}
+        headers = self.headers(_headers_of(response), "response", f"{where}.headers")
+        return {"status": response.status, "headers": headers, "body": self.body(response.body, "response", where)}
+
+
+def _headers_of(response: Response) -> dict[str, str]:
+    headers = dict(response.headers)
+    lower = {k.lower() for k in headers}
+    if response.etag and "etag" not in lower:
+        headers["ETag"] = response.etag
+    if response.retry_after and "retry-after" not in lower:
+        headers["Retry-After"] = response.retry_after
+    return headers
+
+
+def canonical(value: Any) -> str:
+    """JSON with sorted keys and no spaces: what a body's digest and its match read."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def digest(body: dict | None) -> dict | None:
+    """A normalised request body as its SHA-256 and length."""
+    if body is None or "sha256" in body:
+        return body
+    if "json" in body:
+        data = canonical(body["json"]).encode("utf-8")
+    elif "text" in body:
+        data = body["text"].encode("utf-8")
+    else:
+        data = base64.b64decode(body["base64"])
+    return {"sha256": hashlib.sha256(data).hexdigest(), "length": len(data)}
+
+
+def _graphql(url: str, body: dict | None, rules: dict) -> dict | None:
+    """A GraphQL body as its operation's name and variables, when the plugin matches so."""
+    if rules["match"].get("graphql") != "query-name+variables" or not body or "json" not in body:
+        return body
+    query = body["json"].get("query") if isinstance(body["json"], dict) else None
+    if not isinstance(query, str):
+        return body
+    name = body["json"].get("operationName")
+    if not name:
+        m = GRAPHQL_NAME.match(query)
+        name = m.group(1) if m else " ".join(query.split())
+    return {"graphql": {"operation": name, "variables": body["json"].get("variables")}}
+
+
+# --- the cassette ---------------------------------------------------------------
+
+@dataclass
+class _Call:
+    plugin: str | None
+    operation: str | None
+    request: dict
+    response: dict
+    sticky: bool = False  # an old-format answer that answers again once the others are used
+    used: int = 0
+
+
+def _old_answer(found: dict) -> dict:
+    if "error" in found:
+        return {"status": None, "headers": {}, "body": None, "error": found["error"]}
+    body = {"text": found["text"]} if "text" in found else {"json": found.get("json")}
+    return {"status": found["status"], "headers": dict(found.get("headers", {})), "body": body}
+
+
+def _load(source: Path | str | dict) -> tuple[dict, str]:
+    if isinstance(source, dict):
+        return source, source.get("scenario") or source.get("description") or "a cassette"
+    path = Path(source)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data, data.get("scenario") or path.stem
+
+
+class Cassette:
+    """A Transport that answers from a recording: `path` (or the data itself), in
+    `integrations.cassette/1`, or the `{"responses": {"METHOD URL": answer}}` files
+    `Replay` reads (the shared vectors among them).
+
+    A request finds its recorded call by plugin, operation, method, URL (scheme, host,
+    path, the query sorted) and body, each normalised as the plugin's record rules
+    say, and is answered with the first such call not answered yet. Each is answered
+    once; an old-format list answers in turn, its last one for good. With none left,
+    it raises `NoSnapshot`. `mode` is the INTEGRATIONS_MODE it runs under: in
+    record mode `close()` only warns."""
+
+    def __init__(self, path: Path | str | dict, plugins: Any = registry, *, mode: str | None = None):
+        data, self.scenario = _load(path)
+        self.plugins = plugins
+        self.mode = mode if mode is not None else os.environ.get(MODE, "live")
+        self.sent: list[Request] = []
+        if "responses" in data:
+            self.calls = self._old(data["responses"])
+            volatile: dict = {}
+        elif data.get("format") == FORMAT:
+            current = data.get("current") or {}
+            volatile = current.get("volatile", {})
+            self.calls = [_Call(c.get("plugin"), c.get("operation"), c["request"], c["response"])
+                          for c in current.get("calls", [])]
+        else:
+            raise ValueError(f"{self.scenario} is not a cassette: no format {FORMAT} and no responses")
+        self.reader = _Reader(volatile)
+        self.loose = {name for name, e in volatile.items() if e.get("first", "").split(".")[2:3] == ["request"]}
+
+    @staticmethod
+    def _old(responses: dict) -> list[_Call]:
+        calls = []
+        for key, found in responses.items():
+            method, _, url = key.partition(" ")
+            answers = found if isinstance(found, list) else [found]
+            for i, answer in enumerate(answers):
+                calls.append(_Call(None, None, {"method": method, "url": url, "body": "*"}, _old_answer(answer),
+                                   sticky=i == len(answers) - 1))
+        return calls
+
+    def _rules(self, plugin: str | None) -> dict:
+        return self.plugins.record(plugin or None)
+
+    def _recorded_key(self, call: _Call, rules: dict) -> tuple:
+        request = call.request
+        if call.plugin is None:  # an old-format answer: its URL as a request's would read
+            return request["method"].upper(), _Normaliser(rules, _Reader({})).url(request["url"], "url"), "*"
+        return request["method"].upper(), self._loosen(request["url"]), self._body_key(request["url"],
+                                                                                        request.get("body"), rules)
+
+    def _loosen(self, text: str) -> str:
+        """A placeholder first seen in a request is a value the code made itself, which
+        matches any value of its kind."""
+        return PLACEHOLDER.sub(lambda m: _placeholder(m.group(1), "?") if m.group(0) in self.loose else m.group(0),
+                               text)
+
+    def _body_key(self, url: str, body: dict | None, rules: dict) -> str:
+        if body is not None and "sha256" not in body and self.loose:
+            body = json.loads(self._loosen(json.dumps(body, ensure_ascii=False)))
+        return canonical(_graphql(url, body, rules))
+
+    def _live_key(self, request: Request, rules: dict) -> tuple:
+        normaliser = _Normaliser(rules, self.reader)
+        asked = normaliser.request(request, "calls.?.request")
+        asked["url"] = self._loosen(asked["url"])
+        return asked["method"], asked["url"], self._body_key(asked["url"], asked["body"], rules), asked
+
+    def send(self, request: Request, timeout: float) -> Response:
+        self.sent.append(request)
+        rules = self._rules(request.plugin)
+        method, url, body, asked = self._live_key(request, rules)
+        found = None
+        for call in self.calls:
+            if call.plugin is not None and request.plugin and (call.plugin, call.operation) != (
+                    request.plugin, request.operation):
+                continue
+            want = self._recorded_key(call, rules)
+            if want[:2] != (method, url) or want[2] not in ("*", body):
+                continue
+            if not call.used:
+                found = call
+                break
+            if call.sticky and found is None:
+                found = call
+        if found is None:
+            raise NoSnapshot(self._no_snapshot(request, asked, body, rules))
+        found.used += 1
+        return self._answer(found.response)
+
+    def _answer(self, recorded: dict) -> Response:
+        if recorded.get("status") is None:
+            return Response(None, error=recorded.get("error") or "no answer")
+        headers = {k: self.reader.fill_text(v) for k, v in (recorded.get("headers") or {}).items()}
+        body = recorded.get("body")
+        if body is None:
+            data = b""
+        elif "json" in body:
+            data = json.dumps(self.reader.fill(body["json"])).encode("utf-8")
+        elif "text" in body:
+            data = self.reader.fill_text(body["text"]).encode("utf-8")
+        else:
+            data = base64.b64decode(body["base64"])
+        lower = {k.lower(): v for k, v in headers.items()}
+        return Response(recorded["status"], data, etag=lower.get("etag"), retry_after=lower.get("retry-after"),
+                        headers=headers)
+
+    def _describe(self, plugin: str | None, operation: str | None, method: str, url: str) -> str:
+        return f"{plugin or '*'} {operation or '*'} {method} {url}"
+
+    def _no_snapshot(self, request: Request, asked: dict, body: str, rules: dict) -> str:
+        lines = [f"no recorded call in {self.scenario} for "
+                 f"{self._describe(request.plugin, request.operation, asked['method'], asked['url'])}"]
+        best, best_score = None, -1
+        for i, call in enumerate(self.calls):
+            want = self._recorded_key(call, rules)
+            score = (4 * (call.plugin in (None, request.plugin) and call.operation in (None, request.operation))
+                     + 2 * (want[0] == asked["method"]) + 3 * (want[1] == asked["url"]) + (want[2] in ("*", body)))
+            score = 2 * score + (not call.used)
+            if score > best_score:
+                best, best_score = (i, call, want), score
+        if best is None:
+            lines.append("nearest: none, the cassette has no calls")
+        else:
+            i, call, want = best
+            used = f", already answered {call.used} time{'s' * (call.used != 1)}" if call.used else ""
+            lines.append(f"nearest: call {i}, "
+                         f"{self._describe(call.plugin, call.operation, want[0], want[1])}{used}")
+            lines += _differences(want, (asked["method"], asked["url"], body))
+        lines.append(f'record it: pubtest record "{self.scenario}"')
+        return "\n".join(lines)
+
+    def unused(self) -> list[str]:
+        """The recorded calls never made, as "plugin operation METHOD url"."""
+        return [self._describe(c.plugin, c.operation, c.request["method"].upper(), c.request["url"])
+                for c in self.calls if not c.used]
+
+    def close(self) -> None:
+        """Raises `UnusedCalls` when a recorded call was never made; in record mode it
+        only warns, as the recording being made replaces this one."""
+        left = self.unused()
+        if not left:
+            return
+        message = "\n".join([f"{len(left)} recorded call{'s' * (len(left) != 1)} in {self.scenario} never made:",
+                             *(f"  {c}" for c in left), f'record it: pubtest record "{self.scenario}"'])
+        if self.mode == "record":
+            warnings.warn(message, stacklevel=2)
+            return
+        raise UnusedCalls(message)
+
+
+def _short(text: str, limit: int = 60) -> str:
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _json_differences(want: Any, got: Any, path: str, out: list[str]) -> None:
+    if len(out) >= 3:
+        return
+    if isinstance(want, dict) and isinstance(got, dict):
+        for key in sorted(set(want) | set(got)):
+            if key not in got:
+                out.append(f"{path}.{key}: recorded {_short(canonical(want[key]))}, not sent")
+            elif key not in want:
+                out.append(f"{path}.{key}: sent {_short(canonical(got[key]))}, not recorded")
+            else:
+                _json_differences(want[key], got[key], f"{path}.{key}", out)
+            if len(out) >= 3:
+                return
+    elif isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
+        for i, (w, g) in enumerate(zip(want, got)):
+            _json_differences(w, g, f"{path}[{i}]", out)
+    elif canonical(want) != canonical(got):
+        out.append(f"{path}: recorded {_short(canonical(want))}, sent {_short(canonical(got))}")
+
+
+def _sized(body: Any) -> str:
+    if isinstance(body, dict) and "sha256" in body:
+        return f"{body['length']} bytes, sha256 {body['sha256'][:12]}"
+    return _short(canonical(body))
+
+
+def _differences(want: tuple, got: tuple) -> list[str]:
+    out = []
+    if want[0] != got[0]:
+        out.append(f"method: recorded {want[0]}, sent {got[0]}")
+    if want[1] != got[1]:
+        out.append(f"url: recorded {want[1]}, sent {got[1]}")
+    if want[2] not in ("*", got[2]):
+        w, g = json.loads(want[2]), json.loads(got[2])
+        if isinstance(w, dict) and "sha256" in w or isinstance(g, dict) and "sha256" in g:
+            out.append(f"body: recorded {_sized(w)}, sent {_sized(g)}")
+            return out
+        if isinstance(w, dict) and isinstance(g, dict) and len(w) == 1 and w.keys() == g.keys():
+            kind = next(iter(w))
+            if kind in ("json", "graphql"):
+                found: list[str] = []
+                _json_differences(w[kind], g[kind], "$", found)
+                out += [f"body {line}" for line in found]
+                return out
+            out.append(f"body: recorded {_short(canonical(w[kind]))}, sent {_short(canonical(g[kind]))}")
+        else:
+            out.append(f"body: recorded {_short(canonical(w))}, sent {_short(canonical(g))}")
+    return out
+
+
+# --- the recorder ---------------------------------------------------------------
+
+class Recorder:
+    """A Transport that sends through `inner` and keeps every call, in order, with
+    how long it took; `save()` writes them to `path` as a cassette.
+
+    What is written follows each plugin's record rules: the headers it keeps (of
+    requests and answers), text, JSON and binary bodies (base64), a request body
+    over 64 KiB as its digest, volatile values as placeholders. A secret is never
+    written: secret headers are dropped, secret JSON paths and query parameters
+    replaced, and `save()` refuses (`SecretInRecording`) when a secret it saw would
+    still be written anywhere."""
+
+    def __init__(self, inner: Transport, path: Path | str | None = None, plugins: Any = registry, *,
+                 scenario: str | None = None, consumer: str | None = None,
+                 clock: Callable[[], float] = time.monotonic, now: Callable[[], datetime] | None = None):
+        self.inner, self.path, self.plugins = inner, Path(path) if path else None, plugins
+        self.scenario, self.consumer, self.clock = scenario, consumer, clock
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.calls: list[tuple[Request, Response, int]] = []
+
+    def send(self, request: Request, timeout: float) -> Response:
+        started = self.clock()
+        response = self.inner.send(request, timeout)
+        self.calls.append((request, response, int(round((self.clock() - started) * 1000))))
+        return response
+
+    def recording(self) -> dict:
+        """The calls kept so far, normalised: a cassette's `current`. Raises
+        `SecretInRecording` when a secret would be in it."""
+        values = _Writer()
+        calls: list[dict] = []
+        for _ in range(2):  # the second time, every value the first met is known everywhere
+            calls = []
+            for i, (request, response, elapsed) in enumerate(self.calls):
+                normaliser = _Normaliser(self.plugins.record(request.plugin or None), values)
+                calls.append({"kind": "http", "plugin": request.plugin or None, "operation": request.operation or None,
+                              "request": normaliser.request(request, f"calls.{i}.request"),
+                              "response": normaliser.response(response, f"calls.{i}.response"),
+                              "elapsed_ms": elapsed})
+        current = {"recorded": {"at": self.now().strftime("%Y-%m-%dT%H:%M:%SZ"), "integrations": __version__,
+                                "consumer": self.consumer},
+                   "volatile": values.entries, "calls": calls}
+        _no_secrets(current, values.secrets)
+        return current
+
+    def save(self, path: Path | str | None = None) -> Path:
+        """Writes the recording to `path`. Into an existing cassette it goes as the
+        candidate, `current`, and the file's previous `current` becomes its
+        `baseline` unless it has one: a baseline is the last accepted recording,
+        which a re-record never overwrites and only `promote()` moves."""
+        target = Path(path) if path else self.path
+        if target is None:
+            raise ValueError("a recording needs a path to be saved to")
+        current = self.recording()
+        old: dict = {}
+        if target.exists():
+            old = json.loads(target.read_text(encoding="utf-8"))
+        baseline = None
+        if old.get("format") == FORMAT:
+            baseline = old.get("baseline") if old.get("baseline") is not None else old.get("current")
+        scenario = self.scenario or old.get("scenario") or target.stem
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write_cassette(target, {"format": FORMAT, "scenario": scenario, "current": current, "baseline": baseline})
+        return target
+
+
+def _no_secrets(current: dict, secrets: dict[str, str]) -> None:
+    for i, call in enumerate(current["calls"]):
+        for side in ("request", "response"):
+            written = json.dumps(call[side], ensure_ascii=False)
+            for secret, seen in secrets.items():
+                if secret in written or json.dumps(secret, ensure_ascii=False)[1:-1] in written:
+                    raise SecretInRecording(f"a secret seen at {seen} would be written in calls.{i}.{side}: "
+                                            "the recording is not saved")
+
+
+def write_cassette(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def promote(path: Path | str) -> None:
+    """Accepts the cassette's `current` recording: it becomes the baseline."""
+    target = Path(path)
+    data = json.loads(target.read_text(encoding="utf-8"))
+    if data.get("format") != FORMAT:
+        raise ValueError(f"{target} is not an {FORMAT} cassette")
+    data["baseline"] = data["current"]
+    write_cassette(target, data)
+
+
+# --- faults ---------------------------------------------------------------------
+
+def _glob(pattern: str) -> re.Pattern:
+    return re.compile("^" + ".*".join(re.escape(p) for p in pattern.split("*")) + "$")
+
+
+class Fault:
+    """One rule of `Faulty`: which calls (`match`), which of them (`nth`) and what
+    happens to them (`effect`), with a `body` and `headers` for a status."""
+
+    def __init__(self, rule: dict):
+        self.rule = rule
+        words = rule.get("match", "*").split()
+        self.plugin, at = words[0] if words else "*", 1
+        self.operation = None
+        if len(words) > at and not words[at].isupper():
+            self.operation, at = words[at], at + 1
+        self.method = words[at] if len(words) > at else None
+        self.path = _glob(words[at + 1]) if len(words) > at + 1 else None
+        self.nth = str(rule.get("nth", "*"))
+        self.effect, _, self.argument = str(rule["effect"]).partition(" ")
+        if self.effect not in ("no-answer", "status", "slow", "malformed", "then-recorded"):
+            raise ValueError(f"no fault {rule['effect']!r}: no-answer, status N, slow S, malformed or then-recorded")
+        self.seen = 0
+
+    def matches(self, request: Request) -> bool:
+        if self.plugin != "*" and self.plugin != request.plugin:
+            return False
+        if self.operation and self.operation != request.operation:
+            return False
+        if self.method and self.method != request.method.upper():
+            return False
+        m = URL.match(request.url)
+        return not self.path or bool(self.path.match(m.group(3) or "/" if m else request.url))
+
+    def applies(self) -> bool:
+        if self.nth == "*":
+            return True
+        if self.nth == "first":
+            return self.seen == 1
+        if self.nth.startswith("after "):
+            return self.seen > int(self.nth[6:])
+        return self.seen == int(self.nth)
+
+
+class Faulty:
+    """A Transport that makes calls through `inner` fail on purpose, by `rules`, each
+    a dict:
+
+    - `match`: "PLUGIN[ OPERATION][ METHOD PATH]", PATH a pattern in which `*` is
+      anything (`"github.edit-pr open-pr POST /repos/*/pulls"`); "*" is any plugin;
+    - `nth`: which of the calls it matches: "*" (every one, the default), "first",
+      N (the Nth, from 1) or "after N";
+    - `effect`: "no-answer"; "status N", with the rule's `body` (text, or JSON) and
+      `headers`; "slow S", which advances `advance(S)`, a test's clock, and never
+      sleeps, then answers, or gives no answer when S is past the call's timeout;
+      "malformed", the answer with half its body and then text no parser reads; or
+      "then-recorded", which passes the call through.
+
+    The first rule that matches a call and whose `nth` it is decides; a call no rule
+    decides passes through. Only no-answer and status keep the call from `inner`, so a
+    cassette under it still holds the recorded call."""
+
+    def __init__(self, inner: Transport, rules: list[dict], *, advance: Callable[[float], None] | None = None):
+        self.inner, self.rules = inner, [Fault(r) for r in rules]
+        self.advance = advance or (lambda seconds: None)
+        self.slept = 0.0
+
+    def send(self, request: Request, timeout: float) -> Response:
+        chosen = None
+        for fault in self.rules:
+            if fault.matches(request):
+                fault.seen += 1
+                if chosen is None and fault.applies():
+                    chosen = fault
+        if chosen is None or chosen.effect == "then-recorded":
+            return self.inner.send(request, timeout)
+        if chosen.effect == "no-answer":
+            return Response(None, error="no answer: fault injected")
+        if chosen.effect == "status":
+            body = chosen.rule.get("body")
+            data = b"" if body is None else (body if isinstance(body, str) else json.dumps(body)).encode("utf-8")
+            headers = dict(chosen.rule.get("headers", {}))
+            lower = {k.lower(): v for k, v in headers.items()}
+            return Response(int(chosen.argument), data, etag=lower.get("etag"), retry_after=lower.get("retry-after"),
+                            headers=headers)
+        if chosen.effect == "slow":
+            seconds = float(chosen.argument)
+            if seconds >= timeout:
+                self.advance(timeout)
+                self.slept += timeout
+                return Response(None, error=f"no answer: timed out after {timeout:g} s")
+            self.advance(seconds)
+            self.slept += seconds
+            return self.inner.send(request, timeout - seconds)
+        answer = self.inner.send(request, timeout)  # malformed
+        if answer.status is None:
+            return answer
+        return replace(answer, body=answer.body[:len(answer.body) // 2] + "⟦malformed".encode("utf-8"))
+
+
+# --- the current transport --------------------------------------------------------
+
+_installed: ContextVar[tuple] = ContextVar("integrations_transports", default=())
+_by_mode: dict[tuple[str, str], Any] = {}
+
+
+def check_mode(env: dict[str, str] | None = None) -> str:
+    """INTEGRATIONS_MODE, checked: `live` (the default), `replay` or `record`. A mode
+    other than live needs PUBTEST_RUN, which only a test harness sets, so a process
+    misconfigured into answering from cassettes refuses to start; and
+    INTEGRATIONS_CASSETTE, the cassette's file."""
+    env = os.environ if env is None else env
+    mode = env.get(MODE) or "live"
+    if mode not in MODES:
+        raise ModeError(f"{MODE} is {mode!r}: it is live, replay or record")
+    if mode != "live" and not env.get(MARKER):
+        raise ModeError(f"{MODE}={mode} without {MARKER}: only a test harness answers from or records cassettes, "
+                        "so this process does not start")
+    if mode != "live" and not env.get(CASSETTE):
+        raise ModeError(f"{MODE}={mode} needs {CASSETTE}, the cassette's file")
+    return mode
+
+
+def current_transport() -> Transport:
+    """The transport installed by `use()` in this context, else the one
+    INTEGRATIONS_MODE picks: `Network()` (live), `Cassette(INTEGRATIONS_CASSETTE)`
+    (replay) or `Recorder(Network(), INTEGRATIONS_CASSETTE)` (record), which saves
+    when the process exits. Raises `ModeError` as `check_mode()` does."""
+    mode = check_mode()
+    installed = _installed.get()
+    if installed:
+        return installed[-1]
+    path = os.environ.get(CASSETTE, "") if mode != "live" else ""
+    key = (mode, path)
+    if key not in _by_mode:
+        if mode == "live":
+            _by_mode[key] = Network()
+        elif mode == "replay":
+            _by_mode[key] = Cassette(path, mode="replay")
+        else:
+            recorder = Recorder(Network(), path)
+            atexit.register(_save_at_exit, recorder)
+            _by_mode[key] = recorder
+    return _by_mode[key]
+
+
+def _save_at_exit(recorder: Recorder) -> None:
+    if recorder.calls:
+        try:
+            recorder.save()
+        except (OSError, SecretInRecording) as e:
+            print(f"integrations: the recording was not saved: {e}", file=sys.stderr)
+
+
+@contextmanager
+def use(transport: Transport) -> Iterator[Transport]:
+    """Within the block, `current_transport()` is `transport` in this context, so a
+    Caller given none calls through it. For test harnesses only."""
+    token = _installed.set((*_installed.get(), transport))
+    try:
+        yield transport
+    finally:
+        _installed.reset(token)

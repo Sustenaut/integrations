@@ -1,0 +1,451 @@
+{
+  "description": "A re-record is the candidate: the previous recording becomes the baseline unless there is one, and only promote moves it",
+  "scenario": "vectors: baseline",
+  "record": [
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "v": 1
+        }
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "v": 2
+        }
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "v": 3
+        }
+      }
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "promote": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "v": 1
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: baseline",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "v": 2
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: baseline",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 2
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          }
+        },
+        "leaked": []
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "v": 3
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: baseline",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 2
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 3
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          }
+        },
+        "leaked": []
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: baseline",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 2
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 3
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 2
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.board-read",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "v": 3
+                    }
+                  }
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          }
+        },
+        "leaked": []
+      }
+    ]
+  }
+}
