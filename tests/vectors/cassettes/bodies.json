@@ -1,0 +1,222 @@
+{
+  "description": "Text, JSON and binary bodies are kept, of requests and answers; binary as base64",
+  "scenario": "vectors: bodies",
+  "record": [
+    {
+      "status": 201,
+      "headers": {
+        "Content-Type": "application/octet-stream"
+      },
+      "body": {
+        "base64": "AP8QgA=="
+      }
+    },
+    {
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "body": {
+        "text": "plain words"
+      }
+    },
+    {
+      "status": 204
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=b.bin",
+        "body": {
+          "base64": "/wAQIA=="
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://api.github.com/markdown/raw",
+        "body": {
+          "text": "# a title"
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "DELETE",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/x"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=b.bin",
+        "body": {
+          "base64": "/wAQIA=="
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "POST",
+        "url": "https://api.github.com/markdown/raw",
+        "body": {
+          "text": "# a title"
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.repo-ops",
+        "operation": "call",
+        "method": "DELETE",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/x"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 201,
+        "headers": {
+          "content-type": "application/octet-stream"
+        },
+        "base64": "AP8QgA=="
+      },
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "text/plain"
+        },
+        "text": "plain words"
+      },
+      {
+        "status": 204,
+        "headers": {},
+        "text": ""
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: bodies",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.repo-ops",
+                "operation": "call",
+                "request": {
+                  "method": "POST",
+                  "url": "https://uploads.github.com/repos/o/r/releases/1/assets?name=b.bin",
+                  "headers": {},
+                  "body": {
+                    "base64": "/wAQIA=="
+                  }
+                },
+                "response": {
+                  "status": 201,
+                  "headers": {
+                    "Content-Type": "application/octet-stream"
+                  },
+                  "body": {
+                    "base64": "AP8QgA=="
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.repo-ops",
+                "operation": "call",
+                "request": {
+                  "method": "POST",
+                  "url": "https://api.github.com/markdown/raw",
+                  "headers": {},
+                  "body": {
+                    "text": "# a title"
+                  }
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {
+                    "Content-Type": "text/plain"
+                  },
+                  "body": {
+                    "text": "plain words"
+                  }
+                },
+                "elapsed_ms": 0
+              },
+              {
+                "kind": "http",
+                "plugin": "github.repo-ops",
+                "operation": "call",
+                "request": {
+                  "method": "DELETE",
+                  "url": "https://api.github.com/repos/o/r/git/refs/heads/x",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 204,
+                  "headers": {},
+                  "body": null
+                },
+                "elapsed_ms": 0
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 201,
+        "headers": {
+          "content-type": "application/octet-stream"
+        },
+        "base64": "AP8QgA=="
+      },
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "text/plain"
+        },
+        "text": "plain words"
+      },
+      {
+        "status": 204,
+        "headers": {},
+        "text": ""
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

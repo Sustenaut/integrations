@@ -1,7 +1,8 @@
 // clients/js/storage.js, on the vectors in tests/vectors/storage/ that
 // tests/steps/test_storage_client.py runs too, and what they don't cover.
 import { Given, When } from "@cucumber/cucumber";
-import { Caller, MemorySink, Replay } from "../caller.js";
+import { Caller, MemorySink } from "../caller.js";
+import { Cassette } from "../transports.js";
 import { SPEC, Storage, StorageError, StorageUnavailable } from "../storage.js";
 import { given, repositoryJson, saidSleep, toFakes } from "./helpers.mjs";
 
@@ -28,7 +29,7 @@ When("storage.js makes it", async function () {
   await this.attempt(async () => {
     const sink = new MemorySink();
     const naps = [];
-    const replay = new Replay(vector.responses);
+    const replay = new Cassette({ responses: vector.responses });
     const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, sleep: async (s) => naps.push(s), newId: () => "id-1", random: () => 1 });
     const { tenant, token, request_id: requestId, user_agent: userAgent } = vector.client;
     const storage = new Storage({ tenant, token, requestId, userAgent, baseUrl: BASE, caller });
@@ -46,8 +47,8 @@ When("storage.js makes it", async function () {
       const want = expect.sent[i] ?? {};
       return {
         method: s.method, url: s.url,
-        ...(want.headers ? { headers: Object.fromEntries(Object.keys(want.headers).map((k) => [k, s.headers[k]])) } : {}),
-        ...(want.json ? { json: JSON.parse(s.body) } : {}),
+        ...(want.headers ? { headers: Object.fromEntries(Object.keys(want.headers).map((k) => [k, s.headers[k.toLowerCase()]])) } : {}),
+        ...(want.json ? { json: JSON.parse(new TextDecoder().decode(s.body)) } : {}),
       };
     });
     const records = sink.records.map((r, i) => Object.fromEntries(Object.keys(expect.records[i] ?? {}).map((k) => [k, r[k]])));

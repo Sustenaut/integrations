@@ -1,0 +1,79 @@
+{
+  "description": "A request finds its recorded call: its query in any order, its host in any case, its headers aside",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: match",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls?per_page=100&state=open",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "json": [
+                {
+                  "number": 7,
+                  "title": "A"
+                }
+              ]
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://API.github.com/repos/o/r/pulls?state=open&per_page=100",
+        "headers": {
+          "Authorization": "Bearer ghs_anything"
+        }
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": [
+          {
+            "number": 7,
+            "title": "A"
+          }
+        ]
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

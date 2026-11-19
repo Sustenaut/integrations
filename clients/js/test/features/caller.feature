@@ -292,7 +292,7 @@ Feature: clients/js/caller.js: what tests/vectors/ doesn't cover
       {"GET https://api.example/x": {"status": 200, "json": {}}}
       """
     When I fetch "https://other.example/" from it 1 times
-    Then it is refused, saying "not recorded"
+    Then it is refused, saying "no recorded call"
 
   Scenario: Json is written as Python's json.dumps writes it, anything outside ASCII escaped
     When I write as Python's json.dumps does:

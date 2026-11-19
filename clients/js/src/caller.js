@@ -15,6 +15,12 @@
 //   const caller = new Caller("my-repo", "web", { sink: new StorageSink(...) });
 //   const answer = await caller.call("github.repo-ops", "check-push",
 //     { method: "GET", url: `https://api.github.com/repos/${repo}`, headers });
+//
+// A Caller given no fetch calls through currentTransport() (transports.js): globalThis.fetch,
+// unless a test harness says otherwise. caller.fetch(plugin, operation) is a fetch for code
+// that takes one, each of its requests a call.
+
+import { checkMode, currentTransport, NoSnapshot, readRequest } from "./transports.js";
 
 const IDEMPOTENT = new Set(["GET", "HEAD", "PUT", "DELETE"]);
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
@@ -87,16 +93,38 @@ export function readModes(data) {
 }
 
 export class Caller {
-  // fetch is the only thing that reaches the network; clock() is in milliseconds, sleep()
-  // takes seconds, as calls.py's do; random() is the jitter's, from 0 to 1.
-  constructor(repo, app = "", { sink = new NullSink(), fetch = (...a) => globalThis.fetch(...a), modes = {}, clock = monotonic, sleep = nap, newId = () => crypto.randomUUID().replaceAll("-", ""), random = Math.random } = {}) {
-    Object.assign(this, { repo, app, sink, fetch, modes, clock, sleep, newId, random });
+  // fetch is the only thing that reaches the network: the one given, else the current
+  // transport's, looked up at each call, so a harness's use() reaches a caller made before
+  // it. clock() is in milliseconds, sleep() takes seconds, as calls.py's do; random() is
+  // the jitter's, from 0 to 1.
+  constructor(repo, app = "", { sink = new NullSink(), fetch = null, modes = {}, clock = monotonic, sleep = nap, newId = () => crypto.randomUUID().replaceAll("-", ""), random = Math.random } = {}) {
+    Object.assign(this, { repo, app, sink, fetcher: fetch, modes, clock, sleep, newId, random });
   }
 
   // The same caller, on behalf of a project, so its records are that project's.
   forRepo(repo) {
-    const { app, sink, fetch, modes, clock, sleep, newId, random } = this;
-    return new this.constructor(repo, app, { sink, fetch, modes, clock, sleep, newId, random });
+    const { app, sink, fetcher, modes, clock, sleep, newId, random } = this;
+    return new this.constructor(repo, app, { sink, fetch: fetcher, modes, clock, sleep, newId, random });
+  }
+
+  // A fetch(url, init) for code that takes one in place of making its own requests, such as
+  // pubpr's propose({ fetch }): each request is call(plugin, operation, ...), with the
+  // policy, retries, record and transport that come with it. It answers a Response (status,
+  // ok, headers.get, text(), json(), arrayBuffer()); a refusal is its answer, and no answer
+  // throws a TypeError, as fetch does, with the Unavailable as its cause.
+  fetch(plugin, operation, { refused, repeatable = false } = {}) {
+    registeredOperation(plugin, operation);
+    return async (url, init = {}) => {
+      const { method, url: target, headers, body } = await readRequest(url, init);
+      let answer;
+      try {
+        answer = await this.call(plugin, operation, { method, url: target, headers, body, repeatable }, { refused });
+      } catch (err) {
+        if (err instanceof Unavailable) throw new TypeError(`fetch failed: ${err.message}`, { cause: err });
+        throw err;
+      }
+      return new Response(NULL_BODY.has(answer.status) ? null : answer.body, { status: answer.status, headers: answer.headers });
+    };
   }
 
   mode(plugin) {
@@ -109,13 +137,16 @@ export class Caller {
   // answer, so the record says so.
   async call(plugin, operation, { method, url, headers = {}, body = null, repeatable = false }, { requestId, refused } = {}) {
     const registered = registeredOperation(plugin, operation);
+    checkMode();
+    const send = this.fetcher ?? currentTransport().fetch;
     // The class's timeout and tries, or the operation's own where it names them.
     const policy = { ...POLICIES[registered.class], ...registered };
     const request = { method, url, headers, body };
     const tries = repeatable || IDEMPOTENT.has(method) ? policy.tries : 1;
     const started = this.clock();
     const deadline = started + policy.timeout * tries * 1000;
-    let answer = await this.#send(request, policy.timeout);
+    const route = { send, plugin, operation };
+    let answer = await this.#send(route, request, policy.timeout);
     let retries = 0;
     while (retries + 1 < tries && worthRetrying(answer)) {
       const wait = this.#wait(answer, retries, policy.timeout);
@@ -123,7 +154,7 @@ export class Caller {
       if (left <= 0) break;
       await this.sleep(wait);
       retries += 1;
-      answer = await this.#send(request, Math.min(policy.timeout, left));
+      answer = await this.#send(route, request, Math.min(policy.timeout, left));
     }
     const latency = Math.trunc(this.clock() - started);
     const failed = answer.status === null || answer.status >= 500 || answer.status === 429;
@@ -162,15 +193,19 @@ export class Caller {
     };
   }
 
-  async #send({ method, url, headers, body }, timeout) {
+  // The call's plugin, operation and timeout go in init.integrations, for a transport that
+  // answers by them; fetch ignores it.
+  async #send({ send, plugin, operation }, { method, url, headers, body }, timeout) {
     if (!url.startsWith("https://")) return new Answer(null, undefined, { error: "not https" });
     try {
-      const response = await this.fetch(url, {
+      const response = await send(url, {
         method, headers: { "User-Agent": AGENT, ...headers }, body: body ?? undefined, signal: AbortSignal.timeout(timeout * 1000),
+        integrations: { plugin, operation, timeout },
       });
       const bytes = new Uint8Array(await response.arrayBuffer());
       return new Answer(response.status, bytes, { headers: response.headers });
     } catch (err) {
+      if (err instanceof NoSnapshot) throw err;
       const why = err?.name === "TimeoutError" ? `timed out after ${timeout} s` : err?.message ?? String(err);
       return new Answer(null, undefined, { error: `no answer: ${why}` });
     }
@@ -226,30 +261,6 @@ export class MemorySink {
 }
 
 const NULL_BODY = new Set([101, 204, 205, 304]); // a Response with one of these can't have a body
-
-// Recorded answers by "METHOD url", in calls.py's Replay format, as a fetch: for tests,
-// and the shared vectors in tests/vectors/. A list answers in turn, its last one for
-// good; one not recorded has no answer. A "json" answer's body is written as Python's
-// json.dumps writes it, so both languages count the same bytes_in. An answer's
-// "headers" are its headers, such as an ETag.
-export class Replay {
-  sent = [];
-
-  constructor(responses) {
-    this.responses = structuredClone(responses);
-  }
-
-  fetch = async (url, init = {}) => {
-    const request = { method: init.method ?? "GET", url: String(url), headers: init.headers ?? {}, body: init.body ?? null };
-    this.sent.push(request);
-    let found = this.responses[`${request.method} ${request.url}`];
-    if (Array.isArray(found)) found = found.length > 1 ? found.shift() : found[0];
-    if (!found) throw new TypeError("not recorded");
-    if ("error" in found) throw new TypeError(found.error);
-    const text = "text" in found ? found.text : pythonJson(found.json ?? null);
-    return new Response(NULL_BODY.has(found.status) ? null : text, { status: found.status, headers: found.headers });
-  };
-}
 
 // json.dumps(value): ", " and ": " between items, and anything outside ASCII escaped.
 export function pythonJson(value) {

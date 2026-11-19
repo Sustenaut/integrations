@@ -27,5 +27,8 @@
     "env": [
       "GH_TOKEN"
     ]
+  },
+  "record": {
+    "extends": "_github"
   }
 }

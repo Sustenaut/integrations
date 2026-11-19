@@ -1,12 +1,14 @@
 {
-  "description": "Nothing recorded is no answer: status null",
+  "description": "No answer: status null",
   "plugin": "github.edit-pr",
   "operation": "open-pr",
   "request": {
     "method": "GET",
     "url": "https://api.example/x"
   },
-  "responses": {},
+  "responses": {
+    "GET https://api.example/x": {"error": "no answer: down"}
+  },
   "expect": {
     "status": null,
     "raises": "Unavailable",

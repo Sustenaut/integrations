@@ -1,0 +1,256 @@
+{
+  "description": "Faulty's effects: no answer, a status, slow (on the test's clock), malformed, then the recorded answers",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: faulty",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "n": 1
+              }
+            }
+          },
+          "elapsed_ms": 40
+        },
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "n": 2
+              }
+            }
+          },
+          "elapsed_ms": 40
+        },
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": [
+                {
+                  "number": 7
+                }
+              ]
+            }
+          },
+          "elapsed_ms": 40
+        },
+        {
+          "kind": "http",
+          "plugin": "github.board-read",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/pulls",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": [
+                {
+                  "number": 8
+                }
+              ]
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "faults": [
+    {
+      "match": "github.board-read read GET /repos/*/r",
+      "nth": "first",
+      "effect": "no-answer"
+    },
+    {
+      "match": "github.board-read read GET /repos/*/r",
+      "nth": 2,
+      "effect": "status 502",
+      "body": {
+        "message": "Bad gateway"
+      },
+      "headers": {
+        "Retry-After": "1"
+      }
+    },
+    {
+      "match": "github.board-read read GET /repos/*/r",
+      "nth": "after 2",
+      "effect": "then-recorded"
+    },
+    {
+      "match": "github.board-read GET /repos/o/r/pulls",
+      "nth": "first",
+      "effect": "slow 2.5"
+    },
+    {
+      "match": "github.board-read GET /repos/o/r/pulls",
+      "nth": 2,
+      "effect": "malformed"
+    },
+    {
+      "match": "github.board-read GET /repos/o/r/pulls",
+      "nth": 3,
+      "effect": "slow 30"
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.board-read",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/pulls"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "error": "no answer: fault injected"
+      },
+      {
+        "status": 502,
+        "headers": {
+          "retry-after": "1"
+        },
+        "json": {
+          "message": "Bad gateway"
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "n": 1
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "n": 2
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": [
+          {
+            "number": 7
+          }
+        ]
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "text": "[{\"numb⟦malformed"
+      },
+      {
+        "error": "no answer: timed out after 10 s"
+      },
+      {
+        "closed": true
+      }
+    ],
+    "slept": 12.5
+  }
+}

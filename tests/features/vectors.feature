@@ -1,4 +1,6 @@
 Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so both callers call, retry and record the same way
+  And the cassette vectors in tests/vectors/cassettes/, which clients/js/transports.js runs
+  too, so both record, normalise and replay the same way.
 
   Scenario Outline: A vector: <description>
     Given the vector "<vector>"
@@ -11,7 +13,7 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | advisory.json | The repository's mode reaches the record |
       | event-four-tries.json | An event-driven call (E) is tried four times, 1, 2 and 4 s apart |
       | jitter.json | The wait is random, up to 2**n s: here a quarter of it |
-      | no-answer.json | Nothing recorded is no answer: status null |
+      | no-answer.json | No answer: status null |
       | ok.json | A call that worked: one record, its sizes, no retries |
       | person-waits.json | A call a person waits on (H) is tried once |
       | post-once.json | A POST is not safe to repeat, so it is tried once |
@@ -33,6 +35,39 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
     Then the result is:
       """
       ["advisory.json", "event-four-tries.json", "jitter.json", "no-answer.json", "ok.json", "person-waits.json", "post-once.json", "post-repeatable.json", "refusal.json", "refused-in-body.json", "request-id.json", "retry-after-capped.json", "retry-after-elsewhere.json", "retry-after.json", "scheduled-backoff.json", "scheduled-exhausted.json", "too-many.json", "unicode.json", "unreadable-body.json"]
+      """
+
+  Scenario Outline: A cassette vector: <description>
+    Given a scratch directory
+    And the cassette vector "<vector>"
+    When the transports run it
+    Then the result is what the vector expects
+
+    Examples:
+      | vector | description |
+      | baseline.json | A re-record is the candidate: the previous recording becomes the baseline unless there is one, and only promote moves it |
+      | bodies.json | Text, JSON and binary bodies are kept, of requests and answers; binary as base64 |
+      | digest.json | A request body over 64 KiB is written as its digest and matched by it |
+      | escape.json | Real text holding the placeholders' prefix is written escaped, and replayed as it was |
+      | faulty.json | Faulty's effects: no answer, a status, slow (on the test's clock), malformed, then the recorded answers |
+      | graphql.json | A GraphQL request matches by its operation's name and variables, however its query is laid out |
+      | host.json | The host is part of the match: api.github.com is not uploads.github.com |
+      | in-order.json | The same request twice is answered by its recorded calls in order, each once |
+      | match.json | A request finds its recorded call: its query in any order, its host in any case, its headers aside |
+      | no-snapshot.json | A call with no recording raises NoSnapshot, naming the scenario, the call, the nearest recorded one and how they differ |
+      | old-format.json | The old responses format reads as a cassette: answers by METHOD url, a list in turn and its last for good |
+      | repeats.json | A request made again is kept again, in order, each with how long it took, and replayed in that order |
+      | rules.json | A plugin's record rules, its extends merged over the defaults; a plugin with none gets the defaults |
+      | secret-leak.json | A secret the recorder saw that would still be written, here echoed in a body, stops the save |
+      | secret.json | A secret is never written: the Authorization header dropped, a secret query parameter and JSON path replaced; replay answers a stand-in token |
+      | unused.json | A recorded call never made is listed, and closing the cassette fails on it |
+      | volatile.json | Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches |
+
+  Scenario: Every cassette vector is run above
+    When I list the vectors of cassettes
+    Then the result is:
+      """
+      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "match.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
       """
 
   Scenario: A file the JS sink wrote reads as its records and report

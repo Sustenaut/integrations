@@ -1,0 +1,101 @@
+{
+  "description": "The old responses format reads as a cassette: answers by METHOD url, a list in turn and its last for good",
+  "cassette": {
+    "responses": {
+      "GET https://api.example/x": [
+        {
+          "status": 503,
+          "json": {}
+        },
+        {
+          "status": 200,
+          "json": {
+            "a": 1
+          },
+          "headers": {
+            "ETag": "\"v1\""
+          }
+        }
+      ],
+      "GET https://api.example/y": {
+        "error": "no answer: down"
+      }
+    }
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "check",
+        "method": "GET",
+        "url": "https://api.example/x"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "check",
+        "method": "GET",
+        "url": "https://api.example/x"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "check",
+        "method": "GET",
+        "url": "https://api.example/x"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "check",
+        "method": "GET",
+        "url": "https://api.example/y"
+      }
+    },
+    {
+      "unused": true
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 503,
+        "headers": {},
+        "json": {}
+      },
+      {
+        "status": 200,
+        "headers": {
+          "etag": "\"v1\""
+        },
+        "json": {
+          "a": 1
+        }
+      },
+      {
+        "status": 200,
+        "headers": {
+          "etag": "\"v1\""
+        },
+        "json": {
+          "a": 1
+        }
+      },
+      {
+        "error": "no answer: down"
+      },
+      {
+        "unused": []
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

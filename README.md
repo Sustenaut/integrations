@@ -17,6 +17,7 @@ each way we use it, because each has its own token scope, limits and class.
 | `operations` | Each with its `class` and `route` |
 | `setup` | The manual steps, in order |
 | `detect` | The signatures that show the plugin is used |
+| `record` | Optional: how its calls are recorded and replayed ([the record block](#the-record-block)) |
 
 `class` is `H` (human-driven), `E` (event-driven), `S` (scheduled) or `M`
 (manual setup). `src/integrations/classes.json` gives each class's response and
@@ -27,6 +28,9 @@ and only reported (`reported`), or has nothing to log (`none`).
 `detect` can hold `hosts`, `env`, `commands`, `actions`, `terraform_providers`,
 `files` and `patterns`. A plugin with none is set up by hand only, and every
 operation it has must be class `M`.
+
+A file whose name starts with `_` (`plugins/_github.json`) is not a plugin: it holds
+record rules that plugins share. The registry, the scan and the JS generator skip it.
 
 The registry names no consumer. Each repository says what it uses, in its own
 `integrations.json`, so a private repository's details stay in that repository.
@@ -158,6 +162,10 @@ how long it took and how it ended. It holds no body, full URL, token or personal
 data. It goes to the `Caller`'s sink, which keeps nothing by default;
 `JsonlSink` writes a file.
 
+A `Caller` given no `transport` calls through `transports.current_transport()`, looked up
+at each call: the network, unless a test harness installed a cassette
+([record and replay](#record-and-replay)). A transport given to it still wins.
+
 An operation's class sets its timeout and tries. A call is tried again only when
 nothing answered or the provider asked for it (429, 502, 503, 504), and only if it
 is safe to repeat. Between tries it waits a random time up to 2**n seconds (full
@@ -193,8 +201,8 @@ if (!answer.ok || !answer.json().permissions?.push) throw new Error("no push");
 its R2 binding (`bucket` and `prefix`). A Worker has no background timer, so the write
 that finds a file overdue sends it; give it the request's `waitUntil`
 (`sink.waitUntil = (p) => ctx.waitUntil(p)`) so the answer doesn't wait on storage. In
-Node, `start: true` also sends every two minutes. `MemorySink`, `NullSink` and `Replay`
-(a recorded fetch, for tests) are there too.
+Node, `start: true` also sends every two minutes. `MemorySink` and `NullSink` are there
+too; a test's recorded answers come from `Cassette` in `transports.js` (below).
 
 `clients/js/storage.js` is the storage service's client on that `Caller`, and
 `integrations.clients.storage` the same in Python: one tenant's files (upload, get, and a
@@ -251,6 +259,178 @@ Install it from a release's wheel, pinned by URL and hash:
 ```
 integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/download/v0.12.2/integrations-0.12.2-py3-none-any.whl
 ```
+
+### Record and replay
+
+`integrations.transports` (and `clients/js/transports.js`, exported as
+`@sustenaut/integrations/transports.js`) holds the transports a test runs its calls on:
+
+- `Cassette(path, plugins=registry)` answers from a recording. A request finds its recorded
+  call by plugin, operation, method, URL (scheme and host included, the query sorted) and
+  body (by the plugin's `match`), all normalised by the plugin's record rules, and is
+  answered by the first such call not answered yet. A call it has no recording of raises
+  `NoSnapshot`, whose message names the scenario, the call, the nearest recorded call and
+  how they differ, and ends `record it: pubtest record "<scenario>"`. `unused()` lists the
+  recorded calls never made, and `close()` raises `UnusedCalls` for them (only a warning in
+  record mode). It reads the old `{"responses": {"METHOD URL": answer}}` files and the shared
+  vectors too.
+- `Recorder(inner, path, plugins=registry, scenario=...)` sends through `inner`, keeps every
+  call in order with its time, and `save()` writes the cassette.
+- `Faulty(inner, rules, advance=...)` makes calls fail on purpose. A rule is
+  `{"match": "PLUGIN[ OPERATION][ METHOD PATH]", "nth": "*"|"first"|N|"after N", "effect": ...}`,
+  PATH a pattern in which `*` is anything, and the effect `no-answer`, `status N` (with the
+  rule's `body` and `headers`), `slow S` (advances the test's clock, `advance(S)`, and never
+  sleeps; past the call's timeout it is no answer), `malformed` (half the body, then text
+  no parser reads) or `then-recorded` (passes through). The first rule that matches a call
+  and whose `nth` it is decides.
+- `use(transport)` installs a transport for the code it wraps: a context manager in Python
+  (per context, a `ContextVar`), a function returning `restore()` in JS. Only test harnesses
+  call it.
+- `promote(path)` accepts a cassette's recording: it becomes the baseline.
+
+There is no `Replay` or `Recording` any more: `Cassette` and `Recorder` from
+`integrations.transports` (or `transports.js`) take their place, and `Cassette` still reads
+the old `{"responses": ...}` files.
+
+**Where cassettes go.** A cassette is written (`Recorder.save()`, `promote()`,
+`write_cassette()`), and a cassette the environment names is read, only at a path that
+resolves, symlinks followed, inside the cassettes directory; anything else raises
+`CassettePathError` (a `ValueError`; in JS an `Error` of that name) before a byte is read
+or written. The cassettes directory is `INTEGRATIONS_CASSETTES` when it is set, else the
+directory holding `INTEGRATIONS_CASSETTE` when that is set, else the directory of the path
+given: to the `Recorder` when it is made, or to `promote()` and `write_cassette()`. So
+`../outside.json` climbing out of `INTEGRATIONS_CASSETTES`, or a cassette that is a symlink
+out of its directory, is refused. `cassettes_dir()` (`cassettesDir()`) says which
+directory that is, and `cassette_path(path)` (`cassettePath()`) checks a path against it.
+
+#### Modes and the guard
+
+`current_transport()` (`currentTransport()` in JS) is the transport `use()` installed, else
+the one `INTEGRATIONS_MODE` picks:
+
+| `INTEGRATIONS_MODE` | Transport |
+|---|---|
+| `live`, or unset | `Network()`; `globalThis.fetch` in JS |
+| `replay` | `Cassette(INTEGRATIONS_CASSETTE)` |
+| `record` | `Recorder(Network(), INTEGRATIONS_CASSETTE)`, saved when the process exits |
+
+`INTEGRATIONS_CASSETTE` is a file path: it is how a child process, a command line a scenario
+runs, learns its cassette. `INTEGRATIONS_CASSETTES`, when set, is the directory every
+cassette must resolve inside, `INTEGRATIONS_CASSETTE` included. A mode other than `live` needs `PUBTEST_RUN` set, which only a
+test harness sets: without it `current_transport()`, and every `Caller.call`, whatever
+transport it was given, raise `ModeError`, so a pod misconfigured into replay can't answer
+from cassettes. Another mode, or one with no `INTEGRATIONS_CASSETTE`, is refused the same way.
+
+#### The cassette format
+
+One file per scenario, `integrations.cassette/1`:
+
+```json
+{
+  "format": "integrations.cassette/1",
+  "scenario": "<feature file>: <scenario title>[ #<row>]",
+  "current": {
+    "recorded": {"at": "2026-11-19T09:00:00Z", "integrations": "0.16.0", "consumer": "<repo>@<sha>"},
+    "volatile": {"⟦integrations:sha:1⟧": {"kind": "sha", "first": "calls.0.response.body.object.sha"}},
+    "calls": [{"kind": "http", "plugin": "github.edit-pr", "operation": "read",
+               "request": {"method": "GET", "url": "https://api.github.com/repos/o/r/git/ref/heads/main",
+                           "headers": {}, "body": null},
+               "response": {"status": 200, "headers": {"ETag": "⟦integrations:header:1⟧"},
+                            "body": {"json": {"object": {"sha": "⟦integrations:sha:1⟧"}}}},
+               "elapsed_ms": 40}]
+  },
+  "baseline": null
+}
+```
+
+A body is `{"json": ...}`, `{"text": ...}`, `{"base64": ...}` or null; a request body over
+64 KiB is `{"sha256": ..., "length": N}` and matched by that, while an answer's body is
+always kept. An answer that never came is `{"status": null, "error": "no answer: ..."}`.
+
+**Placeholders.** Each cassette has one map from real values to placeholders, applied to
+requests and answers alike: a volatile value (by JSON path, header, or a kind's regex) is
+written `⟦integrations:KIND:N⟧`, the same placeholder wherever the same value is, and a
+different one for every other value. `volatile` lists them, with where each was first seen;
+it never holds a real value. On replay each placeholder is answered as a stand-in made from
+its name, of its kind's shape: a 40-hex sha, an ISO or HTTP date, a ten-digit id, a
+`ghs_` token. A stand-in the code sends back is read as its placeholder again, so a sha one
+call answers and the next sends still matches. Replayed stand-in dates are in the year
+2000, so one is never mistaken for a real date. A volatile value first seen in a request is
+one the code made itself, and matches any value of its kind; where an answer echoes it, it
+is replayed as a stand-in. Real text holding `⟦integrations:` is written
+`⟦integrations:escape⟧`, and replayed as it was.
+
+**Secrets.** A recording never holds a secret's value: secret headers (and
+`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` for every plugin) are
+dropped, secret query parameters and JSON paths replaced (`⟦integrations:secret⟧` in a
+request, `⟦integrations:secret:N⟧` in an answer, replayed as a token). `save()` then looks
+for every secret value it saw, of four characters or more, anywhere in what it would write,
+and raises `SecretInRecording` without writing anything when one is there.
+
+**The baseline.** `current` is what replay uses. `baseline` is the last accepted
+recording: a re-record never overwrites it, and accepting a recording moves it.
+`Recorder.save()` into an existing cassette writes the new recording as the candidate,
+`current`, and keeps the file's previous `current` as `baseline` unless it already has
+one; `promote(path)` (a later `pubtest record --accept`) makes `current` the baseline.
+So when the data repository's pull request with a re-record merges, `baseline` still holds
+the recording accepted before it, which is what a drift check compares a live answer with.
+
+#### The record block
+
+A plugin's optional `record` says how its calls are recorded:
+
+| Field | Meaning |
+|---|---|
+| `extends` | A shared file, `"_github"` for `plugins/_github.json`, whose rules these are merged over: lists joined, objects merged, the rest replaced. Only the record block extends |
+| `keep_headers` | The headers kept, of requests and answers; every other is dropped |
+| `volatile` | `headers`, `json` (JSONPath-lite: `$.a.b`, `$..key`, `$.a[*].b`, `$.a.*`) and `values` (a regex per kind, for a value anywhere) |
+| `secret` | `headers` dropped, `json` paths and `query` parameters replaced |
+| `match` | `url` (`scheme+host+path+sorted-query`), `body` (`json`, compared as parsed JSON after normalising, or `text`, exact) and `graphql` (`query-name+variables`: the operation's name and its variables) |
+| `customers` | The set of test customers recordings are made with, such as `github.test` |
+
+`registry.record(plugin_id)` gives a plugin's rules merged, every field there; a plugin
+without a block gets the defaults. `_github.json` holds GitHub's, which `github.app-token`,
+`github.edit-pr`, `github.board-read` and `github.repo-ops` extend. `clients/js/generate.mjs`
+writes the record blocks into `clients/js/transports.js`, so both languages record by the
+same rules; the vectors in `tests/vectors/cassettes/` run on both.
+
+#### Caller.fetch and Caller.opener
+
+Code that takes a `fetch` in place of making its own requests, such as pubpr's
+`propose({ fetch })`, works unchanged through a `Caller`:
+
+```js
+const result = await propose({ repo, branch, title, changes, token, fetch: caller.fetch("github.edit-pr", "open-pr") });
+```
+
+Each request is `caller.call` with that plugin and operation: its policy, retries, record
+and the current transport. It answers a `Response` (`status`, `ok`, `headers.get`, `text()`,
+`json()`, `arrayBuffer()`); a refusal is its answer, and no answer throws a `TypeError`, as
+`fetch` does, with the `Unavailable` as its `cause`.
+
+`Caller.opener(plugin, operation, *, refused=None, repeatable=False)` is Python's:
+`open(method, url, headers=None, body=None) -> Response`, `body` bytes or text. No answer
+raises `Unavailable`.
+
+#### GitHub's test steps
+
+`integrations.testing` is an opt-in pytest plugin (the `pytest11` entry point
+`integrations.testing`), inert unless a suite sets `integrations_testing = true` in its
+pytest.ini or lists `pytest_plugins = ["integrations.testing.github"]`. In this release it
+is a stub: `Given the GitHub repository "o/r" holds:` (a JSON object of each file's path to
+its text) registers the repository under its own name in replay, and in record mode raises
+`NotImplementedError`, as creating it needs the GitHub test org.
+
+#### Later steps
+
+pubtest 0.3 brings the harness: it installs a cassette per scenario with `use()`, sets
+`PUBTEST_RUN`, `INTEGRATIONS_MODE` and `INTEGRATIONS_CASSETTE` for the programs a scenario
+runs, puts its failure steps on `Faulty`, and adds `pubtest record "<scenario>"` (and
+`--accept`, which calls `promote`). Then come the GitHub test org and its recorder app,
+which record mode creates repositories in and `integrations.testing.github` fills out; then
+the consumers, pubpr and release-controlplane first, moving their tests onto cassettes; and
+last the production drift check, which reuses each plugin's `record.volatile` rules to
+compare what a provider answers now with the cassette's baseline.
 
 ### Releasing
 

@@ -2,7 +2,8 @@
 import { Given, When } from "@cucumber/cucumber";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { Caller, MemorySink, Replay, Unavailable } from "../caller.js";
+import { Caller, MemorySink, Unavailable } from "../caller.js";
+import { Cassette } from "../transports.js";
 import { repositoryJson } from "./helpers.mjs";
 
 const refusal = (rule) => rule && ((answer) => answer.json()[rule.key] === rule.equals);
@@ -18,7 +19,7 @@ When("caller.js makes it", async function () {
   await this.attempt(async () => {
     const sink = new MemorySink();
     const naps = [];
-    const replay = new Replay(vector.responses);
+    const replay = new Cassette({ responses: vector.responses });
     const caller = new Caller("a-repo", "web", { sink, fetch: replay.fetch, modes: vector.modes, sleep: async (s) => naps.push(s), newId: () => "id-1", random: () => vector.random ?? 1 });
     let raises = null;
     let status;

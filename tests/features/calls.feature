@@ -286,7 +286,7 @@ Feature: The wrapper every client call goes through, and the first clients
     When the recording sends "GET https://nothing.example/"
     And the recording is saved as "recorded.json"
     And a replay of "recorded.json" sends "GET https://nothing.example/"
-    Then the result's "error" is "not recorded"
+    Then it is refused, saying "no recorded call"
 
   Scenario: An empty body reads as nothing
     When I read an empty answer with the status 204 as JSON

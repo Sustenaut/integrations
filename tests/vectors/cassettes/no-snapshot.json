@@ -1,0 +1,75 @@
+{
+  "description": "A call with no recording raises NoSnapshot, naming the scenario, the call, the nearest recorded one and how they differ",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: no snapshot",
+    "current": {
+      "recorded": {
+        "at": "2026-11-19T09:00:00Z",
+        "integrations": "0.16.0",
+        "consumer": "Sustenaut/example@0000000"
+      },
+      "volatile": {},
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "open-pr",
+          "request": {
+            "method": "POST",
+            "url": "https://api.github.com/repos/o/r/pulls",
+            "headers": {},
+            "body": {
+              "json": {
+                "title": "A",
+                "head": "b",
+                "base": "main"
+              }
+            }
+          },
+          "response": {
+            "status": 201,
+            "headers": {},
+            "body": {
+              "json": {
+                "number": 8
+              }
+            }
+          },
+          "elapsed_ms": 40
+        }
+      ]
+    },
+    "baseline": null
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/pulls",
+        "body": {
+          "json": {
+            "title": "B",
+            "head": "b",
+            "base": "main"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "no recorded call in vectors: no snapshot for github.edit-pr open-pr POST https://api.github.com/repos/o/r/pulls",
+          "nearest: call 0, github.edit-pr open-pr POST https://api.github.com/repos/o/r/pulls",
+          "body $.title: recorded \"A\", sent \"B\"",
+          "record it: pubtest record \"vectors: no snapshot\""
+        ]
+      }
+    ]
+  }
+}

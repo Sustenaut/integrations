@@ -39,11 +39,63 @@
         "files": {"$ref": "#/$defs/strings", "description": "Path patterns whose presence is a use"},
         "patterns": {"$ref": "#/$defs/strings", "description": "Other regexes, for a line of code or config"}
       }
-    }
+    },
+    "record": {"$ref": "#/$defs/record", "description": "How the plugin's calls are recorded and replayed: integrations.transports"}
   },
   "if": {"properties": {"detect": {"maxProperties": 0}}},
   "then": {"properties": {"operations": {"items": {"properties": {"class": {"const": "M"}}}}}},
   "$defs": {
-    "strings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+    "strings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "headers": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9-]+$"}},
+    "paths": {"type": "array", "items": {"type": "string", "pattern": "^\\$(\\.\\.?([A-Za-z0-9_-]+|\\*)|\\[\\*\\])+$"}, "description": "JSONPath-lite: $.a.b, $..key, $.a[*].b, $.a.*"},
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extends": {"type": "string", "pattern": "^_[a-z0-9-]+$", "description": "A shared record-only file, plugins/<name>.json, merged under these rules: lists joined, objects merged, the rest replaced"},
+        "keep_headers": {"$ref": "#/$defs/headers", "description": "The headers a recording keeps, of requests and answers; every other is dropped"},
+        "volatile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What changes between two recordings of the same calls: written as placeholders, given stand-ins on replay",
+          "properties": {
+            "headers": {"$ref": "#/$defs/headers"},
+            "json": {"$ref": "#/$defs/paths"},
+            "values": {"type": "object", "propertyNames": {"pattern": "^[a-z][a-z0-9-]*$"}, "additionalProperties": {"type": "string", "minLength": 1}, "description": "A regex per kind, for a value anywhere: a body, a URL, a header"}
+          }
+        },
+        "secret": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What a recording never writes: headers dropped, JSON paths and query parameters replaced",
+          "properties": {
+            "headers": {"$ref": "#/$defs/headers"},
+            "json": {"$ref": "#/$defs/paths"},
+            "query": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How a request finds its recorded call",
+          "properties": {
+            "url": {"const": "scheme+host+path+sorted-query"},
+            "body": {"enum": ["json", "text"]},
+            "graphql": {"enum": ["query-name+variables", null]}
+          }
+        },
+        "customers": {"type": "string", "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$", "description": "The set of test customers recordings are made with, such as github.test"}
+      }
+    },
+    "shared": {
+      "type": "object",
+      "description": "A shared record-only file, plugins/_name.json: not a plugin, only the rules plugins extend",
+      "required": ["description", "record"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "record": {"$ref": "#/$defs/record"}
+      }
+    }
   }
 }
