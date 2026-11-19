@@ -1,4 +1,0 @@
-{
-  "category": "internal",
-  "change": "The test suite's scenarios, Python and JavaScript, are Given/When/Then on pubtest's steps"
-}
