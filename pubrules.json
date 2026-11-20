@@ -42,8 +42,8 @@
     "providers": [
       {
         "distribution": "pubdeploy",
-        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl",
-        "sha256": "320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd"
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl",
+        "sha256": "d783284288181f025e11d64505c1a28cf52ba24231d5309e03d1073914cfa457"
       },
       {
         "distribution": "pubsec",
