@@ -10,5 +10,5 @@ hypothesis==6.170.5
 pubtest @ https://github.com/Sustenaut/pubtest/releases/download/v0.2.1/pubtest-0.2.1-py3-none-any.whl
 pubrules @ https://github.com/Sustenaut/pubrules/releases/download/v0.45.0/pubrules-0.45.0-py3-none-any.whl
 # deploy.providers' packages, whose need types `pubrules sync --check` reads:
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl
 pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl

@@ -52,5 +52,5 @@ provider() {
 }
 provider https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18
 
-fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.0/pubdeploy-0.5.0-py3-none-any.whl 320d68e081c674457294e6ed3a6c8ab9e2606ca4a2946c252a34021b62dc70cd providers deploy.providers
+fetch https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl d783284288181f025e11d64505c1a28cf52ba24231d5309e03d1073914cfa457 providers deploy.providers
 exec uvx --from "$fetched" ${with[@]+"${with[@]}"} pubdeploy "$@"
