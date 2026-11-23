@@ -496,6 +496,12 @@ compute load (below) beside `pubrules_checks`. Buffers that share a tenant keep 
 batch records apart, under `batches/<table>-`. The three variables before it work as
 they did.
 
+`INGEST_NOTIFY_KEY` (the Secret `ingest-notify`, from Bitwarden's `INGEST_NOTIFY_KEY`)
+turns on storage's notices, below; without it they are refused. `INGEST_SWEEP_SECONDS`,
+`INGEST_REPORT_SECONDS` and `INGEST_BATCH_GAP_SECONDS`, numbers of seconds, set how often
+the pod lists every buffer, how often its own reports load when no batch takes them, and
+how far apart a notified buffer's batches are; unset, each is 120, as the pod has always run.
+
 ### CI's wait times and compute load
 
 `integrations ci-usage` collects them into storage's `ci-usage` buffer, for BigQuery's
@@ -548,8 +554,9 @@ Every run can run again: what is ready is left alone. In order:
 |---|---|
 | the namespace `integrations` | the server's `sustenaut-app`, which makes it and its deploy identity |
 | `gcp.workload-identity` `ingest` | that the ingest's ServiceAccount may act as `integrations-ingest` (Terraform's, in shared-infra) through the `services` Workload Identity pool: the ingest reads BigQuery with no key, its `INGEST_KEY_FILE` being `k8s/google-credential.yaml`'s external_account credential. The grant is Terraform's (`infra/services-identity.tf`), so a missing one is proposed |
-| `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods may send to the ingest pod |
-| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBRULES_CHECKS`, `INGEST_BUFFERS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set: their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
+| `k8s.manifests` | `k8s/admin/network-policy.yaml` applied: only the service's pods, and the cluster's Traefik with storage's notices, may reach the ingest pod |
+| `bitwarden.secret` `ingest-notify-key` | the Secret `ingest-notify` (key `key`), from Bitwarden's `INGEST_NOTIFY_KEY`: the key storage's notices are signed with. A person makes it in Bitwarden, and sets the same value on storage's Pages project and the call-log Worker |
+| the repository's variables | `INGEST_DATASETS`, `INGEST_SIGNALS`, `INGEST_NEED_STATES`, `INGEST_PUBRULES_CHECKS`, `INGEST_BUFFERS`, `INTEGRATIONS_ORIGINS` and `INTEGRATIONS_EDIT_PR_REPOS` must be set (`INGEST_SWEEP_SECONDS`, `INGEST_REPORT_SECONDS` and `INGEST_BATCH_GAP_SECONDS` may be): their values are the owner's state file's, so a missing one is set with `pubfleet variables --apply` |
 | `DEPLOY_INTEGRATIONS` and the rollout | the gate on, once everything before it is ready, and `deploy.yml` run and waited for |
 | `service.health` | `https://integrations.sustenaut.eu/healthz` answers |
 
@@ -576,13 +583,23 @@ storage's `plane` tenant; it fails when a need is missing, drift or blocked.
 ## The call log
 
 `integrations.ingest` is the pod that gets call records into BigQuery. Services don't
-send it anything: each writes its records, through `integrations.storage_sink.StorageSink`
+send it records: each writes its records, through `integrations.storage_sink.StorageSink`
 (the `storage-sink` extra), as an Avro file in its project's buffer in the storage service
 (`inbox/calls/`), so nothing is lost while this pod or BigQuery is down. Each project has
 its own private tenant, named like its dataset.
 
-Every two minutes the pod merges what is waiting into one load job and deletes the files
-once it has loaded, so a table uses at most 720 of its 1,500 jobs a day. A record in
+Storage tells the pod of each file it takes into a buffer's inbox: `POST /ingest/notify`
+on `integrations.sustenaut.eu`, `{"tenant", "name", "size"}`, with `X-Ingest-Timestamp`
+(Unix seconds) and `X-Ingest-Signature: sha256=<hex>`, the HMAC-SHA256 under
+`INGEST_NOTIFY_KEY` of the timestamp, a dot and the body. One signed more than 300 seconds
+from the pod's clock is refused. A notice is only a hint: the pod reads the file it names
+from a buffer it scans, under that buffer's folder, with its own token. The pod merges the
+files it was told of into one load job once the first has waited 5 seconds and the
+buffer's last batch is `INGEST_BATCH_GAP_SECONDS` old (120, so a table uses at most 720 of
+its 1,500 jobs a day; 62 is the least that stays within the pod's 1,400), and deletes them
+once they have loaded, with nothing listed. A sweep lists every buffer at start and every
+`INGEST_SWEEP_SECONDS`, for what no notice named, and a buffer whose batch didn't finish is
+swept, not taken from its notices. Without notices the sweep alone does it all. A record in
 `batches/` names the files first, so a pod that stops partway sends the same job again,
 which BigQuery won't load twice. A rejected batch is split until only the bad files are
 left, and those move to `rejected/`.
@@ -590,9 +607,11 @@ left, and those move to `rejected/`.
 Every sender writes a file every two minutes, even with no calls in it, and the file's
 metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and
 storage failures. Those load into a `status` table next to `calls`, so a quiet service can
-be told from one that has stopped. The pod reports too, with a file of its own for each
-project each cycle: what is waiting and how old it is, what was rejected, and the load jobs
-used today. All of this is facts, and it holds no thresholds or alerts.
+be told from one that has stopped. The pod reports too, for each project each pass: what is
+waiting and how old it is, what was rejected, and the load jobs used today. Its report goes
+with that project's next reports job, or as a job of its own once none has gone for
+`INGEST_REPORT_SECONDS`, and is never a file in the buffer. All of this is facts, and it
+holds no thresholds or alerts.
 
 A request's calls share one id, given by the app or made by the service, and returned
 as `X-Request-Id`. That splits a slow request three ways: each call's `latency_ms` is

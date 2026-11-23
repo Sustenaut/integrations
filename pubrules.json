@@ -21,6 +21,9 @@
       "INGEST_NEED_STATES",
       "INGEST_PUBRULES_CHECKS",
       "INGEST_BUFFERS",
+      "INGEST_SWEEP_SECONDS",
+      "INGEST_REPORT_SECONDS",
+      "INGEST_BATCH_GAP_SECONDS",
       "INTEGRATIONS_ORIGINS",
       "INTEGRATIONS_EDIT_PR_REPOS"
     ],
@@ -113,6 +116,14 @@
         "secret": {
           "name": "ci-jobs-app",
           "key": "installation-id"
+        }
+      },
+      {
+        "type": "bitwarden.secret",
+        "name": "ingest-notify-key",
+        "secret": {
+          "name": "ingest-notify",
+          "key": "key"
         }
       },
       {

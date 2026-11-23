@@ -1,8 +1,21 @@
-# The ingest pod: each project's buffer in storage, into BigQuery every two minutes. One
-# replica, as one writer per table keeps a table within BigQuery's daily load jobs; to
-# scale, more pods split by dataset. Nothing sends to it, so it has no Service; its
-# only routes are /healthz and /livez. It reaches BigQuery with no key, through Workload
-# Identity (google-credential.yaml).
+# The ingest pod: each project's buffer in storage, into BigQuery as storage tells of its
+# files, and in a sweep every INGEST_SWEEP_SECONDS. One replica, as one writer per table
+# keeps a table within BigQuery's daily load jobs; to scale, more pods split by dataset.
+# Its Service takes storage's notices, POST /ingest/notify through the Ingress, signed
+# with INGEST_NOTIFY_KEY (the Secret ingest-notify; without it every notice is refused),
+# and Kubernetes' probes. It reaches BigQuery with no key, through Workload Identity
+# (google-credential.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingest
+spec:
+  selector:
+    app: integrations-ingest
+  ports:
+    - name: http
+      port: 8080
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +54,12 @@ spec:
               value: https://storage.sustenaut.eu
             - name: INGEST_STORAGE_TOKEN_FILE
               value: /var/run/secrets/storage.sustenaut.eu/token
+            - name: INGEST_NOTIFY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ingest-notify
+                  key: key
+                  optional: true
           envFrom:
             - configMapRef:
                 name: ingest-settings

@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "The ingest pod takes storage's signed notices of files in a buffer's inbox (POST /ingest/notify, HMAC-SHA256 with INGEST_NOTIFY_KEY over the timestamp and body; refused without the key) and loads the named files without listing, a buffer's batches at least INGEST_BATCH_GAP_SECONDS apart; INGEST_SWEEP_SECONDS and INGEST_REPORT_SECONDS set how often it lists every buffer and loads its own reports (120 each, as before)"
+}

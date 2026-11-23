@@ -14,6 +14,14 @@ spec:
     - host: integrations.sustenaut.eu
       http:
         paths:
+          # Storage's notices of files in a buffer, to the ingest pod (ingest.yaml).
+          - path: /ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: ingest
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:

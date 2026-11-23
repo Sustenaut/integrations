@@ -1,6 +1,8 @@
 # Applied by the deploy walk (k8s.manifests) over the admin channel: the deploy identity
-# may not manage network policies. Only the service's pods may send records to the ingest pod, which
-# takes them without a token because of this.
+# may not manage network policies. The ingest pod takes connections from the service's
+# pods, and from the cluster's Traefik, which brings it storage's signed notices
+# (POST /ingest/notify, ingress.yaml). Kubernetes' probes come from the node, which a
+# NetworkPolicy doesn't stop.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -16,5 +18,11 @@ spec:
         - podSelector:
             matchLabels:
               app: integrations
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
       ports:
         - port: 8080
