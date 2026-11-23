@@ -197,3 +197,116 @@ Feature: workers/call-log's Durable Object, on fakes of its storage and R2, and 
       [{"sender": "storage"}]
       """
     Then it is refused, saying "needs a sender and a namespace"
+
+  Scenario: With a deadline, the first record sets the alarm for the deadline
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30", "CALL_LOG_HEARTBEAT_SECONDS": "28800"}
+      """
+    When "storage" sends the records "r1"
+    And 10 seconds pass, the alarm silent
+    And "storage" sends the records "r2"
+    Then the alarm is set for 30 s after the start
+
+  Scenario: With a deadline, the file goes at the deadline and the alarm waits for the heartbeat
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30", "CALL_LOG_HEARTBEAT_SECONDS": "28800"}
+      """
+    When "storage" sends the records "r1,r2"
+    And 30 seconds pass and the alarm rings
+    Then the directory "calls-storage/inbox/calls/2027-01-15" holds:
+      """
+      080030-storage-467066caa239a044.avro
+      """
+    And the report in "calls-storage/inbox/calls/2027-01-15/080030-storage-467066caa239a044.avro" has "calls" equal to "2"
+    And the alarm is set for 28830 s after the start
+
+  Scenario: With a deadline, a record after a file brings the alarm forward
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30", "CALL_LOG_HEARTBEAT_SECONDS": "28800"}
+      """
+    When "storage" sends the records "r1"
+    And 30 seconds pass and the alarm rings
+    And 100 seconds pass, the alarm silent
+    And "storage" sends the records "r2"
+    Then the alarm is set for 160 s after the start
+
+  Scenario: With a deadline, an idle object writes nothing until its heartbeat
+    Given the object's vars are:
+      """
+      {"CALL_LOG_HEARTBEAT_SECONDS": "600"}
+      """
+    When "storage" sends the records ""
+    Then the alarm is set for 600 s after the start
+    When 300 seconds pass and the alarm rings
+    Then the file "calls-storage" does not exist
+    And the alarm is set for 600 s after the start
+    When 300 seconds pass and the alarm rings
+    Then the directory "calls-storage/inbox/calls/2027-01-15" holds:
+      """
+      081000-storage-ca8a6adee4616483.avro
+      """
+    And the report in "calls-storage/inbox/calls/2027-01-15/081000-storage-ca8a6adee4616483.avro" has "calls" equal to "0"
+    And the alarm is set for 1200 s after the start
+
+  Scenario: With a deadline, a file R2 didn't take goes again a deadline later
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30", "CALL_LOG_HEARTBEAT_SECONDS": "28800"}
+      """
+    And R2 is down
+    When "storage" sends the records "r1"
+    And 30 seconds pass and the alarm rings
+    Then the alarm is set for 60 s after the start
+
+  Scenario: Each file R2 takes is told to the ingest pod, signed with the key
+    Given the object's vars are:
+      """
+      {"INGEST_NOTIFY_KEY": "k1"}
+      """
+    When "storage" sends the records "r1"
+    And two minutes pass and the alarm rings
+    Then ingest was told, with the key "k1", of:
+      """
+      [{"url": "https://integrations.sustenaut.eu/ingest/notify", "tenant": "calls-storage",
+        "name": "inbox/calls/2027-01-15/080200-storage.avro", "sized": true, "at": "1800000120", "signed": true}]
+      """
+
+  Scenario: The notices go where INGEST_NOTIFY_URL says
+    Given the object's vars are:
+      """
+      {"INGEST_NOTIFY_KEY": "k1", "INGEST_NOTIFY_URL": "https://ingest.example/ingest/notify"}
+      """
+    When "storage" sends the records "r1"
+    And two minutes pass and the alarm rings
+    Then ingest was told, with the key "k1", of:
+      """
+      [{"url": "https://ingest.example/ingest/notify", "tenant": "calls-storage",
+        "name": "inbox/calls/2027-01-15/080200-storage.avro", "sized": true, "at": "1800000120", "signed": true}]
+      """
+
+  Scenario: Without the key the object tells no one
+    Given the object's vars are:
+      """
+      {}
+      """
+    When "storage" sends the records "r1"
+    And two minutes pass and the alarm rings
+    Then ingest was told of nothing
+    And the object keeps the records ""
+
+  Scenario: Ingest being down loses no file
+    Given the object's vars are:
+      """
+      {"INGEST_NOTIFY_KEY": "k1"}
+      """
+    And ingest is down
+    When "storage" sends the records "r1"
+    And two minutes pass and the alarm rings
+    Then the directory "calls-storage/inbox/calls/2027-01-15" holds:
+      """
+      080200-storage-b54b25193a65b295.avro
+      """
+    And the object keeps the records ""

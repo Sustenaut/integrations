@@ -587,6 +587,16 @@ once it has loaded, so a table uses at most 720 of its 1,500 jobs a day. A recor
 which BigQuery won't load twice. A rejected batch is split until only the bad files are
 left, and those move to `rejected/`.
 
+A sender can write only when it has something to say: with `CALL_LOG_DEADLINE_SECONDS`
+or `CALL_LOG_HEARTBEAT_SECONDS` in its environment (or `StorageSink`'s `deadline_seconds`
+and `heartbeat_seconds`; in JS `deadlineSeconds` and `heartbeatSeconds`; for the call-log
+object, its vars), each dataset's file goes once its first unsent call has waited the
+deadline, and a dataset with no calls writes its report alone once a heartbeat has passed
+since its last file. The one not set is two minutes, and with neither set the sender writes
+a file every two minutes, as below. The call-log object, which puts its files into R2
+itself, tells the ingest pod of each one, signed with `INGEST_NOTIFY_KEY`, as storage does
+for the files it takes.
+
 Every sender writes a file every two minutes, even with no calls in it, and the file's
 metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and
 storage failures. Those load into a `status` table next to `calls`, so a quiet service can

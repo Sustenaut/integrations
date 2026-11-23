@@ -1,4 +1,4 @@
-Feature: A sender's files: one every cycle, even with nothing in it, and nothing lost or doubled
+Feature: A sender's files: one every cycle, or when its calls are due, and nothing lost or doubled
 
   The sink writes into an in-memory storage buffer that lists, takes and gives files as
   the storage service does. What a sink's action comes to is that buffer's inbox: how
@@ -252,3 +252,149 @@ Feature: A sender's files: one every cycle, even with nothing in it, and nothing
   Scenario: The thread's first wait is within a cycle
     When I ask how long a 120 second cycle's first wait is
     Then the result is at least 0 and less than 120
+
+  Scenario: With a deadline, a call goes once it has waited the deadline
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 28800
+    And the sink was given call 1 of "a-repo"
+    And 29 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+    And the result's "files.0.request_ids" is "["r1"]"
+    And the result's "files.0.report.calls" is "1"
+    And the result's "files.0.report.cycle_start" is "2027-01-15T08:00:00Z"
+    And the result's "files.0.report.cycle_end" is "2027-01-15T08:00:30Z"
+
+  Scenario: The deadline is the first call's, not a timer's
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 28800
+    And 100 seconds pass
+    And the sink was given call 1 of "a-repo"
+    And 20 seconds pass
+    And the sink was given call 2 of "a-repo"
+    And 10 seconds pass
+    When the sink sends what is due
+    Then the result's "files.0.request_ids" is "["r1", "r2"]"
+    And the result's "files.0.report.cycle_start" is "2027-01-15T08:00:00Z"
+
+  Scenario: With a deadline, a quiet sender writes nothing until its heartbeat
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 600
+    And 599 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+    And the result's "files.0.report.calls" is "0"
+    And the result's "files.0.report.cycle_end" is "2027-01-15T08:10:00Z"
+
+  Scenario: The first heartbeat comes a random part of one in
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a heartbeat of 400 seconds whose first comes 0.25 of the way in
+    And 99 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+
+  Scenario: The heartbeat counts from the last file
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 600
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    And the sink sent what was due
+    And 570 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+
+  Scenario: The heartbeat comes once the last file is a heartbeat old
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 600
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    And the sink sent what was due
+    And 600 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "2"
+    And the result's "files.1.report.calls" is "0"
+    And the result's "files.1.report.cycle_start" is "2027-01-15T08:00:30Z"
+
+  Scenario: With a deadline, only the dataset with calls writes
+    Given a sink for the sender "app-1" sending to two datasets, "a-repo" to "one" and "b-repo" to "two", with a deadline of 30 seconds and a heartbeat of 28800
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    When the sink sends what is due
+    Then the result's "tenants" is "["one"]"
+
+  Scenario: A file storage didn't take goes again a deadline later, not before
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 28800
+    And storage takes no PUT
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    And the sink sent what was due
+    And storage takes files again
+    And 29 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+    And the result's "held" is "[]"
+    And the file held back went as it was
+
+  Scenario: The counters wait for the next file
+    Given a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and a heartbeat of 28800
+    And storage takes no PUT
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    And the sink sent what was due
+    And storage takes files again
+    And the sink was given call 2 of "a-repo"
+    And 30 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "2"
+    And the result's "files.1.report.storage_failures" is "1"
+
+  Scenario: With a deadline, a write that finds a call overdue writes it
+    Given a sink for the sender "run-1" sending "a-repo" to "ds", flushing on write, with a deadline of 30 seconds
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    When the sink is given call 2 of "a-repo"
+    Then the result's "count" is "1"
+    And the result's "files.0.request_ids" is "["r1", "r2"]"
+
+  Scenario: The deadline and the heartbeat come from the environment
+    Given the environment sets "CALL_LOG_DEADLINE_SECONDS" to "30"
+    And the environment sets "CALL_LOG_HEARTBEAT_SECONDS" to "28800"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", as the environment says
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+
+  Scenario: A heartbeat alone leaves the deadline at a cycle
+    Given the environment sets "CALL_LOG_HEARTBEAT_SECONDS" to "28800"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", as the environment says
+    And the sink was given call 1 of "a-repo"
+    And 119 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+
+  Scenario: Without either, the cycle is as it was
+    Given the environment does not set "CALL_LOG_DEADLINE_SECONDS"
+    And the environment does not set "CALL_LOG_HEARTBEAT_SECONDS"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", as the environment says
+    And 119 seconds pass
+    And the sink sent what was due
+    And 1 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "1"
+    And the result's "files.0.report.calls" is "0"
+
+  Scenario Outline: A deadline that isn't a number of seconds above 0 is refused
+    Given the environment sets "CALL_LOG_DEADLINE_SECONDS" to "<text>"
+    When a sink for the sender "app-1" is made, as the environment says
+    Then it is refused, saying "CALL_LOG_DEADLINE_SECONDS is a number of seconds above 0"
+
+    Examples:
+      | text |
+      | 0    |
+      | soon |
+      | inf  |

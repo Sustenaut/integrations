@@ -293,16 +293,36 @@ export function pythonJson(value) {
 // so the answer doesn't wait on storage. In Node, start: true also sends on a timer, whose
 // first tick comes a random part of a cycle in, so pods started together don't all send
 // at once.
+//
+// With deadlineSeconds or heartbeatSeconds (in Node, else CALL_LOG_DEADLINE_SECONDS and
+// CALL_LOG_HEARTBEAT_SECONDS), as storage_sink.py: each dataset's file goes once its first
+// unsent call is deadline seconds old, and a dataset with no calls writes a report alone
+// once heartbeat seconds have passed since its last file (the first a random part of one
+// in); the one not set is everySeconds. A file storage didn't take is tried again a
+// deadline later. flushDue() sends what is due; start: true looks each second.
 
 const EVERY_SECONDS = 120;
+const LOOK_MS = 1000;
+
+// A number of seconds above 0 from the environment, where there is one (Node), or undefined.
+export function envSeconds(name, env = globalThis.process?.env) {
+  const text = (env?.[name] ?? "").trim();
+  if (!text) return undefined;
+  const value = Number(text);
+  if (!(value > 0 && value < Infinity)) throw new TypeError(`${name} is a number of seconds above 0, not ${JSON.stringify(text)}`);
+  return value;
+}
 const PAGE_LIMIT = 10_000;
 const PUT_TIMEOUT_SECONDS = 60;
 
 export class StorageSink {
-  constructor(datasets, { sender, url, token, tokenFile, bucket, prefix = "", version = "js", everySeconds = EVERY_SECONDS, limit = 10_000, clock = () => Date.now(), fetch = (...a) => globalThis.fetch(...a), readFile, waitUntil, flushOnWrite = true, start = false, random = Math.random } = {}) {
+  constructor(datasets, { sender, url, token, tokenFile, bucket, prefix = "", version = "js", everySeconds = EVERY_SECONDS, limit = 10_000, clock = () => Date.now(), fetch = (...a) => globalThis.fetch(...a), readFile, waitUntil, flushOnWrite = true, start = false, random = Math.random, deadlineSeconds = envSeconds("CALL_LOG_DEADLINE_SECONDS"), heartbeatSeconds = envSeconds("CALL_LOG_HEARTBEAT_SECONDS") } = {}) {
     if (!sender) throw new TypeError("a StorageSink needs a sender");
     if (!bucket && !(url && (token || tokenFile))) throw new TypeError("a StorageSink needs a url and a token or tokenFile, or a bucket");
     Object.assign(this, { datasets, sender, version, everySeconds, limit, clock, fetch, waitUntil, flushOnWrite });
+    // null: the cycle. Else when a call must be sent by, and how often a quiet dataset reports.
+    this.deadline = deadlineSeconds == null && heartbeatSeconds == null ? null : (deadlineSeconds ?? everySeconds);
+    this.heartbeat = heartbeatSeconds ?? everySeconds;
     this.target = bucket ? { bucket, prefix } : { url: url.replace(/\/+$/, ""), token, tokenFile, readFile };
     const names = [...new Set(Object.values(datasets))].sort();
     this.waiting = Object.fromEntries(names.map((n) => [n, []]));
@@ -314,8 +334,16 @@ export class StorageSink {
     this.pageCount = 0;
     this.cold = true; // until the first report goes out
     this.started = clock();
+    // Each dataset's window: since its last file, when its first unsent call came, and when
+    // it next reports with nothing to say.
+    this.since = Object.fromEntries(names.map((n) => [n, this.started]));
+    this.first = Object.fromEntries(names.map((n) => [n, null]));
+    this.beat = Object.fromEntries(names.map((n) => [n, this.started + random() * this.heartbeat * 1000]));
     this.flushing = null; // one flush at a time, whoever starts it
-    if (start) {
+    if (start && this.deadline !== null) {
+      this.timer = setInterval(() => void this.flushDue(), Math.min(LOOK_MS, this.deadline * 1000));
+      this.timer.unref?.();
+    } else if (start) {
       const every = everySeconds * 1000;
       const tick = () => void this.flush();
       this.timer = setTimeout(() => {
@@ -342,11 +370,24 @@ export class StorageSink {
     }
     waiting.push({ ...record });
     this.peak[dataset] = Math.max(this.peak[dataset], waiting.length);
-    const due = this.flushOnWrite && this.clock() - this.started >= this.everySeconds * 1000;
+    this.first[dataset] ??= this.clock();
+    const due = this.flushOnWrite && this.due().length > 0;
     if (due && !this.flushing) {
-      const sent = this.flush();
+      const sent = this.flushDue();
       this.waitUntil?.(sent);
     }
+  }
+
+  // The datasets whose file is due now: in the cycle, all of them once a cycle is over;
+  // with a deadline, those whose first call has waited it, whose file storage didn't take
+  // a deadline ago, or whose heartbeat has come.
+  due() {
+    const now = this.clock();
+    const names = Object.keys(this.waiting).sort();
+    if (this.deadline === null) return now - this.started >= this.everySeconds * 1000 ? names : [];
+    const deadline = this.deadline * 1000;
+    return names.filter((n) => (this.first[n] !== null && now - this.first[n] >= deadline)
+      || (this.held[n] && now - this.since[n] >= deadline) || now >= this.beat[n]);
   }
 
   // How long the app took to answer one request, in milliseconds.
@@ -357,7 +398,16 @@ export class StorageSink {
 
   // One file per project, whatever has happened since the last. Never rejects.
   flush() {
-    if (!this.flushing) this.flushing = this.#flushAll().finally(() => (this.flushing = null));
+    if (!this.flushing) this.flushing = this.#flushThese(Object.keys(this.waiting).sort(), true).finally(() => (this.flushing = null));
+    return this.flushing;
+  }
+
+  // The files that are due (due()), and no others. Never rejects.
+  flushDue() {
+    if (this.flushing) return this.flushing;
+    const names = this.due();
+    if (!names.length) return Promise.resolve();
+    this.flushing = this.#flushThese(names, this.deadline === null).finally(() => (this.flushing = null));
     return this.flushing;
   }
 
@@ -378,19 +428,32 @@ export class StorageSink {
     };
   }
 
-  async #flushAll() {
+  // Each dataset's file. Unless every, a dataset whose held file was all that was due
+  // sends that, and no report alone before its heartbeat.
+  async #flushThese(names, every) {
     const started = this.started;
     const ended = this.clock();
     this.started = ended;
     const pages = this.#pageReport();
-    for (const dataset of Object.keys(this.waiting)) await this.#flush(dataset, started, ended, pages);
+    for (const dataset of names) {
+      const fresh = every || this.waiting[dataset].length > 0 || ended >= this.beat[dataset];
+      // The cycle's window is the sink's; with a deadline, each dataset's own.
+      const since = this.deadline === null ? started : this.since[dataset];
+      this.since[dataset] = ended;
+      if (fresh) {
+        this.first[dataset] = null;
+        this.beat[dataset] = ended + this.heartbeat * 1000;
+      }
+      await this.#flush(dataset, since, ended, pages, fresh);
+    }
   }
 
-  async #flush(dataset, started, ended, pages) {
+  async #flush(dataset, started, ended, pages, fresh = true) {
     if (this.held[dataset]) {
       if (!(await this.#put(dataset, ...this.held[dataset]))) return;
       delete this.held[dataset];
     }
+    if (!fresh) return;
     const batch = this.waiting[dataset];
     this.waiting[dataset] = [];
     const status = {
@@ -443,6 +506,38 @@ export class StorageSink {
     const read = readFile ?? (await import(fs)).readFile;
     return (await read(tokenFile, "utf8")).trim();
   }
+}
+
+// The ingest pod's word that a file arrived in a buffer's inbox (integrations.ingest.notify):
+// POST {tenant, name, size}, signed with INGEST_NOTIFY_KEY, HMAC-SHA256 over the Unix
+// seconds, a dot and the body. Never rejects: a notice that doesn't arrive only leaves the
+// file for the pod's sweep, and says why in the log.
+export const NOTIFY_URL = "https://integrations.sustenaut.eu/ingest/notify";
+const NOTIFY_TIMEOUT_SECONDS = 10;
+
+export async function noticeSignature(key, seconds, body) {
+  const text = new TextEncoder();
+  const hmac = await crypto.subtle.importKey("raw", text.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", hmac, text.encode(`${seconds}.${body}`)));
+  return `sha256=${[...mac].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export async function notifyIngest({ key, tenant, name, size, url = NOTIFY_URL, now = Date.now(), fetch = (...a) => globalThis.fetch(...a) }) {
+  if (!key) return false;
+  const body = JSON.stringify({ tenant, name, size });
+  const seconds = String(Math.floor(now / 1000));
+  try {
+    const response = await fetch(url, {
+      method: "POST", body, signal: AbortSignal.timeout(NOTIFY_TIMEOUT_SECONDS * 1000),
+      headers: { "Content-Type": "application/json", "User-Agent": AGENT, "X-Ingest-Timestamp": seconds,
+        "X-Ingest-Signature": await noticeSignature(key, seconds, body) },
+    });
+    if (response.ok) return true;
+    console.error(`integrations: ingest didn't take the notice of ${tenant}/${name}: HTTP ${response.status}`);
+  } catch (err) {
+    console.error(`integrations: ingest didn't take the notice of ${tenant}/${name}: ${err?.message ?? err}`);
+  }
+  return false;
 }
 
 // Call records into the call-log Durable Object (workers/call-log), for a Worker or a

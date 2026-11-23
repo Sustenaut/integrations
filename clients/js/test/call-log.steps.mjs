@@ -4,7 +4,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import { fromFetch } from "@sustenaut/pubtest/http";
 import { CallLog, report } from "../../../workers/call-log/src/call-log.js";
 import worker from "../../../workers/call-log/src/call-log.js";
-import { CallLogSink } from "../caller.js";
+import { CallLogSink, noticeSignature } from "../caller.js";
 import { bucket, records } from "./helpers.mjs";
 
 const START = 1_800_000_000_000; // 2027-01-15T08:00:00Z
@@ -41,6 +41,50 @@ Given("a call-log object whose senders are:", function (doc) {
   this.calls = bucket(this);
   this.clock = { now: START };
   this.object = new CallLog({ storage: this.storage }, { SENDERS: doc, CALLS: this.calls }, { now: () => this.clock.now });
+});
+
+// The object again, with these vars beside SENDERS and CALLS, and a fetch that keeps each
+// notice it is sent to the ingest pod and answers 202, or fails while ingest is down.
+Given("the object's vars are:", function (doc) {
+  const env = { SENDERS: this.object.env.SENDERS, CALLS: this.calls, ...JSON.parse(doc) };
+  this.notices = [];
+  const fetch = async (url, init) => {
+    this.notices.push({ url, ...init });
+    if (this.ingestDown) throw new TypeError("fetch failed");
+    return new Response("{}", { status: 202 });
+  };
+  this.object = new CallLog({ storage: this.storage }, env, { now: () => this.clock.now, fetch });
+});
+
+Given("ingest is down", function () {
+  this.ingestDown = true;
+});
+
+When("{int} seconds pass and the alarm rings", async function (seconds) {
+  this.clock.now += seconds * 1000;
+  await this.attempt(() => this.object.alarm());
+});
+
+When("{int} seconds pass, the alarm silent", function (seconds) {
+  this.clock.now += seconds * 1000;
+});
+
+// Each notice: where it went, its body but the name's hash, and whether its signature is
+// the key's over its timestamp and body.
+Then("ingest was told, with the key {string}, of:", async function (key, doc) {
+  const told = [];
+  for (const n of this.notices ?? []) {
+    const body = JSON.parse(n.body);
+    const seconds = n.headers["X-Ingest-Timestamp"];
+    told.push({ url: n.url, tenant: body.tenant, name: body.name.replace(/-[0-9a-f]{16}\.avro$/, ".avro"),
+      sized: body.size > 0, at: seconds, signed: n.headers["X-Ingest-Signature"] === await noticeSignature(key, seconds, n.body) });
+  }
+  const wanted = JSON.parse(doc);
+  if (JSON.stringify(told) !== JSON.stringify(wanted)) throw new Error(`ingest was told of ${JSON.stringify(told)}`);
+});
+
+Then("ingest was told of nothing", function () {
+  if ((this.notices ?? []).length) throw new Error(`ingest was told of ${JSON.stringify(this.notices)}`);
 });
 
 Given("R2 is down", function () {
