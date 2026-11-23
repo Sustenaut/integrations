@@ -644,6 +644,15 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
     And the result's "lists" is "3"
     And the result's "queued" is "[]"
 
+  Scenario: A notice that comes while the scanner goes through what it was told of is kept, and stops nothing
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When storage tells of a file for "other" while the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "queued buffers" is "["other"]"
+
   Scenario: A sweep takes what storage told of off the list
     Given a scanner of the calls of "ds"
     And calls file 1 is waiting

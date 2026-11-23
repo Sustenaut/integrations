@@ -85,6 +85,28 @@ Feature: Storage's notices: a signed word that a file arrived in a buffer's inbo
     Then the answer is 401
     And the answer includes "X-Ingest-Signature"
 
+  Scenario Outline: A notice is at most 4096 bytes
+    Given the pod's notify key is "k1"
+    When storage sends a notice of <bytes> bytes, signed with "k1"
+    Then the answer is <status>
+
+    Examples:
+      | bytes | status |
+      | 4096  | 202    |
+      | 4097  | 413    |
+
+  Scenario: A notice over 4096 bytes is refused, and its file isn't handed on
+    Given the pod's notify key is "k1"
+    When storage sends a notice of 10000 bytes, signed with "k1"
+    Then the answer is 413
+    And the answer includes "at most 4096 bytes"
+    And the scanner was handed nothing
+
+  Scenario: A notice whose length says it is over 4096 bytes is refused unread
+    Given the pod's notify key is "k1"
+    When storage sends a notice saying it is 5000 bytes long
+    Then the answer is 413
+
   Scenario: A signed body changed on the way is refused
     Given the pod's notify key is "k1"
     When storage sends a body other than the one it signed with "k1"

@@ -214,10 +214,12 @@ class Scanner:
         """The batches that are due, from the names storage told of. A buffer that didn't
         settle last time is swept instead, as only a listing finds what it left."""
         now = self.clock()
-        for dataset in sorted(self.queued):
-            with self.lock:
-                queued = dict(self.queued.get(dataset, {}))
-            if not queued or now - min(at for _, at in queued.values()) < self.wait_seconds:
+        # A copy, taken under the lock: notified() adds to the queue from the request thread.
+        with self.lock:
+            snapshot = {dataset: dict(names) for dataset, names in self.queued.items() if names}
+        for dataset in sorted(snapshot):
+            queued = snapshot[dataset]
+            if now - min(at for _, at in queued.values()) < self.wait_seconds:
                 continue
             if now - self.worked.get(dataset, float("-inf")) < self.gap_seconds:
                 continue
@@ -228,7 +230,7 @@ class Scanner:
             done = self._scan(dataset, chosen)
             with self.lock:
                 for name in done:
-                    self.queued[dataset].pop(name, None)
+                    self.queued.get(dataset, {}).pop(name, None)
 
     def _scan(self, dataset: str, chosen: list[str] | None = None) -> set[str]:
         """One project's work, a sweep's or, with `chosen`, those names alone, and its

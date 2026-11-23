@@ -592,7 +592,7 @@ Storage tells the pod of each file it takes into a buffer's inbox: `POST /ingest
 on `integrations.sustenaut.eu`, `{"tenant", "name", "size"}`, with `X-Ingest-Timestamp`
 (Unix seconds) and `X-Ingest-Signature: sha256=<hex>`, the HMAC-SHA256 under
 `INGEST_NOTIFY_KEY` of the timestamp, a dot and the body. One signed more than 300 seconds
-from the pod's clock is refused. A notice is only a hint: the pod reads the file it names
+from the pod's clock is refused, and so is a body over 4,096 bytes (413), unread. A notice is only a hint: the pod reads the file it names
 from a buffer it scans, under that buffer's folder, with its own token. The pod merges the
 files it was told of into one load job once the first has waited 5 seconds and the
 buffer's last batch is `INGEST_BATCH_GAP_SECONDS` old (120, so a table uses at most 720 of

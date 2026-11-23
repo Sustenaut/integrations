@@ -35,6 +35,8 @@ MAX_AGE_SECONDS = 300
 # As storage's BUFFER takes an inbox/ file: up to six folders, then an Avro file's name.
 NAME = re.compile(r"inbox/(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}/){0,5}[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.avro")
 MAX_BYTES = 50 * 1024 * 1024
+# A notice's body is a tenant, a name and a size: anything longer is refused unread (413).
+MAX_BODY_BYTES = 4096
 
 
 def signature(key: str, timestamp: str, body: bytes) -> str:

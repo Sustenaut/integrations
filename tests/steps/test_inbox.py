@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime, timezone
 
 from integrations.avrofile import (decode_need_states,
@@ -144,6 +145,7 @@ def seen(ctx) -> dict:
         "storage folders asked": sorted({path.split("?")[0].split("/")[0] for _, path in buffer.sent}),
         "lists": sum(path == "list" for _, path in buffer.sent),
         "queued": sorted(ctx.scanner.queued.get(ctx.buffers[-1], {})),
+        "queued buffers": sorted(key for key, names in ctx.scanner.queued.items() if names),
         "report count": len(ctx.statuses),
         "reports": ctx.statuses,
         "reported": sorted({f"{s['dataset']}.{s['table']}" if "table" in s else s["dataset"] for s in ctx.statuses}),
@@ -324,6 +326,49 @@ def scanner_passes(ctx):
 @when("the scanner takes what it was told of")
 def scanner_drains(ctx):
     ctx.attempt(lambda: (ctx.scanner.drain(), seen(ctx))[1])
+
+
+class Racing(dict):
+    """The scanner's queue, where storage's next notice comes from another thread the
+    moment the scanner starts going through it, as the pod's request thread may. The
+    notice is given a moment to land: one that waits for the scanner's lock waits."""
+
+    def __init__(self, scanner, queued, notice):
+        super().__init__(queued)
+        self.scanner, self.notice, self.thread = scanner, notice, None
+
+    def _race(self):
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.scanner.notified, args=self.notice)
+            self.thread.start()
+            self.thread.join(0.2)
+
+    def __iter__(self):
+        for n, key in enumerate(super().__iter__()):
+            if n == 0:
+                self._race()
+            yield key
+
+    def items(self):
+        for n, item in enumerate(super().items()):
+            if n == 0:
+                self._race()
+            yield item
+
+
+@when(parsers.parse('storage tells of a file for "{other}" while the scanner takes what it was told of'))
+def told_while_draining(ctx, other):
+    racing = Racing(ctx.scanner, ctx.scanner.queued, (other, "inbox/calls/2027-01-15/075009-web-9.avro", 9))
+    ctx.scanner.queued = racing
+
+    def drain():
+        try:
+            ctx.scanner.drain()
+        finally:
+            if racing.thread:
+                racing.thread.join()
+        return seen(ctx)
+    ctx.attempt(drain)
 
 
 @when(parsers.parse('the buffers scanned for INGEST_DATASETS {datasets} and the named ones of INGEST_BUFFERS {named}'))

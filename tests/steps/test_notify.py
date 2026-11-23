@@ -62,6 +62,18 @@ def storage_sends_changed(ctx, http_client, key):
     signed(ctx, http_client, key, str(int(NOW)), body, body.replace(b"1}", b"2}"))
 
 
+@when(parsers.parse('storage sends a notice of {size:d} bytes, signed with "{key}"'))
+def storage_sends_sized(ctx, http_client, size, key):
+    body = b'{"tenant": "calls-visit-ee", "name": "inbox/calls/2027-01-15/075001-app-1.avro", "size": 812}'
+    signed(ctx, http_client, key, str(int(NOW)), body + b" " * (size - len(body)))
+
+
+@when(parsers.parse("storage sends a notice saying it is {length:d} bytes long"))
+def storage_sends_long(ctx, http_client, length):
+    ctx.headers = {"Content-Length": str(length)}
+    send(ctx, http_client, "POST", "/ingest/notify", None, "application/json")
+
+
 @then("the scanner was handed:")
 def handed(ctx, docstring):
     assert ctx.handed == json.loads(docstring), f"it was handed {ctx.handed}"

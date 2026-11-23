@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ..calls import Check, health
-from .notify import ROUTE, Notices, Refused
+from .notify import MAX_BODY_BYTES, ROUTE, Notices, Refused
 
 
 def create_app(checks: Callable[[], list[Check]] = list, notices: Notices | None = None) -> FastAPI:
@@ -31,7 +31,16 @@ def create_app(checks: Callable[[], list[Check]] = list, notices: Notices | None
 
     @app.post(ROUTE)
     async def notify(request: Request) -> JSONResponse:
-        body = await request.body()
+        too_big = JSONResponse({"error": f"a notice is at most {MAX_BODY_BYTES} bytes"}, status_code=413)
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > MAX_BODY_BYTES:
+            return too_big
+        # Read no further than the limit, whatever the length said.
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > MAX_BODY_BYTES:
+                return too_big
         try:
             if notices is None:
                 raise Refused(403, "notices are off: INGEST_NOTIFY_KEY isn't set")
