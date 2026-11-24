@@ -2,7 +2,8 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
 
   Storage and BigQuery are fakes of the project's own. Each pass leaves, as its
   result, what they hold then: what BigQuery loaded, the folders of storage, and
-  the scanner's reports, one a dataset a pass.
+  the scanner's reports, one a dataset a pass. A pass is a sweep, which lists the
+  buffer; the scanner also takes the files storage told it of, without listing.
 
   Scenario: Waiting files load as one job and leave
     Given a scanner of the calls of "ds"
@@ -104,7 +105,7 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
     Then the result's "calls jobs" is "0"
     And the result's "inbox" is "["inbox/calls/2027-01-15/075001-web-1.avro", "inbox/calls/2027-01-15/075002-web-2.avro"]"
     And the result's "reports.-1.problems" includes "did not finish"
-    And the result's "reports.-1.inbox_files" is "3"
+    And the result's "reports.-1.inbox_files" is "2"
 
   Scenario: A job that failed in a way that may pass waits for its next try
     Given a scanner of the calls of "ds"
@@ -274,23 +275,67 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
     And the result's "senders" is "["web-1", "web-2", "web-3"]"
     And the result's "status kinds" is "["sender", "sender", "sender"]"
 
-  Scenario: The pod writes its report of each pass into the inbox
+  Scenario: The pod keeps its report of each pass, and writes none into the inbox
     Given a scanner of the calls of "ds"
     When the scanner passes
     Then the result's "own report count" is "1"
     And the result's "own report.kind" is "ingest"
     And the result's "own report.inbox_files" is "0"
+    And the result's "own report files" is "[]"
+    And the result's "files" is "[]"
     # It is the pod's, whatever it scanned: it names no dataset.
     And the result's "own report fields" is "["at", "cycle_end", "cycle_start", "inbox_bytes", "inbox_files", "inbox_more", "inbox_oldest_seconds", "jobs_today", "kind", "loaded_files", "problems", "rejected_files", "rejected_more", "rejected_now", "rejected_oldest_seconds", "sender", "status_jobs_today", "storage_ok", "version"]"
 
-  Scenario: The pod's report loads on the next pass
+  Scenario: The pod's report goes with the next reports job
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting with a report from "web-1"
+    When the scanner passes
+    And calls file 2 arrives with a report from "web-2"
+    And the scanner passes again
+    Then the result's "status jobs" is "2"
+    And the result's "status kinds" is "["sender", "sender", "ingest"]"
+    And the result's "own report count" is "1"
+
+  Scenario: The pod's reports load on their own once none has gone for 120 seconds
     Given a scanner of the calls of "ds"
     When the scanner passes
+    And 120 seconds pass
     And the scanner passes again
-    Then the result's "status kinds" is "["ingest"]"
-    And the result's "own report count" is "1"
-    And the result's "posts" is "0"
-    And the result's "earlier own reports kept" is "[]"
+    Then the result's "status jobs" is "1"
+    And the result's "status kinds" is "["ingest", "ingest"]"
+    And the result's "own report count" is "0"
+
+  Scenario: An idle project's reports wait for each other, not a job a pass
+    Given a scanner of the calls of "ds"
+    When the scanner passes
+    And 60 seconds pass
+    And the scanner passes again
+    Then the result's "status jobs" is "0"
+    And the result's "own report count" is "2"
+
+  Scenario: The pod's reports wait while BigQuery can't take them
+    Given a scanner of the calls of "ds"
+    And BigQuery is busy
+    And 120 seconds pass
+    When the scanner passes
+    Then the result's "own report count" is "1"
+    And the result's "reports.0.problems" includes "the pod's report waits"
+
+  Scenario: The pod's reports BigQuery rejects are let go
+    Given a scanner of the calls of "ds"
+    And BigQuery rejects the reports
+    And 120 seconds pass
+    When the scanner passes
+    Then the result's "own report count" is "0"
+    And the result's "reports.0.problems" includes "the pod's reports rejected"
+
+  Scenario: The pod's reports wait for the next day when the status table's jobs are used
+    Given a scanner of the calls of "ds"
+    And the day's load jobs of the status table are used
+    And 120 seconds pass
+    When the scanner passes
+    Then the result's "own report count" is "1"
+    And the result's "reports.0.problems" includes "the day's load jobs are used"
 
   Scenario: The pods report says what went wrong
     Given a scanner of the calls of "ds"
@@ -507,10 +552,160 @@ Feature: The scanner: files in storage reach BigQuery once and leave, whatever s
     Then it is refused, saying "INGEST_NEED_STATES and INGEST_PUBRULES_CHECKS name the same dataset"
     And the refusal is a "ValueError"
 
-  Scenario: The scan passes once at start and then each interval
-    When the scan runs over "a,b" until its second sleep, at the moment 42
-    Then the result's "events" is "["tick a,b", "sleep 120", "tick a,b", "sleep 120"]"
-    And the result's "ticked" is "[42.0]"
+  Scenario: The scan sweeps at start, takes what it is told of each second, and sweeps each interval
+    When the scan runs over "a,b", sweeping every 3 seconds, for 4 sleeps from the moment 42
+    Then the result's "events" is "["tick a,b", "sleep 1", "drain", "sleep 1", "drain", "sleep 1", "tick a,b", "sleep 1"]"
+    And the result's "ticked" is "[45.0]"
+
+  Scenario: The scan sleeps no further than its next sweep
+    When the scan runs over "a", sweeping every 0.5 seconds, for 2 sleeps from the moment 0
+    Then the result's "events" is "["tick a", "sleep 0.5", "tick a", "sleep 0.5"]"
+
+  Scenario: A file storage told of loads without a listing
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "left" is "[]"
+    And the result's "lists" is "0"
+    And the result's "queued" is "[]"
+    And the result's "reports.0.inbox_files" is "0"
+
+  Scenario: Files told of together go as one batch
+    Given a scanner of the calls of "ds"
+    And calls files 1 and 2 are waiting
+    And storage tells of calls file 1
+    And storage tells of calls file 2
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    Then the result's "loaded" is "["r1", "r2"]"
+    And the result's "calls jobs" is "1"
+
+  Scenario: A file told of waits a moment for others
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    And 4 seconds pass
+    When the scanner takes what it was told of
+    Then the result's "loaded" is "[]"
+    And the result's "queued" is "["inbox/calls/2027-01-15/075001-web-1.avro"]"
+
+  Scenario: A buffer's batches are 120 seconds apart, however much it is told of
+    Given a scanner of the calls of "ds"
+    And calls files 1 and 2 are waiting
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    And storage tells of calls file 2
+    And 60 seconds pass
+    And the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "queued" is "["inbox/calls/2027-01-15/075002-web-2.avro"]"
+
+  Scenario: The next batch goes once the gap is over
+    Given a scanner of the calls of "ds"
+    And calls files 1 and 2 are waiting
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    And storage tells of calls file 2
+    And 120 seconds pass
+    And the scanner takes what it was told of
+    Then the result's "loaded" is "["r1", "r2"]"
+    And the result's "calls jobs" is "2"
+
+  Scenario: A buffer whose batch didn't finish is swept, not taken from what it was told
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And BigQuery leaves its load jobs running
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    And calls file 2 arrives
+    And storage tells of calls file 2
+    And 120 seconds pass
+    And the scanner takes what it was told of
+    Then the result's "lists" is "3"
+    And the result's "reports.-1.problems" includes "did not finish"
+
+  Scenario: A buffer storage was down for is swept once it answers
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage does not answer a "GET"
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    And storage answers again
+    And 120 seconds pass
+    And the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "lists" is "3"
+    And the result's "queued" is "[]"
+
+  Scenario: A notice that comes while the scanner goes through what it was told of is kept, and stops nothing
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When storage tells of a file for "other" while the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "queued buffers" is "["other"]"
+
+  Scenario: A sweep takes what storage told of off the list
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    When the scanner passes
+    Then the result's "loaded" is "["r1"]"
+    And the result's "queued" is "[]"
+
+  Scenario: A file told of twice is one
+    Given a scanner of the calls of "ds"
+    And calls file 1 is waiting
+    And storage tells of calls file 1
+    And storage tells of calls file 1
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    Then the result's "loaded" is "["r1"]"
+    And the result's "calls jobs" is "1"
+
+  Scenario: A file told of that isn't there only leaves the list
+    Given a scanner of the calls of "ds"
+    And storage tells of calls file 9
+    And 5 seconds pass
+    When the scanner takes what it was told of
+    Then the result's "loaded" is "[]"
+    And the result's "queued" is "[]"
+    And the result's "batches" is "[]"
+
+  Scenario: The buffers notices may name are every call log's and the named ones
+    When the buffers scanned for INGEST_DATASETS {"repo-a": "calls_a", "repo-b": "calls_a"} and the named ones of INGEST_BUFFERS [{"tenant": "ci-usage", "dataset": "platform", "table": "ci_jobs"}]
+    Then the result is:
+      """
+      {"calls_a": ["calls-a", "inbox/calls/"], "platform.ci_jobs": ["ci-usage", "inbox/ci-jobs/"]}
+      """
+
+  Scenario Outline: The sweep's interval is a number of seconds above 0
+    When INGEST_SWEEP_SECONDS is "<text>"
+    Then the result is "<seconds>"
+
+    Examples:
+      | text  | seconds |
+      |       | 120     |
+      | 28800 | 28800.0 |
+
+  Scenario Outline: An interval that isn't a number of seconds above 0 is refused
+    When INGEST_SWEEP_SECONDS is "<text>"
+    Then it is refused, saying "INGEST_SWEEP_SECONDS is a number of seconds above 0"
+
+    Examples:
+      | text  |
+      | 0     |
+      | -5    |
+      | soon  |
+      | inf   |
 
   Scenario: CI jobs load from the tenant they share, and leave the cluster usage waiting
     Given a scanner of the buffers INGEST_PUBRULES_CHECKS and INGEST_BUFFERS name:

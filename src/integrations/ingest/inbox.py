@@ -1,6 +1,14 @@
-"""Call logs that services left in storage: scanned every two minutes, loaded into
-BigQuery as one merged job per project, and deleted. What is in the inbox is what is
-still to do, so an outage anywhere only leaves files waiting.
+"""Call logs that services left in storage: loaded into BigQuery as one merged job per
+project, and deleted. What is in the inbox is what is still to do, so an outage anywhere
+only leaves files waiting.
+
+Files reach the scanner two ways. Storage tells the pod of each file written into a
+buffer's inbox (notify.py), and the scanner takes the names it was told, without listing:
+a buffer's batch goes once its first name has waited WAIT_SECONDS and its last batch is
+GAP_SECONDS old, so a busy buffer still loads at most once a gap. And a sweep lists every
+buffer, at start and then every INGEST_SWEEP_SECONDS (INTERVAL_SECONDS unless set), for
+whatever no one told it of: files from before the pod started, a notice that never came,
+a batch that didn't finish. With no notices, the sweep alone is the scanner as it was.
 
 Before a load, a record in batches/ names its files and so its job. If this pod stops
 at any point, the next one finds the record and sends the same job again, which
@@ -10,8 +18,11 @@ A batch BigQuery rejects is split in two until only the bad files are left, whic
 to rejected/ for a person.
 
 Every file carries its sender's report for the cycle, and those go to the status table as
-one more job. This pod reports the same way, with a file of its own for each project: facts
-only, and what to make of them is for whoever reads them.
+one more job. This pod's own report of each pass, for each project, goes with them: it
+waits in memory for that project's next reports job, and when none has gone for
+INGEST_REPORT_SECONDS (INTERVAL_SECONDS unless set), it loads as a job of its own. It is
+never a file in the buffer, so a pass leaves the next one nothing to do. Facts only, and
+what to make of them is for whoever reads them.
 
 A buffer that isn't a call log has a `Kind` of its own: its inbox folder, its table, its
 files' format, and no reports. Observability's signals are one (SIGNALS): its evaluator
@@ -27,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -35,11 +47,18 @@ from typing import Callable
 from .. import __version__
 from ..avrofile import (decode, decode_ci_jobs, decode_cluster_usage, decode_need_states, decode_pubrules_checks,
                         decode_signals, encode, encode_ci_jobs, encode_cluster_usage, encode_need_states,
-                        encode_pubrules_checks, encode_signals, encode_status, file_name, file_status, timestamp)
+                        encode_pubrules_checks, encode_signals, encode_status, file_status, timestamp)
 from ..calls import Request, Response, Transport
 from .bigquery import STATUS_TABLE, TABLE, BigQueryLoader, JobBudget, LoadResult, Outcome, job_id
 
 INTERVAL_SECONDS = 120
+# A notified name waits this long, so the files written about together go as one batch.
+WAIT_SECONDS = 5
+# A buffer's batches are at least this far apart. 120 keeps a table to 720 load jobs a
+# day; 62 is as low as it can go within JOBS_PER_TABLE_PER_DAY.
+GAP_SECONDS = 120
+# The pod's own reports a project keeps while BigQuery can't take them; past it the oldest go.
+REPORTS_KEPT = 60
 INBOX = "inbox/calls/"
 BATCHES = "batches/"
 REJECTED = "rejected/"
@@ -155,25 +174,85 @@ class Scanner:
     # A buffer's Kind, by its key, when it isn't a call log.
     kinds: dict[str, Kind] = field(default_factory=dict)
 
+    # How often the pod's own reports load when nothing else takes them, and how a
+    # notified buffer's batches are spaced.
+    report_seconds: float = INTERVAL_SECONDS
+    wait_seconds: float = WAIT_SECONDS
+    gap_seconds: float = GAP_SECONDS
+    # The pod's reports waiting for their project's next reports job, when each project's
+    # reports last loaded, the names storage told of, by buffer (each with its size and when
+    # it was told), when each buffer was last worked on, and the buffers a sweep must settle.
+    pending: dict[str, list[dict]] = field(default_factory=dict)
+    reports_loaded: dict[str, float] = field(default_factory=dict)
+    queued: dict[str, dict[str, tuple[int, float]]] = field(default_factory=dict)
+    worked: dict[str, float] = field(default_factory=dict)
+    unsettled: set[str] = field(default_factory=set)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def __post_init__(self):
+        # Counted from the pod's start: a new pod's first report waits for a reports job a while.
+        self.started = self.clock()
+
     def kind(self, dataset: str) -> Kind:
         return self.kinds.get(dataset, CALLS)
 
     def tick(self, datasets: list[str]) -> None:
+        """A sweep: every buffer listed, and what it finds worked through."""
         for dataset in datasets:
-            self._scan(dataset)
+            done = self._scan(dataset)
+            with self.lock:
+                for name in done:
+                    self.queued.get(dataset, {}).pop(name, None)
 
-    def _scan(self, dataset: str) -> None:
+    def notified(self, dataset: str, name: str, size: int) -> None:
+        """Storage took `name` into the buffer: it goes in that buffer's next batch. Safe
+        from any thread; the same name twice is one."""
+        with self.lock:
+            self.queued.setdefault(dataset, {}).setdefault(name, (size, self.clock()))
+
+    def drain(self) -> None:
+        """The batches that are due, from the names storage told of. A buffer that didn't
+        settle last time is swept instead, as only a listing finds what it left."""
+        now = self.clock()
+        # A copy, taken under the lock: notified() adds to the queue from the request thread.
+        with self.lock:
+            snapshot = {dataset: dict(names) for dataset, names in self.queued.items() if names}
+        for dataset in sorted(snapshot):
+            queued = snapshot[dataset]
+            if now - min(at for _, at in queued.values()) < self.wait_seconds:
+                continue
+            if now - self.worked.get(dataset, float("-inf")) < self.gap_seconds:
+                continue
+            if dataset in self.unsettled:
+                self.tick([dataset])
+                continue
+            chosen = self._choose([Waiting(name, size, at) for name, (size, at) in sorted(queued.items())])
+            done = self._scan(dataset, chosen)
+            with self.lock:
+                for name in done:
+                    self.queued.get(dataset, {}).pop(name, None)
+
+    def _scan(self, dataset: str, chosen: list[str] | None = None) -> set[str]:
+        """One project's work, a sweep's or, with `chosen`, those names alone, and its
+        report. The names it settled come back."""
         started = self.clock()
+        self.worked[dataset] = started
+        done: set[str] = set()
         status = {"kind": "ingest", "sender": self.sender, "version": __version__, "storage_ok": True,
                   "loaded_files": 0, "rejected_now": 0}
         problems: list[str] = []
         try:
-            self._work(dataset, status, problems)
+            if chosen is None:
+                self._work(dataset, status, problems, done)
+            else:
+                self._take(dataset, chosen, status, problems, done)
         except StorageDown as e:
             status["storage_ok"] = False
             problems.append(str(e))
+            self.unsettled.add(dataset)
         except Exception as e:  # noqa: BLE001 - one project's bad day must not stop the rest
             problems.append(f"{type(e).__name__}: {e}")
+            self.unsettled.add(dataset)
         ended = self.clock()
         kind = self.kind(dataset)
         status.update(at=timestamp(ended), cycle_start=timestamp(started), cycle_end=timestamp(ended),
@@ -183,34 +262,73 @@ class Scanner:
             # Its report goes to the log alone: the buffer holds only what it is for.
             self.report({**status, "dataset": dataset_of(dataset), "table": kind.table,
                          "problems": "; ".join(problems) or None})
-            return
-        try:
-            data = encode([], {**status, "problems": "; ".join(problems) or None})
-            self.inbox.put(dataset, file_name(ended, self.sender, data), data)
-        except StorageDown as e:
-            status["storage_ok"] = False
-            problems.append(str(e))
-        except Exception as e:  # noqa: BLE001 - a report that can't be made must not stop the next project
-            problems.append(f"no report: {type(e).__name__}: {e}")
+            return done
+        own = {**status, "problems": "; ".join(problems) or None}
+        kept = self.pending.setdefault(dataset, [])
+        kept.append(own)
+        del kept[:-REPORTS_KEPT]
+        self._load_own(dataset, problems)
         self.report({**status, "dataset": dataset, "problems": "; ".join(problems) or None})
+        return done
 
-    def _work(self, dataset: str, status: dict, problems: list[str]) -> None:
+    def _load_own(self, dataset: str, problems: list[str]) -> None:
+        """The pod's reports as a job of their own, once none has gone with a batch for
+        report_seconds (a tenth early, so passes that drift don't skip one)."""
+        since = self.clock() - self.reports_loaded.get(dataset, self.started)
+        own = self.pending.get(dataset)
+        if not own or since < self.report_seconds * 0.9:
+            return
+        if not self.jobs.may_load(dataset_of(dataset), STATUS_TABLE):
+            problems.append("the pod's report waits: the day's load jobs are used")
+            return
+        self.jobs.spend(dataset_of(dataset), STATUS_TABLE)
+        rows = list(own)
+        digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+        result = self.loader.load(dataset_of(dataset), encode_status(rows), job_id("ingest", digest), STATUS_TABLE)
+        if result.outcome is Outcome.RETRY:
+            problems.append(f"the pod's report waits: {result.detail}")
+            return
+        if result.outcome is Outcome.REJECTED:
+            problems.append(f"the pod's reports rejected: {result.detail}")
+        self._loaded_own(dataset, len(rows))
+
+    def _loaded_own(self, dataset: str, count: int) -> None:
+        del self.pending.get(dataset, [])[:count]
+        self.reports_loaded[dataset] = self.clock()
+
+    def _work(self, dataset: str, status: dict, problems: list[str], done: set[str]) -> None:
         finished = True
         for record in self.inbox.list(dataset, self.kind(dataset).batches)[0]:
-            finished = self._resume(dataset, record.name, status, problems) and finished
+            finished = self._resume(dataset, record.name, status, problems, done) and finished
         waiting, more = self.inbox.list(dataset, self.kind(dataset).folder)
-        done: set[str] = set()
         if finished and waiting:
-            files = self._choose(waiting)
-            record = f"{self.kind(dataset).batches}{_batch_job(files, 0)}.json"
-            held = {"files": files, "attempt": 0, "status_attempt": 0, "status_done": False}
-            self.inbox.put(dataset, record, json.dumps(held).encode())
-            self._run(dataset, record, held, done, status, problems)
+            finished = self._batch(dataset, self._choose(waiting), done, status, problems)
+        if finished:
+            self.unsettled.discard(dataset)
+        else:
+            self.unsettled.add(dataset)
         left = [f for f in waiting if f.name not in done]
         rejected, rejected_more = self.inbox.list(dataset, REJECTED)
         status.update(inbox_files=len(left), inbox_bytes=sum(f.size for f in left), inbox_more=more,
                       inbox_oldest_seconds=self._age(left), rejected_files=len(rejected),
                       rejected_more=rejected_more, rejected_oldest_seconds=self._age(rejected))
+
+    def _take(self, dataset: str, files: list[str], status: dict, problems: list[str], done: set[str]) -> None:
+        """The names storage told of, as one batch, with nothing listed. What is left
+        waiting is what the pod was told of and hasn't settled."""
+        if not self._batch(dataset, files, done, status, problems):
+            self.unsettled.add(dataset)
+        with self.lock:
+            left = [Waiting(n, size, at) for n, (size, at) in self.queued.get(dataset, {}).items() if n not in done]
+        status.update(inbox_files=len(left), inbox_bytes=sum(f.size for f in left), inbox_more=None,
+                      inbox_oldest_seconds=self._age(left))
+
+    def _batch(self, dataset: str, files: list[str], done: set[str], status: dict, problems: list[str]) -> bool:
+        """A batch record for `files`, then the batch. True once it is settled."""
+        record = f"{self.kind(dataset).batches}{_batch_job(files, 0)}.json"
+        held = {"files": files, "attempt": 0, "status_attempt": 0, "status_done": False}
+        self.inbox.put(dataset, record, json.dumps(held).encode())
+        return self._run(dataset, record, held, done, status, problems)
 
     def _age(self, files: list[Waiting]) -> int | None:
         return int(self.clock() - min(f.uploaded for f in files)) if files else None
@@ -225,11 +343,14 @@ class Scanner:
             size += f.size
         return files
 
-    def _resume(self, dataset: str, record: str, status: dict, problems: list[str]) -> bool:
+    def _resume(self, dataset: str, record: str, status: dict, problems: list[str], done: set[str]) -> bool:
         data = self.inbox.read(dataset, record)
         if data is None:
             return True
-        return self._run(dataset, record, json.loads(data), set(), status, problems)
+        gone: set[str] = set()
+        finished = self._run(dataset, record, json.loads(data), gone, status, problems)
+        done.update(gone)
+        return finished
 
     def _run(self, dataset: str, record: str, held: dict, gone: set[str], status: dict, problems: list[str]) -> bool:
         """Settles the record's files, adding to `gone` those no longer in the inbox. The
@@ -280,7 +401,11 @@ class Scanner:
 
     def _load_reports(self, dataset: str, record: str, held: dict, reports: list[dict], problems: list[str]) -> bool:
         """False when the batch has to wait. A record notes when its reports have loaded, so
-        a new job for its calls can't load them twice."""
+        a new job for its calls can't load them twice. The pod's own reports go with them.
+        The job's id is its files', so a try after a crash is the same job; the pod's
+        reports in a job that had already gone are the ones lost."""
+        own = list(self.pending.get(dataset, [])) if self.kind(dataset).reports else []
+        reports = reports + own
         if not reports or held["status_done"]:
             return True
         if not self.jobs.may_load(dataset_of(dataset), STATUS_TABLE):
@@ -298,6 +423,7 @@ class Scanner:
         if result.outcome is Outcome.REJECTED:
             problems.append(f"reports rejected: {result.detail}")
         held["status_done"] = True
+        self._loaded_own(dataset, len(own))
         return True
 
     def _settle(self, dataset, files, rows, contents, attempt, gone, status, problems) -> LoadResult:

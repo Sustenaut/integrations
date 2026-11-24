@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "The ingest pod no longer writes its report of each pass as a file into the project's buffer: it goes with that project's next reports job, or as a job of its own once none has gone for INGEST_REPORT_SECONDS"
+}

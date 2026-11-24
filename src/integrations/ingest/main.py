@@ -9,7 +9,13 @@ INGEST_PUBRULES_CHECKS the platform's nightly pubrules checks into its pubrules_
 INGEST_BUFFERS names any number more, as a list: [{"tenant": ..., "dataset": ..., "table":
 ...}], each the Kind whose table it names (inbox.KINDS), so one dataset may hold several
 (platform's ci_jobs and cluster_usage, both from the tenant ci-usage, beside its
-pubrules_checks). The three variables above keep working as they are."""
+pubrules_checks). The three variables above keep working as they are.
+
+INGEST_NOTIFY_KEY turns on storage's notices (notify.py): without it, POST /ingest/notify
+refuses everything and the sweep alone finds the files. INGEST_SWEEP_SECONDS is how often
+the sweep lists every buffer, INGEST_REPORT_SECONDS how often the pod's own reports load
+when no batch takes them, and INGEST_BATCH_GAP_SECONDS how far apart a notified buffer's
+batches are (inbox.py); unset, they are 120, 120 and 120."""
 
 from __future__ import annotations
 
@@ -23,7 +29,12 @@ from ..calls import Caller, Check, Network, StdoutSink
 from .app import create_app
 from .bigquery import BigQueryLoader, JobBudget
 from .google_token import google_token, project_of
-from .inbox import INTERVAL_SECONDS, KINDS, NEED_STATES, PUBRULES_CHECKS, SIGNALS, Inbox, Kind, Scanner, dataset_of
+from .inbox import (CALLS, GAP_SECONDS, INTERVAL_SECONDS, KINDS, NEED_STATES, PUBRULES_CHECKS, SIGNALS, Inbox, Kind,
+                    Scanner, dataset_of, tenant_of)
+from .notify import Notices
+
+# The scan loop's longest sleep between looks at what storage told of.
+STEP_SECONDS = 1.0
 
 
 def buffer(text: str, variable: str, kind: Kind) -> tuple[dict[str, str], dict[str, Kind]]:
@@ -103,6 +114,28 @@ def named_buffers(signals_text: str, need_states_text: str, pubrules_checks_text
     return tenants, kinds
 
 
+def seconds(variable: str, text: str | None, default: float) -> float:
+    """A number of seconds a variable gives, above 0, or the default when it is unset."""
+    if text is None or not text.strip():
+        return default
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not value > 0 or value == float("inf"):
+        raise ValueError(f"{variable} is a number of seconds above 0, not {text!r}")
+    return value
+
+
+def scanned(datasets: dict[str, str], tenants: dict[str, str], kinds: dict[str, Kind]) -> dict[str, tuple[str, Kind]]:
+    """Every buffer the scanner scans, by its key, with its tenant and Kind: each call log's
+    (INGEST_DATASETS), named like its dataset, and the named buffers."""
+    found = {dataset: (tenant_of(dataset), CALLS) for dataset in set(datasets.values())}
+    for key, kind in kinds.items():
+        found[key] = (tenants.get(key) or tenant_of(dataset_of(key)), kind)
+    return found
+
+
 def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     datasets = json.loads(os.environ["INGEST_DATASETS"])
     tenants, kinds = named_buffers(os.environ.get("INGEST_SIGNALS", ""), os.environ.get("INGEST_NEED_STATES", ""),
@@ -114,26 +147,41 @@ def build():  # pragma: no cover - the pod's wiring, with real paths and keys
     loader = BigQueryLoader(caller, google_token(caller, key), project_of(key))
     inbox = Inbox(Network(), lambda: storage_token.read_text(encoding="utf-8").strip(), os.environ["INGEST_STORAGE_URL"],
                   tenants)
+    env = os.environ.get
     scanner = Scanner(inbox, loader, JobBudget(), report=lambda status: print(json.dumps(status), flush=True),
-                      sender=os.environ.get("HOSTNAME", "ingest"), kinds=kinds)
+                      sender=env("HOSTNAME", "ingest"), kinds=kinds,
+                      report_seconds=seconds("INGEST_REPORT_SECONDS", env("INGEST_REPORT_SECONDS"), INTERVAL_SECONDS),
+                      gap_seconds=seconds("INGEST_BATCH_GAP_SECONDS", env("INGEST_BATCH_GAP_SECONDS"), GAP_SECONDS))
+    sweep = seconds("INGEST_SWEEP_SECONDS", env("INGEST_SWEEP_SECONDS"), INTERVAL_SECONDS)
     buffers = sorted(set(datasets.values()) | set(kinds))
+    notices = Notices(env("INGEST_NOTIFY_KEY", "").strip(), scanned(datasets, tenants, kinds), scanner.notified,
+                      time.time)
 
     ticked = [time.monotonic()]
-    threading.Thread(target=scan, args=(scanner, buffers, ticked), daemon=True).start()
-    return create_app(lambda: [scanning(time.monotonic() - ticked[0])])
+    threading.Thread(target=scan, args=(scanner, buffers, ticked), kwargs={"sweep_seconds": sweep},
+                     daemon=True).start()
+    return create_app(lambda: [scanning(time.monotonic() - ticked[0])], notices)
 
 
-def scan(scanner: Scanner, buffers: list[str], ticked: list[float], *, sleep=time.sleep, clock=time.monotonic) -> None:
-    """The scanner's loop: a pass straight away, then one every interval. Passing first
-    means a new pod reports at once, so a deploy leaves no gap longer than its restart."""
+def scan(scanner: Scanner, buffers: list[str], ticked: list[float], *, sleep=time.sleep, clock=time.monotonic,
+         sweep_seconds: float = INTERVAL_SECONDS, step: float = STEP_SECONDS) -> None:
+    """The scanner's loop: a sweep straight away, then one every sweep_seconds, and
+    between them, every step, the batches storage's notices made due. Sweeping first
+    means a new pod reports at once and finds what came while it was away, so a deploy
+    leaves no gap longer than its restart."""
+    due = clock()
     while True:
-        scanner.tick(buffers)
+        if clock() >= due:
+            scanner.tick(buffers)
+            due = clock() + sweep_seconds
+        else:
+            scanner.drain()
         ticked[0] = clock()
-        sleep(INTERVAL_SECONDS)
+        sleep(max(0.0, min(step, due - clock())))
 
 
 def scanning(since: float) -> Check:
-    """The scanner works while it finishes a pass every few intervals: a pass that
+    """The scanner works while its loop comes round within a few intervals: a pass that
     hangs, or a thread that died, stops the clock."""
     return Check("ingest.scanner", since < 3 * INTERVAL_SECONDS, f"last pass {int(since)} s ago")
 

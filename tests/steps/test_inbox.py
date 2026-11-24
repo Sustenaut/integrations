@@ -10,16 +10,16 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime, timezone
 
 from integrations.avrofile import (decode_need_states,
                                    decode_pubrules_checks, decode_signals, encode, encode_ci_jobs,
-                                   encode_cluster_usage, encode_need_states, encode_pubrules_checks, encode_signals,
-                                   file_status)
+                                   encode_cluster_usage, encode_need_states, encode_pubrules_checks, encode_signals)
 from integrations.calls import Caller, MemorySink
 from integrations.ingest.bigquery import JOBS_PER_TABLE_PER_DAY, STATUS_TABLE, BigQueryLoader, JobBudget
 from integrations.ingest.inbox import KINDS, Inbox, Scanner, Waiting
-from integrations.ingest.main import buffers, named_buffers, need_states, pubrules_checks, scan, signals
+from integrations.ingest.main import buffers, named_buffers, need_states, pubrules_checks, scan, scanned, seconds, signals
 from pubtest.core import dig, show
 from pytest_bdd import given, parsers, scenarios, then, when
 
@@ -100,7 +100,8 @@ def world(ctx, buffers_to_scan, tenants=None, kinds=None):
     ctx.buffers = buffers_to_scan
     ctx.put, ctx.own_before = {}, []
     caller = Caller("integrations", "ingest", sink=MemorySink(), transport=ctx.bigquery, sleep=lambda _: None)
-    clock = lambda: 1_800_000_000.0  # noqa: E731 - a moment after the files' upload time
+    ctx.now = [1_800_000_000.0]  # a moment after the files' upload time, which "seconds pass" moves on
+    clock = lambda: ctx.now[0]  # noqa: E731
     ctx.scanner = Scanner(Inbox(ctx.buffer, lambda: "pod-token", BASE, tenants),
                           BigQueryLoader(caller, lambda: "gcp-token", "proj", sleep=lambda _: None, polls=2),
                           JobBudget(clock), ctx.statuses.append, clock, kinds=kinds or {})
@@ -109,8 +110,9 @@ def world(ctx, buffers_to_scan, tenants=None, kinds=None):
 def seen(ctx) -> dict:
     """What storage, BigQuery and the scanner's reports hold now."""
     buffer, bigquery = ctx.buffer, ctx.bigquery
-    batches, own = buffer.under("batches/"), sorted(n for n in buffer.files if "-ingest-" in n)
+    batches, own_files = buffer.under("batches/"), sorted(n for n in buffer.files if "-ingest-" in n)
     dataset = ctx.buffers[-1].partition(".")[0]
+    own = ctx.scanner.pending.get(ctx.buffers[-1], [])
     return {
         "loaded": sorted(r["request_id"] for r in bigquery.rows),
         "posts": bigquery.posts,
@@ -136,12 +138,14 @@ def seen(ctx) -> dict:
         "rejected as they came": [n for n in buffer.under("rejected/")
                                   if ctx.put.get(n.replace("rejected/", "inbox/", 1)) == buffer.files[n]],
         "left": buffer.left(),
-        "own reports": own,
+        "own report files": own_files,
         "own report count": len(own),
-        "own report": file_status(buffer.files[own[0]]) if own else None,
-        "own report fields": sorted(file_status(buffer.files[own[0]])) if own else None,
-        "earlier own reports kept": [n for n in ctx.own_before if n in buffer.files],
+        "own report": own[0] if own else None,
+        "own report fields": sorted(own[0]) if own else None,
         "storage folders asked": sorted({path.split("?")[0].split("/")[0] for _, path in buffer.sent}),
+        "lists": sum(path == "list" for _, path in buffer.sent),
+        "queued": sorted(ctx.scanner.queued.get(ctx.buffers[-1], {})),
+        "queued buffers": sorted(key for key, names in ctx.scanner.queued.items() if names),
         "report count": len(ctx.statuses),
         "reports": ctx.statuses,
         "reported": sorted({f"{s['dataset']}.{s['table']}" if "table" in s else s["dataset"] for s in ctx.statuses}),
@@ -199,6 +203,7 @@ def bad_waiting(ctx, n):
 
 
 @given(parsers.parse('calls file {n:d} is waiting with a report from "{sender}"'))
+@when(parsers.parse('calls file {n:d} arrives with a report from "{sender}"'))
 def reported_waiting(ctx, n, sender):
     waiting(ctx, n, report(sender=sender))
 
@@ -285,12 +290,25 @@ def no_encoding(monkeypatch):
 def work_fails(ctx, dataset, message):
     real = ctx.scanner._work
 
-    def work(name, status, problems):
+    def work(name, status, problems, done):
         if name == dataset:
             raise RuntimeError(message)
-        real(name, status, problems)
+        real(name, status, problems, done)
 
     ctx.scanner._work = work
+
+
+@given(parsers.parse("{seconds:d} seconds pass"))
+@when(parsers.parse("{seconds:d} seconds pass"))
+def seconds_pass(ctx, seconds):
+    ctx.now[0] += seconds
+
+
+@given(parsers.parse("storage tells of calls file {n:d}"))
+@when(parsers.parse("storage tells of calls file {n:d}"))
+def told_of(ctx, n):
+    name = f"inbox/calls/2027-01-15/0750{n:02d}-web-{n}.avro"
+    ctx.scanner.notified(ctx.buffers[-1], name, len(ctx.buffer.files.get(name, b"")))
 
 
 # --- the actions ------------------------------------------------------------------------------------------------
@@ -303,6 +321,62 @@ def passes(ctx, keys=None):
 @when("the scanner passes")
 def scanner_passes(ctx):
     passes(ctx)
+
+
+@when("the scanner takes what it was told of")
+def scanner_drains(ctx):
+    ctx.attempt(lambda: (ctx.scanner.drain(), seen(ctx))[1])
+
+
+class Racing(dict):
+    """The scanner's queue, where storage's next notice comes from another thread the
+    moment the scanner starts going through it, as the pod's request thread may. The
+    notice is given a moment to land: one that waits for the scanner's lock waits."""
+
+    def __init__(self, scanner, queued, notice):
+        super().__init__(queued)
+        self.scanner, self.notice, self.thread = scanner, notice, None
+
+    def _race(self):
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.scanner.notified, args=self.notice)
+            self.thread.start()
+            self.thread.join(0.2)
+
+    def __iter__(self):
+        for n, key in enumerate(super().__iter__()):
+            if n == 0:
+                self._race()
+            yield key
+
+    def items(self):
+        for n, item in enumerate(super().items()):
+            if n == 0:
+                self._race()
+            yield item
+
+
+@when(parsers.parse('storage tells of a file for "{other}" while the scanner takes what it was told of'))
+def told_while_draining(ctx, other):
+    racing = Racing(ctx.scanner, ctx.scanner.queued, (other, "inbox/calls/2027-01-15/075009-web-9.avro", 9))
+    ctx.scanner.queued = racing
+
+    def drain():
+        try:
+            ctx.scanner.drain()
+        finally:
+            if racing.thread:
+                racing.thread.join()
+        return seen(ctx)
+    ctx.attempt(drain)
+
+
+@when(parsers.parse('the buffers scanned for INGEST_DATASETS {datasets} and the named ones of INGEST_BUFFERS {named}'))
+def buffers_scanned(ctx, datasets, named):
+    def found():
+        tenants, kinds = buffers(named)
+        return {key: [tenant, kind.folder] for key, (tenant, kind) in scanned(json.loads(datasets), tenants, kinds).items()}
+    ctx.attempt(found)
 
 
 @when("the scanner passes again")
@@ -344,7 +418,10 @@ def kinds_by_table(found):
 
 @when(parsers.re(r'(?P<variable>INGEST_[A-Z_]+) is "(?P<text>.*)"'))
 def variable_is(ctx, variable, text):
-    ctx.attempt(lambda: kinds_by_table(VARIABLES[variable](text)))
+    if variable.endswith("_SECONDS"):
+        ctx.attempt(lambda: seconds(variable, text, 120))
+    else:
+        ctx.attempt(lambda: kinds_by_table(VARIABLES[variable](text)))
 
 
 @when("the ingest buffers are read from:")
@@ -369,26 +446,32 @@ def written_twice(ctx, what):
                          "read back unchanged": read(write(rows())) == rows()})
 
 
-@when(parsers.parse('the scan runs over "{keys}" until its second sleep, at the moment {moment:g}'))
-def scan_runs(ctx, keys, moment):
+@when(parsers.parse('the scan runs over "{keys}", sweeping every {sweep:g} seconds, for {sleeps:d} sleeps from the moment {moment:g}'))
+def scan_runs(ctx, keys, sweep, sleeps, moment):
     events: list[str] = []
     ticked = [0.0]
 
     class Stop(Exception):
         pass
 
+    clock = [moment]
+
     class Ticking:
         def tick(self, buffers_):
             events.append(f"tick {','.join(buffers_)}")
 
+        def drain(self):
+            events.append("drain")
+
     def sleep(seconds):
-        events.append(f"sleep {seconds}")
-        if events.count(f"sleep {seconds}") == 2:
+        events.append(f"sleep {seconds:g}")
+        clock[0] += seconds
+        if sum(e.startswith("sleep") for e in events) == sleeps:
             raise Stop
 
     def run():
         try:
-            scan(Ticking(), keys.split(","), ticked, sleep=sleep, clock=lambda: moment)
+            scan(Ticking(), keys.split(","), ticked, sleep=sleep, clock=lambda: clock[0], sweep_seconds=sweep)
         except Stop:
             return {"events": events, "ticked": ticked}
         raise AssertionError("the scan stopped by itself")
