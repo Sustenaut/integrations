@@ -364,3 +364,108 @@ Feature: caller.js's StorageSink, as tests/steps/test_storage_sink.py holds stor
     When the sink of the vector writes its records and page times, two minutes in
     Then the result is the JSON in "tests/vectors/sink.json"
     And the file "ds/inbox/calls/2027-01-15/080200-app-1-x-251562cc672d4443.avro" is the repository's "tests/vectors/sink.avro"
+
+  Scenario: With a deadline, a call goes once it has waited the deadline
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline is 30 seconds and its heartbeat 28800
+    When it is given the records "r1"
+    And 29 seconds pass
+    And it sends what is due
+    Then the result is "[]"
+    When 1 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["ds"]
+      """
+
+  Scenario: With a deadline, a quiet sender writes nothing until its heartbeat
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline is 30 seconds and its heartbeat 600
+    When 599 seconds pass
+    And it sends what is due
+    Then the result is "[]"
+    When 1 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["ds"]
+      """
+
+  Scenario: The first heartbeat comes a random part of one in
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its heartbeat is 400 seconds, the first 0.25 of the way in
+    When 100 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["ds"]
+      """
+
+  Scenario: With a deadline, only the dataset with calls writes, and a held file goes alone
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "one", "b-repo": "two"}
+      """
+    And its deadline is 30 seconds and its heartbeat 28800
+    And storage is down
+    When it is given the records "r1"
+    And 30 seconds pass
+    And it sends what is due
+    And storage takes files again
+    And 29 seconds pass
+    And it sends what is due
+    Then the result is "[]"
+    When 1 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["one"]
+      """
+
+  Scenario: With a deadline, a write that finds a call overdue sends it
+    Given a StorageSink "run-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline is 30 seconds and its heartbeat 28800
+    And it flushes from a write that finds the file overdue, handing that to waitUntil
+    When it is given the records "r1"
+    And 30 seconds pass
+    And it is given the records "r2"
+    Then the result's "ds" is "[]"
+
+  Scenario: The deadline and the heartbeat come from the environment
+    Given the environment sets "CALL_LOG_DEADLINE_SECONDS" to "30"
+    And the environment sets "CALL_LOG_HEARTBEAT_SECONDS" to "28800"
+    And a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline and heartbeat are the environment's
+    When it is given the records "r1"
+    And 30 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["ds"]
+      """
+
+  Scenario: A deadline that isn't a number of seconds above 0 is refused
+    Given the environment sets "CALL_LOG_DEADLINE_SECONDS" to "soon"
+    And a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline and heartbeat are the environment's
+    When it is made
+    Then it is refused, saying "CALL_LOG_DEADLINE_SECONDS is a number of seconds above 0"

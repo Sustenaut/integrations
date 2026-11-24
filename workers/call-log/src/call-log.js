@@ -15,8 +15,19 @@
 //
 // The cycle's payload is report() below, so health checks and other statistics can join
 // the sender's report there.
+//
+// With CALL_LOG_DEADLINE_SECONDS or CALL_LOG_HEARTBEAT_SECONDS (wrangler.toml's vars), as
+// caller.js's StorageSink: the alarm rings once the first record kept has waited the
+// deadline, and with nothing kept it writes a report alone a heartbeat after its last
+// file; the one not set is EVERY_SECONDS. A file R2 didn't take goes again a deadline
+// later. With neither, it is the cycle above.
+//
+// After R2 takes a file, the object tells the ingest pod of it (caller.js's notifyIngest),
+// as storage does for the files it takes, since this one never passes through storage:
+// signed with the secret INGEST_NOTIFY_KEY, to INGEST_NOTIFY_URL or integrations'. Without
+// the key it tells no one, and the pod's sweep finds the file.
 
-import { encode, fileName, timestamp } from "../../../clients/js/caller.js";
+import { encode, envSeconds, fileName, notifyIngest, timestamp } from "../../../clients/js/caller.js";
 
 const EVERY_SECONDS = 120;
 const LIMIT = 10_000; // records an instance keeps; past it the oldest go, and are counted
@@ -24,9 +35,15 @@ const BATCH_DELETE = 128; // keys Durable Object storage deletes at once
 const RECORD = "r:";
 
 export class CallLog {
-  constructor(state, env, { now = () => Date.now() } = {}) {
-    Object.assign(this, { storage: state.storage, env, now });
+  constructor(state, env, { now = () => Date.now(), fetch = (...a) => globalThis.fetch(...a) } = {}) {
+    Object.assign(this, { storage: state.storage, env, now, send: fetch });
     this.senders = typeof env.SENDERS === "string" ? JSON.parse(env.SENDERS) : env.SENDERS ?? {};
+    const vars = { CALL_LOG_DEADLINE_SECONDS: env.CALL_LOG_DEADLINE_SECONDS, CALL_LOG_HEARTBEAT_SECONDS: env.CALL_LOG_HEARTBEAT_SECONDS };
+    const deadline = envSeconds("CALL_LOG_DEADLINE_SECONDS", vars);
+    const heartbeat = envSeconds("CALL_LOG_HEARTBEAT_SECONDS", vars);
+    // null: the cycle. Else when a record must be sent by, and how often a quiet sender reports, in ms.
+    this.deadline = deadline === undefined && heartbeat === undefined ? null : (deadline ?? EVERY_SECONDS) * 1000;
+    this.heartbeat = (heartbeat ?? EVERY_SECONDS) * 1000;
   }
 
   async fetch(request) {
@@ -44,8 +61,18 @@ export class CallLog {
     const pinned = await this.storage.get("sender");
     if (pinned && pinned !== sender) return Response.json({ error: `this instance is ${pinned}'s` }, { status: 409 });
     if (!pinned) await this.storage.put({ sender, started: this.now() });
+    const before = await this.#counters();
     await this.#keep(records);
-    if ((await this.storage.getAlarm()) === null) await this.storage.setAlarm(this.now() + EVERY_SECONDS * 1000);
+    const alarm = await this.storage.getAlarm();
+    if (this.deadline === null) {
+      if (alarm === null) await this.storage.setAlarm(this.now() + EVERY_SECONDS * 1000);
+    } else if (records.length && before.next === before.first) {
+      // The first record kept since the last file: it must go by the deadline.
+      const due = this.now() + this.deadline;
+      if (alarm === null || alarm > due) await this.storage.setAlarm(due);
+    } else if (alarm === null) {
+      await this.storage.setAlarm(this.now() + this.heartbeat);
+    }
     return Response.json({ kept: records.length });
   }
 
@@ -74,6 +101,7 @@ export class CallLog {
   // records are deleted, and the file held, before R2 is asked, so a request that arrives
   // meanwhile keeps its records for the next cycle and none is sent twice.
   async alarm() {
+    let next = this.now() + (this.deadline ?? EVERY_SECONDS * 1000);
     try {
       const sender = await this.storage.get("sender");
       if (!sender) return;
@@ -87,14 +115,24 @@ export class CallLog {
       const kept = await this.storage.list({ prefix: RECORD });
       const records = [...kept.values()];
       const c = await this.#counters();
+      if (this.deadline !== null) {
+        // Nothing kept: a report alone once its heartbeat comes, and until then nothing.
+        const beat = (c.started ?? ended) + this.heartbeat;
+        next = ended + this.heartbeat;
+        if (!records.length && ended < beat) {
+          next = beat;
+          return;
+        }
+      }
       const data = await encode(records, report(sender, c, records, ended));
       const name = await fileName(ended, sender, data);
       await this.#delete([...kept.keys()]);
       const first = kept.size ? Number([...kept.keys()].at(-1).slice(RECORD.length)) + 1 : c.first;
       await this.storage.put({ first, started: ended, drops: 0, peak: c.next - first, failures: 0, held: { name, data } });
       if (await this.#put(tenant, name, data)) await this.storage.delete("held");
+      else if (this.deadline !== null) next = this.now() + this.deadline;
     } finally {
-      await this.storage.setAlarm(this.now() + EVERY_SECONDS * 1000);
+      await this.storage.setAlarm(next);
     }
   }
 
@@ -103,6 +141,8 @@ export class CallLog {
   async #put(tenant, name, data) {
     try {
       await this.env.CALLS.put(`${tenant}/${name}`, data);
+      await notifyIngest({ key: this.env.INGEST_NOTIFY_KEY, url: this.env.INGEST_NOTIFY_URL || undefined, tenant, name,
+        size: data.length, now: this.now(), fetch: this.send });
       return true;
     } catch (err) {
       await this.storage.put("failures", ((await this.storage.get("failures")) ?? 0) + 1);

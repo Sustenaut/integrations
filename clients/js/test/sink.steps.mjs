@@ -20,7 +20,7 @@ const records = (ids, fields) => ids.split(",").filter(Boolean).map((id) => reco
 
 function storage(world) {
   const self = {
-    down: false, status: 200, body: "{}", says: false, sent: 0,
+    down: false, status: 200, body: "{}", says: false, sent: 0, written: [],
     fetch: async (url, init) => {
       self.sent += 1;
       if (self.says) process.stdout.write(`${await given(url, { ...init, body: undefined })}\n`);
@@ -29,6 +29,7 @@ function storage(world) {
       const file = path.join(world.pubtest.directory, new URL(url).pathname);
       await mkdir(path.dirname(file), { recursive: true });
       await writeFile(file, init.body);
+      self.written.push(new URL(url).pathname.split("/")[1]);
       return new Response("{}");
     },
   };
@@ -55,6 +56,33 @@ Given("a StorageSink {string} into an R2 bucket with the prefix {string}, for:",
   this.clock = { now: START };
   this.datasets = JSON.parse(doc);
   this.sinkOptions = { sender, bucket: this.calls, prefix, clock: () => this.clock.now, flushOnWrite: false };
+});
+
+Given("its deadline is {int} seconds and its heartbeat {int}", function (deadline, heartbeat) {
+  Object.assign(this.sinkOptions, { deadlineSeconds: deadline, heartbeatSeconds: heartbeat, random: () => 1 });
+});
+
+Given("its heartbeat is {int} seconds, the first {float} of the way in", function (heartbeat, share) {
+  Object.assign(this.sinkOptions, { heartbeatSeconds: heartbeat, random: () => share });
+});
+
+Given("its deadline and heartbeat are the environment's", function () {
+  delete this.sinkOptions.deadlineSeconds;
+  delete this.sinkOptions.heartbeatSeconds;
+  this.sinkOptions.random = () => 1;
+});
+
+When("{int} seconds pass", function (seconds) {
+  sink(this);
+  this.clock.now += seconds * 1000;
+});
+
+// What it wrote, as the tenant of each file storage took, from the start.
+When("it sends what is due", async function () {
+  await this.attempt(async () => {
+    await sink(this).flushDue();
+    return this.store.written;
+  });
 });
 
 Given("its limit is the default", function () {

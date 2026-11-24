@@ -99,6 +99,57 @@ def started_sink(ctx, sender, repo, dataset, seconds):
     ctx.sink.started = ctx.now - seconds
 
 
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", with a deadline of '
+                     "{deadline:d} seconds and a heartbeat of {heartbeat:d}"))
+def deadline_sink(ctx, sender, repo, dataset, deadline, heartbeat):
+    sink(ctx, {repo: dataset}, sender, deadline_seconds=deadline, heartbeat_seconds=heartbeat, random=lambda: 1.0)
+
+
+@given(parsers.parse('a sink for the sender "{sender}" sending to two datasets, "{one}" to "{first}" and "{two}" to '
+                     '"{second}", with a deadline of {deadline:d} seconds and a heartbeat of {heartbeat:d}'))
+def two_deadline_sink(ctx, sender, one, first, two, second, deadline, heartbeat):
+    sink(ctx, {one: first, two: second}, sender, deadline_seconds=deadline, heartbeat_seconds=heartbeat,
+         random=lambda: 1.0)
+
+
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", with a heartbeat of '
+                     "{heartbeat:d} seconds whose first comes {share:g} of the way in"))
+def heartbeat_sink(ctx, sender, repo, dataset, heartbeat, share):
+    sink(ctx, {repo: dataset}, sender, heartbeat_seconds=heartbeat, random=lambda: share)
+
+
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", flushing on write, with a '
+                     "deadline of {deadline:d} seconds"))
+def flushing_deadline_sink(ctx, sender, repo, dataset, deadline):
+    sink(ctx, {repo: dataset}, sender, flush_on_write=True, deadline_seconds=deadline, random=lambda: 1.0)
+
+
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", as the environment says'))
+def environment_sink(ctx, sender, repo, dataset):
+    sink(ctx, {repo: dataset}, sender, random=lambda: 1.0)
+
+
+@when(parsers.parse('a sink for the sender "{sender}" is made, as the environment says'))
+def make_environment_sink(ctx, sender):
+    ctx.attempt(lambda: sink(ctx, {"a-repo": "ds"}, sender))
+
+
+def flush_due(ctx):
+    ctx.sink.flush_due()
+    if ctx.sink.held and not hasattr(ctx, "first_held"):
+        ctx.first_held = next(iter(ctx.sink.held.values()))
+
+
+@given("the sink sent what was due")
+def sent_due(ctx):
+    flush_due(ctx)
+
+
+@when("the sink sends what is due")
+def sends_due(ctx):
+    act(ctx, lambda: flush_due(ctx))
+
+
 def give(ctx, n, repo):
     ctx.sink.write(CallRecord(**record(n, repo=repo)))
 

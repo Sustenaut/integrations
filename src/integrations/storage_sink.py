@@ -19,11 +19,21 @@ overdue, so that request waits on storage, once every two minutes at most.
 
 The background thread's first file comes a random part of a cycle in, so pods that
 started together don't all send at the same moment.
+
+A sender can instead write only when it has something to say. With a deadline
+(``deadline_seconds``, else CALL_LOG_DEADLINE_SECONDS) or a heartbeat
+(``heartbeat_seconds``, else CALL_LOG_HEARTBEAT_SECONDS), each dataset's file goes once
+its first unsent call is ``deadline`` seconds old, and a dataset with no calls writes a
+report alone once ``heartbeat`` seconds have passed since its last file; the one not set
+is ``every_seconds``. A file storage didn't take is tried again once a deadline later.
+The report's counters (drops, failures, the page times) keep counting until the next
+file. With neither set, it is the cycle above, a file every ``every_seconds``.
 """
 
 from __future__ import annotations
 
 import atexit
+import os
 import random
 import statistics
 import sys
@@ -39,6 +49,10 @@ from .calls import CallRecord, Caller, Transport
 from .clients.storage import Storage, StorageError, StorageUnavailable
 
 EVERY_SECONDS = 120
+DEADLINE_VARIABLE = "CALL_LOG_DEADLINE_SECONDS"
+HEARTBEAT_VARIABLE = "CALL_LOG_HEARTBEAT_SECONDS"
+# How often the background thread looks for a file that is due, at most.
+LOOK_SECONDS = 1.0
 # The page times a window keeps for its median; past this it goes on counting.
 PAGE_LIMIT = 10_000
 
@@ -46,8 +60,15 @@ PAGE_LIMIT = 10_000
 class StorageSink:
     def __init__(self, datasets: dict[str, str], *, transport: Transport, token: Callable[[], str], base_url: str,
                  sender: str, every_seconds: float = EVERY_SECONDS, limit: int = 10_000,
-                 clock: Callable[[], float] = time.time, start: bool = True, flush_on_write: bool = False):
+                 clock: Callable[[], float] = time.time, start: bool = True, flush_on_write: bool = False,
+                 deadline_seconds: float | None = None, heartbeat_seconds: float | None = None,
+                 random: Callable[[], float] = random.random):
         self.datasets, self.transport, self.token = datasets, transport, token
+        deadline = deadline_seconds if deadline_seconds is not None else seconds(DEADLINE_VARIABLE)
+        heartbeat = heartbeat_seconds if heartbeat_seconds is not None else seconds(HEARTBEAT_VARIABLE)
+        # None: the cycle. Else when a call must be sent by, and how often a quiet dataset reports.
+        self.deadline = None if deadline is None and heartbeat is None else (deadline or every_seconds)
+        self.heartbeat = heartbeat or every_seconds
         # Its own calls to storage are the call log's plumbing, so nothing records them.
         self.caller = Caller("integrations", f"storage-sink:{sender}", transport=transport)
         self.base, self.sender, self.every_seconds, self.limit = base_url.rstrip("/"), sender, every_seconds, limit
@@ -62,6 +83,11 @@ class StorageSink:
         self.page_count = 0
         self.cold = True  # until the first report goes out
         self.started = clock()
+        # Each dataset's window: since its last file, when its first unsent call came, and
+        # when it next reports with nothing to say, the first a random part of a heartbeat in.
+        self.since = dict.fromkeys(names, self.started)
+        self.first: dict[str, float | None] = dict.fromkeys(names)
+        self.beat = {name: self.started + random() * self.heartbeat for name in names}
         self.lock = threading.Lock()
         self.flushing = threading.Lock()  # one flush at a time, whoever starts it
         if start:  # pragma: no cover - the process's own thread
@@ -82,13 +108,27 @@ class StorageSink:
                 self.dropped[dataset] += 1
             waiting.append(asdict(record))
             self.peak[dataset] = max(self.peak[dataset], len(waiting))
-            due = self.flush_on_write and self.clock() - self.started >= self.every_seconds
+            if self.first[dataset] is None:
+                self.first[dataset] = self.clock()
+            due = self.flush_on_write and bool(self.due())
         # Outside the lock, and only if no other flush is under way.
         if due and self.flushing.acquire(blocking=False):
             try:
-                self._flush_all()
+                self._flush_due()
             finally:
                 self.flushing.release()
+
+    def due(self) -> list[str]:
+        """The datasets whose file is due now: in the cycle, all of them once a cycle is
+        over; with a deadline, those whose first call has waited it, whose file storage
+        didn't take a deadline ago, or whose heartbeat has come."""
+        now = self.clock()
+        if self.deadline is None:
+            return sorted(self.waiting) if now - self.started >= self.every_seconds else []
+        return [name for name in sorted(self.waiting)
+                if (self.first[name] is not None and now - self.first[name] >= self.deadline)
+                or (name in self.held and now - self.since[name] >= self.deadline)
+                or now >= self.beat[name]]
 
     def page(self, ms: float) -> None:
         """How long the app took to answer one request, in milliseconds."""
@@ -113,18 +153,42 @@ class StorageSink:
         with self.flushing:
             self._flush_all()
 
-    def _flush_all(self) -> None:
-        started, ended = self.started, self.clock()
-        self.started = ended
-        pages = self._page_report()
-        for dataset in self.waiting:
-            self._flush(dataset, started, ended, pages)
+    def flush_due(self) -> None:
+        """The files that are due, and no others (due)."""
+        with self.flushing:
+            self._flush_due()
 
-    def _flush(self, dataset: str, started: float, ended: float, pages: dict) -> None:
+    def _flush_all(self) -> None:
+        self._flush_these(sorted(self.waiting), every=True)
+
+    def _flush_due(self) -> None:
+        names = self.due()
+        if names:
+            self._flush_these(names, every=self.deadline is None)
+
+    def _flush_these(self, names: list[str], every: bool) -> None:
+        """Each dataset's file. Unless `every`, a dataset whose held file was all that was
+        due sends that, and no report alone before its heartbeat."""
+        ended = self.clock()
+        started, self.started = self.started, ended
+        pages = self._page_report()
+        for dataset in names:
+            new = every or bool(self.waiting[dataset]) or ended >= self.beat[dataset]
+            # The cycle's window is the sink's; with a deadline, each dataset's own.
+            since = started if self.deadline is None else self.since[dataset]
+            self.since[dataset] = ended
+            if new:
+                self.first[dataset] = None
+                self.beat[dataset] = ended + self.heartbeat
+            self._flush(dataset, since, ended, pages, new)
+
+    def _flush(self, dataset: str, started: float, ended: float, pages: dict, new: bool = True) -> None:
         if dataset in self.held:
             if not self._put(dataset, *self.held[dataset]):
                 return
             del self.held[dataset]
+        if not new:
+            return
         with self.lock:
             batch = list(self.waiting[dataset])
             self.waiting[dataset].clear()
@@ -166,10 +230,28 @@ class StorageSink:
         return False
 
     def _run(self) -> None:  # pragma: no cover - the process's own thread
+        if self.deadline is not None:
+            while True:
+                time.sleep(min(LOOK_SECONDS, self.deadline))
+                self.flush_due()
         time.sleep(first_wait(self.every_seconds))
         while True:
             self.flush()
             time.sleep(self.every_seconds)
+
+
+def seconds(variable: str, environ=os.environ) -> float | None:
+    """A number of seconds the environment gives, above 0, or None when it is unset or empty."""
+    text = environ.get(variable, "").strip()
+    if not text:
+        return None
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not 0 < value < float("inf"):
+        raise ValueError(f"{variable} is a number of seconds above 0, not {text!r}")
+    return value
 
 
 def first_wait(every_seconds: float, random: Callable[[], float] = random.random) -> float:

@@ -3,6 +3,12 @@
 # the sender's Avro file into its buffer tenant in storage's R2 bucket. A Worker or Pages
 # project binds to it with a durable_objects binding naming script_name = "call-log".
 # Deployed by .github/workflows/call-log.yml.
+#
+# CALL_LOG_DEADLINE_SECONDS and CALL_LOG_HEARTBEAT_SECONDS, when set in [vars], write a
+# file only when a record has waited the deadline, or a report alone each heartbeat
+# (src/call-log.js). The secret INGEST_NOTIFY_KEY, set by a person with `wrangler secret
+# put INGEST_NOTIFY_KEY` (the value of Bitwarden's INGEST_NOTIFY_KEY), has the object tell
+# the ingest pod of each file; without it, the pod's sweep finds them.
 name = "call-log"
 main = "src/call-log.js"
 compatibility_date = "2026-10-01"
