@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   service-needs:
-    uses: Sustenaut/pubrules/.github/workflows/service-needs.yml@36b8b556ff838eb1e24c4e995350f10fdbdf26f3 # v0.45.0
+    uses: Sustenaut/pubrules/.github/workflows/service-needs.yml@498c9185a45fc6edad74658740e66cd369a646a4 # v0.49.1
     with: {"unit": "${{ inputs.unit }}", "kind": "${{ inputs.action }}"}
     permissions:
       contents: read

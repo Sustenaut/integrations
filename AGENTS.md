@@ -1,6 +1,6 @@
 # Working in this repository
 
-Managed by pubrules 0.45.0: `pubrules sync` rewrites this file and `pubrules
+Managed by pubrules 0.49.1: `pubrules sync` rewrites this file and `pubrules
 sync --check` fails when it differs, so every pub* repository gives agents
 and people the same rules. Repository-specific guidance lives in the
 README. The standard behind these rules is pubrules' README:
