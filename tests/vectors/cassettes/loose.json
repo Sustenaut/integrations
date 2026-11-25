@@ -1,0 +1,313 @@
+{
+  "description": "A placeholder first seen in a request binds to the first value the code sends there: answered as that value, and only that value matches it again; a value already another placeholder's binds none",
+  "cassette": {
+    "format": "integrations.cassette/1",
+    "scenario": "vectors: loose",
+    "baseline": null,
+    "current": {
+      "volatile": {
+        "⟦integrations:sha:1⟧": {
+          "kind": "sha",
+          "first": "calls.0.request.body.sha"
+        },
+        "⟦integrations:sha:2⟧": {
+          "kind": "sha",
+          "first": "calls.3.request.body.object"
+        },
+        "⟦integrations:id:1⟧": {
+          "kind": "id",
+          "first": "calls.4.request.body.id"
+        }
+      },
+      "calls": [
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "open-pr",
+          "request": {
+            "method": "POST",
+            "url": "https://api.github.com/repos/o/r/git/refs",
+            "headers": {},
+            "body": {
+              "json": {
+                "ref": "refs/heads/b",
+                "sha": "⟦integrations:sha:1⟧"
+              }
+            }
+          },
+          "response": {
+            "status": 201,
+            "headers": {},
+            "body": {
+              "json": {
+                "object": {
+                  "sha": "⟦integrations:sha:1⟧"
+                }
+              }
+            }
+          },
+          "elapsed_ms": 10
+        },
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "open-pr",
+          "request": {
+            "method": "PATCH",
+            "url": "https://api.github.com/repos/o/r/git/refs/heads/b",
+            "headers": {},
+            "body": {
+              "json": {
+                "sha": "⟦integrations:sha:1⟧"
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "object": {
+                  "sha": "⟦integrations:sha:1⟧"
+                }
+              }
+            }
+          },
+          "elapsed_ms": 10
+        },
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "read",
+          "request": {
+            "method": "GET",
+            "url": "https://api.github.com/repos/o/r/commits/⟦integrations:sha:1⟧",
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "status": 200,
+            "headers": {},
+            "body": {
+              "json": {
+                "sha": "⟦integrations:sha:1⟧",
+                "message": "on ⟦integrations:sha:1⟧"
+              }
+            }
+          },
+          "elapsed_ms": 10
+        },
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "open-pr",
+          "request": {
+            "method": "POST",
+            "url": "https://api.github.com/repos/o/r/git/tags",
+            "headers": {},
+            "body": {
+              "json": {
+                "tag": "v1",
+                "object": "⟦integrations:sha:2⟧"
+              }
+            }
+          },
+          "response": {
+            "status": 201,
+            "headers": {},
+            "body": {
+              "json": {
+                "object": {
+                  "sha": "⟦integrations:sha:2⟧"
+                }
+              }
+            }
+          },
+          "elapsed_ms": 10
+        },
+        {
+          "kind": "http",
+          "plugin": "github.edit-pr",
+          "operation": "open-pr",
+          "request": {
+            "method": "POST",
+            "url": "https://api.github.com/repos/o/r/check-runs",
+            "headers": {},
+            "body": {
+              "json": {
+                "id": "⟦integrations:id:1⟧",
+                "name": "c"
+              }
+            }
+          },
+          "response": {
+            "status": 201,
+            "headers": {},
+            "body": {
+              "json": {
+                "id": "⟦integrations:id:1⟧"
+              }
+            }
+          },
+          "elapsed_ms": 10
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/refs",
+        "body": {
+          "json": {
+            "ref": "refs/heads/b",
+            "sha": "1111111111111111111111111111111111111111"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "PATCH",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/b",
+        "body": {
+          "json": {
+            "sha": "2222222222222222222222222222222222222222"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "PATCH",
+        "url": "https://api.github.com/repos/o/r/git/refs/heads/b",
+        "body": {
+          "json": {
+            "sha": "1111111111111111111111111111111111111111"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/commits/1111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/tags",
+        "body": {
+          "json": {
+            "tag": "v1",
+            "object": "1111111111111111111111111111111111111111"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/tags",
+        "body": {
+          "json": {
+            "tag": "v1",
+            "object": "3333333333333333333333333333333333333333"
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/check-runs",
+        "body": {
+          "json": {
+            "id": 4242,
+            "name": "c"
+          }
+        }
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "1111111111111111111111111111111111111111"
+          }
+        }
+      },
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "body $.sha: recorded \"⟦integrations:sha:1⟧\", sent \"⟦integrations:sha:?⟧\""
+        ]
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "1111111111111111111111111111111111111111"
+          }
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "sha": "1111111111111111111111111111111111111111",
+          "message": "on 1111111111111111111111111111111111111111"
+        }
+      },
+      {
+        "raises": "NoSnapshot",
+        "mentions": [
+          "body $.object: recorded \"⟦integrations:sha:?⟧\", sent \"⟦integrations:sha:1⟧\""
+        ]
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "3333333333333333333333333333333333333333"
+          }
+        }
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "id": 4242
+        }
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

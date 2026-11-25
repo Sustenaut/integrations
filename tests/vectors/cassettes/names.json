@@ -1,0 +1,233 @@
+{
+  "description": "A recording against the test org writes its real names as the scenario's, a whole name at a time, so the cassette and a replay only see o/r",
+  "scenario": "vectors: names",
+  "names": {
+    "SustenautTest/rec-pubpr-run1-1": "o/r",
+    "rec-pubpr-run1-1": "r",
+    "SustenautTest": "o"
+  },
+  "record": [
+    {
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8",
+        "Link": "<https://api.github.com/repos/SustenautTest/rec-pubpr-run1-1/pulls?page=2>; rel=\"next\""
+      },
+      "body": {
+        "json": {
+          "full_name": "SustenautTest/rec-pubpr-run1-1",
+          "name": "rec-pubpr-run1-1",
+          "owner": {
+            "login": "SustenautTest"
+          },
+          "clone_url": "https://github.com/SustenautTest/rec-pubpr-run1-1.git",
+          "description": "not rec-pubpr-run1-10, nor SustenautTests"
+        }
+      },
+      "elapsed_ms": 20
+    },
+    {
+      "status": 201,
+      "body": {
+        "json": {
+          "html_url": "https://github.com/SustenautTest/rec-pubpr-run1-1/pull/1",
+          "number": 1
+        }
+      },
+      "elapsed_ms": 30
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/SustenautTest/rec-pubpr-run1-1"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/SustenautTest/rec-pubpr-run1-1/pulls",
+        "body": {
+          "json": {
+            "title": "Edits to SustenautTest/rec-pubpr-run1-1",
+            "head": "edit/one",
+            "base": "main"
+          }
+        }
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/pulls",
+        "body": {
+          "json": {
+            "title": "Edits to o/r",
+            "head": "edit/one",
+            "base": "main"
+          }
+        }
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "absent": [
+    "SustenautTest/",
+    "\"SustenautTest\"",
+    "rec-pubpr-run1-1\"",
+    "rec-pubpr-run1-1/",
+    "rec-pubpr-run1-1."
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "link": "<https://api.github.com/repos/SustenautTest/rec-pubpr-run1-1/pulls?page=2>; rel=\"next\""
+        },
+        "json": {
+          "full_name": "SustenautTest/rec-pubpr-run1-1",
+          "name": "rec-pubpr-run1-1",
+          "owner": {
+            "login": "SustenautTest"
+          },
+          "clone_url": "https://github.com/SustenautTest/rec-pubpr-run1-1.git",
+          "description": "not rec-pubpr-run1-10, nor SustenautTests"
+        }
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "html_url": "https://github.com/SustenautTest/rec-pubpr-run1-1/pull/1",
+          "number": 1
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: names",
+          "current": {
+            "volatile": {},
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Link": "<https://api.github.com/repos/o/r/pulls?page=2>; rel=\"next\""
+                  },
+                  "body": {
+                    "json": {
+                      "full_name": "o/r",
+                      "name": "r",
+                      "owner": {
+                        "login": "o"
+                      },
+                      "clone_url": "https://github.com/o/r.git",
+                      "description": "not rec-pubpr-run1-10, nor SustenautTests"
+                    }
+                  }
+                },
+                "elapsed_ms": 20
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "open-pr",
+                "request": {
+                  "method": "POST",
+                  "url": "https://api.github.com/repos/o/r/pulls",
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "title": "Edits to o/r",
+                      "head": "edit/one",
+                      "base": "main"
+                    }
+                  }
+                },
+                "response": {
+                  "status": 201,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "html_url": "https://github.com/o/r/pull/1",
+                      "number": 1
+                    }
+                  }
+                },
+                "elapsed_ms": 30
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "link": "<https://api.github.com/repos/o/r/pulls?page=2>; rel=\"next\""
+        },
+        "json": {
+          "full_name": "o/r",
+          "name": "r",
+          "owner": {
+            "login": "o"
+          },
+          "clone_url": "https://github.com/o/r.git",
+          "description": "not rec-pubpr-run1-10, nor SustenautTests"
+        }
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "html_url": "https://github.com/o/r/pull/1",
+          "number": 1
+        }
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

@@ -145,7 +145,7 @@ def run_cassette_vector(ctx):
     def run():
         clock, slept = [0.0], [0.0]
         recorder = Recorder(Scripted(vector["record"], clock), scenario=vector.get("scenario"),
-                            clock=lambda: clock[0]) if "record" in vector else None
+                            clock=lambda: clock[0], names=vector.get("names")) if "record" in vector else None
         saved = None
 
         def chain(base):

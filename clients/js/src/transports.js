@@ -13,12 +13,24 @@
 //   plugins/*.json): only the headers worth keeping, volatile values as placeholders,
 //   secrets never.
 // - new Faulty(inner, rules) makes calls fail on purpose.
-// - currentTransport() is the one use() installed, else the one INTEGRATIONS_MODE picks.
+// - currentTransport() is the one use() installed, else the one INTEGRATIONS_MODE picks,
+//   under the faults INTEGRATIONS_FAULTS names; cassetteReports() says which recorded
+//   calls the cassettes it made answered, for a harness to check at exit.
+// - useClock() sets the clock, sleep and jitter a Caller given none of them uses.
 //
 // Placeholders: a volatile value is written ⟦integrations:KIND:N⟧, the same one wherever
 // the same value is; on replay it is answered as a stand-in of its kind made from its
 // name, and a stand-in sent back reads as its placeholder again. Real text holding
-// "⟦integrations:" is written ⟦integrations:escape⟧, and read back as it was.
+// "⟦integrations:" is written ⟦integrations:escape⟧, and read back as it was. A
+// placeholder first seen in a request is a value the code made itself: on replay it
+// matches the first value of its kind the code sends there, and from then on is that
+// value, in the answers and in what the code must send again. A value already another
+// placeholder's matches none.
+//
+// Names: a recording against a test org names its repositories for real where a
+// scenario says o/r. The Recorder's names, and INTEGRATIONS_NAMES (a JSON object from
+// each real name to the scenario's), are written as the scenario's names wherever they
+// appear as a whole word, so the cassette, and a replay, only ever see o/r.
 //
 // Where cassettes go: a cassette is written (save(), promote(), writeCassette()), and a
 // cassette the environment names is read, only at a path that resolves, symlinks
@@ -41,6 +53,8 @@ export const MODE = "INTEGRATIONS_MODE";
 export const CASSETTE = "INTEGRATIONS_CASSETTE";
 export const CASSETTES = "INTEGRATIONS_CASSETTES";
 export const MARKER = "PUBTEST_RUN";
+export const NAMES = "INTEGRATIONS_NAMES";
+export const FAULTS = "INTEGRATIONS_FAULTS";
 const MODES = ["live", "replay", "record"];
 
 const PREFIX = "⟦integrations:";
@@ -197,8 +211,35 @@ function subOutside(text, pattern, fn) {
   return pieces(text).map(([held, p]) => (held ? p : p.replace(pattern, (m) => fn(m)))).join("");
 }
 
+// INTEGRATIONS_NAMES: a JSON object from each real name a recording meets to the name the
+// scenario gives it; {} when it is not set. Throws when it is not such an object.
+export function namesFrom(vars = env()) {
+  const raw = vars[NAMES];
+  if (!raw) return {};
+  let names = null;
+  try {
+    names = JSON.parse(raw);
+  } catch {
+    // reported below
+  }
+  if (!isObject(names) || !Object.entries(names).every(([k, v]) => k && typeof v === "string")) {
+    throw new Error(`${NAMES} is a JSON object from each real name to the scenario's, not ${JSON.stringify(raw)}`);
+  }
+  return names;
+}
+
+// Each real name in names, where it is a whole word (not inside a longer name), as the
+// scenario's; the longest first.
+function renamer(names) {
+  const real = Object.keys(names).filter((k) => k !== names[k]).sort((a, b) => b.length - a.length || cmp(a, b));
+  if (!real.length) return null;
+  const pattern = new RegExp(`(?<![A-Za-z0-9_.-])(?:${real.map(escapeRegExp).join("|")})(?![A-Za-z0-9_-])`, "g");
+  return (text) => subOutside(text, pattern, (v) => names[v]);
+}
+
 class ValueMap {
   known = new Map(); // a value's text -> its placeholder
+  rename = null;
   #inside;
 
   knownText(text) {
@@ -224,6 +265,11 @@ class Writer extends ValueMap {
   entries = {};
   counts = {};
   secrets = new Map(); // a secret value -> where it was seen
+
+  constructor(names = {}) {
+    super();
+    this.rename = renamer(names);
+  }
 
   volatile(value, kind, where) {
     const key = JSON.stringify(value);
@@ -256,7 +302,8 @@ class Writer extends ValueMap {
 }
 
 class Reader extends ValueMap {
-  values = new Map(); // a placeholder -> its stand-in
+  values = new Map(); // a placeholder -> its stand-in, or the value it was bound to
+  raw = false; // true: a volatile value no placeholder stands for is left as it is
 
   constructor(volatile) {
     super();
@@ -270,7 +317,23 @@ class Reader extends ValueMap {
   }
 
   volatile(value, kind) {
-    return this.known.get(textOf(value)) ?? placeholder(kind, "?");
+    return this.known.get(textOf(value)) ?? (this.raw ? value : placeholder(kind, "?"));
+  }
+
+  // The same map, leaving a volatile value it does not know as it is.
+  rawCopy() {
+    const other = new Reader({});
+    Object.assign(other, { values: this.values, known: this.known, raw: true });
+    return other;
+  }
+
+  // name is value from now on: its stand-in no longer stands for it.
+  bind(name, value) {
+    const old = this.values.get(name);
+    if (old !== undefined && this.known.get(textOf(old)) === name) this.known.delete(textOf(old));
+    this.values.set(name, value);
+    this.known.set(textOf(value), name);
+    this.learnt();
   }
 
   secret() {
@@ -336,6 +399,7 @@ class Normaliser {
 
   text(text, where) {
     text = escapeText(text);
+    if (this.map.rename) text = this.map.rename(text);
     const found = this.map.knownText(text);
     if (found) return found;
     text = subOutside(text, this.map.inside(), (v) => this.map.known.get(v));
@@ -625,6 +689,8 @@ export class Cassette {
     return calls;
   }
 
+  // A placeholder first seen in a request, and not yet bound, is a value the code made
+  // itself, which matches any value of its kind.
   #loosen(text) {
     return text.replace(placeholders(), (m, kind) => (this.loose.has(m) ? placeholder(kind, "?") : m));
   }
@@ -657,6 +723,12 @@ export class Cassette {
       const want = this.#recordedKey(call, rules);
       if (want[0] !== method || want[1] !== normalUrl || (want[2] !== "*" && want[2] !== body)) continue;
       if (!call.used) {
+        const bound = this.#bindings(call, request, rules);
+        if (bound === null) continue;
+        for (const [name, value] of bound) {
+          this.reader.bind(name, value);
+          this.loose.delete(name);
+        }
         found = call;
         break;
       }
@@ -666,6 +738,48 @@ export class Cassette {
     found.used += 1;
     return this.#answer(found.response);
   };
+
+  // The values request sends where call's recorded request holds a loose placeholder:
+  // each one binds it. Empty when there is none; null when they do not fit the map: one
+  // placeholder sent as two values, or a value that is already another placeholder's.
+  #bindings(call, request, rules) {
+    const found = new Map();
+    if (call.plugin === null || !this.loose.size) return found;
+    const recorded = call.request;
+    const body = recorded.body ?? null;
+    if (body !== null && "sha256" in body) return found;
+    const texts = [recorded.url, canonical(graphql(body, rules))];
+    if (!texts.some((t) => [...t.matchAll(placeholders())].some((m) => this.loose.has(m[0])))) return found;
+    const raw = new Normaliser(rules, this.reader.rawCopy()).request(request, "calls.?.request");
+    const sent = [raw.url, canonical(graphql(raw.body, rules))];
+    for (const [i, text] of texts.entries()) {
+      const [pattern, groups] = bindingPattern(text, this.loose, i === 1);
+      const m = pattern.exec(sent[i]);
+      if (m === null) return new Map();
+      for (const [group, [name, how]] of Object.entries(groups)) {
+        const value = boundValue(m.groups[group], how);
+        if (typeof value === "string" && isPlaceholder(value)) {
+          if (value !== name) return null;
+          continue;
+        }
+        if (found.has(name) && textOf(found.get(name)) !== textOf(value)) return null;
+        found.set(name, value);
+      }
+    }
+    const seen = new Set();
+    for (const [name, value] of found) {
+      const known = this.reader.known.get(textOf(value));
+      if ((known !== undefined && known !== name) || seen.has(textOf(value))) return null;
+      seen.add(textOf(value));
+    }
+    return found;
+  }
+
+  // What was replayed: how many calls the cassette holds, which of them (by index)
+  // answered, how many requests were sent and how many were answered.
+  report() {
+    return { calls: this.calls.length, used: this.calls.flatMap((c, i) => (c.used ? [i] : [])), sent: this.sent.length, answered: this.calls.reduce((n, c) => n + c.used, 0) };
+  }
 
   #answer(recorded) {
     if (recorded.status === null || recorded.status === undefined) throw noAnswer(recorded.error);
@@ -717,6 +831,42 @@ export class Cassette {
     }
     throw new UnusedCalls(message);
   }
+}
+
+// text as a pattern a request's text matches, each loose placeholder in it a group: in
+// JSON, a whole value (a string or a number) or a piece of a string.
+function bindingPattern(text, loose, jsonText) {
+  const out = [];
+  const groups = {};
+  const parts = pieces(text);
+  for (let i = 0; i < parts.length; i++) {
+    const [held, piece] = parts[i];
+    if (!held || !loose.has(piece)) {
+      out.push(escapeRegExp(piece));
+      continue;
+    }
+    const group = `g${Object.keys(groups).length}`;
+    const after = parts[i + 1]?.[1] ?? "";
+    if (jsonText && out.join("").endsWith('"') && after.startsWith('"')) {
+      out[out.length - 1] = out.at(-1).slice(0, -1); // the quote goes into the group: a string, or the number it stood for
+      parts[i + 1] = [parts[i + 1][0], after.slice(1)];
+      out.push(String.raw`(?<${group}>"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)`);
+      groups[group] = [piece, "json"];
+    } else if (jsonText) {
+      out.push(String.raw`(?<${group}>(?:[^"\\]|\\.)+?)`);
+      groups[group] = [piece, "inside"];
+    } else {
+      out.push(`(?<${group}>.+?)`);
+      groups[group] = [piece, "text"];
+    }
+  }
+  return [new RegExp(`^(?:${out.join("")})$`, "s"), groups];
+}
+
+function boundValue(text, how) {
+  if (how === "json") return JSON.parse(text);
+  if (how === "inside") return JSON.parse(`"${text}"`);
+  return text;
 }
 
 const describe = (plugin, operation, method, url) => `${plugin || "*"} ${operation || "*"} ${method} ${url}`;
@@ -773,15 +923,17 @@ const monotonic = globalThis.performance?.now ? () => performance.now() : () => 
 // bodies (base64), a request body over 64 KiB as its digest, volatile values as
 // placeholders. A secret is never written: secret headers are dropped, secret JSON paths
 // and query parameters replaced, and save() throws SecretInRecording when a secret it saw
-// would still be written anywhere. clock() is in milliseconds. save() writes only inside
+// would still be written anywhere. names (from each real name to the scenario's), over
+// INTEGRATIONS_NAMES as it is when the recording is written, are written as the
+// scenario's names. clock() is in milliseconds. save() writes only inside
 // the cassettes directory (cassettesDir()), settled when the recorder is made:
 // INTEGRATIONS_CASSETTES, else the directory of INTEGRATIONS_CASSETTE, else that of
 // path; a path resolving outside it throws CassettePathError.
 export class Recorder {
   calls = [];
 
-  constructor(inner, path = null, { plugins = registry, scenario = null, consumer = null, clock = monotonic, now = () => new Date() } = {}) {
-    Object.assign(this, { inner: asTransport(inner), path, plugins, scenario, consumer, clock, now });
+  constructor(inner, path = null, { plugins = registry, scenario = null, consumer = null, clock = monotonic, now = () => new Date(), names = {} } = {}) {
+    Object.assign(this, { inner: asTransport(inner), path, plugins, scenario, consumer, clock, now, names: { ...names } });
     this.root = cassettesDir(path);
   }
 
@@ -804,7 +956,7 @@ export class Recorder {
   // The calls kept so far, normalised: a cassette's current. Throws SecretInRecording
   // when a secret would be in it.
   recording() {
-    const values = new Writer();
+    const values = new Writer({ ...namesFrom(), ...this.names });
     let calls = [];
     for (let pass = 0; pass < 2; pass++) { // the second time, every value the first met is known everywhere
       calls = this.calls.map(([request, response, elapsed], i) => {
@@ -904,7 +1056,8 @@ export class Fault {
   }
 
   matches(request) {
-    if (this.plugin !== "*" && this.plugin !== request.plugin) return false;
+    const plugin = request.plugin ?? "";
+    if (this.plugin !== "*" && plugin !== this.plugin && !plugin.startsWith(`${this.plugin}.`)) return false;
     if (this.operation && this.operation !== request.operation) return false;
     if (this.method && this.method !== request.method.toUpperCase()) return false;
     const m = URL_PARTS.exec(request.url);
@@ -921,7 +1074,8 @@ export class Fault {
 
 // A transport that makes calls through inner fail on purpose, by rules, each an object:
 // - match: "PLUGIN[ OPERATION][ METHOD PATH]", PATH a pattern in which * is anything
-//   ("github.edit-pr open-pr POST /repos/*/pulls"); "*" is any plugin;
+//   ("github.edit-pr open-pr POST /repos/*/pulls"); "*" is any plugin, and a PLUGIN is
+//   also every plugin under it, before a dot (github is every github.* plugin);
 // - nth: which of the calls it matches: "*" (every one, the default), "first", N (the
 //   Nth, from 1) or "after N";
 // - effect: "no-answer"; "status N", with the rule's body (text, or JSON) and headers;
@@ -976,6 +1130,9 @@ export class Faulty {
 
 const installed = [];
 const byMode = new Map();
+const named = new Map(); // each cassette's INTEGRATIONS_CASSETTE, as it was given
+const faulty = new Map();
+const clocks = [];
 export const LIVE = Object.freeze({ fetch: (...a) => globalThis.fetch(...a) });
 
 // INTEGRATIONS_MODE, checked: live (the default), replay or record. A mode other than
@@ -989,20 +1146,42 @@ export function checkMode(vars = env()) {
   return mode;
 }
 
+// INTEGRATIONS_FAULTS: a JSON list of Faulty's rules, which a harness sets so the programs
+// it runs fail as it does; [] when it is not set. Throws ModeError when it is set without
+// PUBTEST_RUN, and an Error when it is no list of rules.
+export function faultRules(vars = env()) {
+  const raw = vars[FAULTS];
+  if (!raw) return [];
+  if (!vars[MARKER]) throw new ModeError(`${FAULTS} without ${MARKER}: only a test harness makes calls fail on purpose, so this process does not start`);
+  let rules = null;
+  try {
+    rules = JSON.parse(raw);
+  } catch {
+    // reported below
+  }
+  if (!Array.isArray(rules) || !rules.every((r) => isObject(r) && "effect" in r)) throw new Error(`${FAULTS} is a JSON list of Faulty's rules, each with an effect, not ${JSON.stringify(raw)}`);
+  for (const rule of rules) new Fault(rule); // an effect that is not one is refused here, not at the call
+  return rules;
+}
+
 // The transport use() installed, else the one INTEGRATIONS_MODE picks: globalThis.fetch
 // (live), new Cassette(INTEGRATIONS_CASSETTE) (replay) or new Recorder(LIVE,
-// INTEGRATIONS_CASSETTE) (record), which saves when the process exits. Throws
-// CassettePathError when INTEGRATIONS_CASSETTE resolves outside the cassettes directory
-// (INTEGRATIONS_CASSETTES, if set).
+// INTEGRATIONS_CASSETTE) (record), which saves when the process exits; under Faulty with
+// INTEGRATIONS_FAULTS's rules when it names some (faultRules()), which count this
+// process's calls. Throws CassettePathError when INTEGRATIONS_CASSETTE resolves outside
+// the cassettes directory (INTEGRATIONS_CASSETTES, if set).
 export function currentTransport() {
   const mode = checkMode();
   if (installed.length) return installed.at(-1);
   const path = mode === "live" ? "" : cassettePath(env()[CASSETTE]);
+  const rules = faultRules();
   const key = `${mode} ${path}`;
   if (!byMode.has(key)) {
     if (mode === "live") byMode.set(key, LIVE);
-    else if (mode === "replay") byMode.set(key, new Cassette(path, { mode }));
-    else {
+    else if (mode === "replay") {
+      byMode.set(key, new Cassette(path, { mode }));
+      named.set(key, env()[CASSETTE]);
+    } else {
       const recorder = new Recorder(LIVE, path);
       globalThis.process?.on?.("exit", () => {
         if (!recorder.calls.length) return;
@@ -1015,7 +1194,43 @@ export function currentTransport() {
       byMode.set(key, recorder);
     }
   }
-  return byMode.get(key);
+  if (!rules.length) return byMode.get(key);
+  const faulted = `${key} ${env()[FAULTS]}`;
+  if (!faulty.has(faulted)) faulty.set(faulted, new Faulty(byMode.get(key), rules));
+  return faulty.get(faulted);
+}
+
+// For a harness to check at exit what a process it ran replayed: one entry per cassette
+// currentTransport() answered from in this process, its INTEGRATIONS_CASSETTE as the
+// process was given it (cassette) and its report().
+export function cassetteReports() {
+  return [...byMode.entries()].filter(([key, t]) => t instanceof Cassette && named.has(key))
+    .map(([key, t]) => ({ cassette: named.get(key), ...t.report() }));
+}
+
+const nap = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+const monotonicMs = globalThis.performance?.now ? () => performance.now() : () => Date.now();
+
+// The clock (milliseconds), sleep (seconds) and random a Caller given none of them uses:
+// the ones useClock() installed, else performance.now, a timer and Math.random.
+export function currentClock() {
+  let clock = monotonicMs;
+  let sleep = nap;
+  let random = Math.random;
+  for (const c of clocks) [clock, sleep, random] = [c.clock ?? clock, c.sleep ?? sleep, c.random ?? random];
+  return { clock, sleep, random };
+}
+
+// Until restore() is called, a Caller given no clock, sleep or random uses these, each
+// looked up at each call, so a harness reaches a Caller made before it. Each one not
+// given stays as it was. For test harnesses only.
+export function useClock({ clock, sleep, random } = {}) {
+  const entry = { clock, sleep, random };
+  clocks.push(entry);
+  return function restore() {
+    const at = clocks.lastIndexOf(entry);
+    if (at >= 0) clocks.splice(at, 1);
+  };
 }
 
 // Until restore() is called, currentTransport() is transport (an object with a fetch, or
