@@ -29,7 +29,7 @@ export const OPERATIONS = Object.freeze({
   "github.board-read": {"read":{"class":"S","route":"routed"}},
   "github.edit-pr": {"open-pr":{"class":"H","route":"routed"},"check":{"class":"S","route":"routed"},"read":{"class":"H","route":"routed"},"service-total":{"class":"H","route":"none"},"client-total":{"class":"H","route":"none"}},
   "github.ghcr": {"push":{"class":"E","route":"reported"},"pull":{"class":"E","route":"reported"}},
-  "github.repo-ops": {"call":{"class":"E","route":"reported"},"check-push":{"class":"H","route":"routed"}},
+  "github.repo-ops": {"call":{"class":"E","route":"reported"},"check-push":{"class":"H","route":"routed"},"test-org":{"class":"E","route":"reported"},"test-org-sweep":{"class":"S","route":"reported"}},
   "google.bigquery": {"load":{"class":"S","route":"routed"},"query":{"class":"H","route":"routed"}},
   "google.calendar": {"read":{"class":"H","route":"routed"}},
   "google.cloud": {"provision":{"class":"M","route":"none"},"deploy":{"class":"E","route":"reported"}},

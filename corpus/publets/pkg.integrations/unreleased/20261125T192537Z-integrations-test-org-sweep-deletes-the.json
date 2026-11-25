@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "`integrations test-org sweep` deletes the GitHub test org's rec-* repositories older than a day (--older-than-hours), and the test-org workflow runs it daily; github.repo-ops has the test-org and test-org-sweep operations for them"
+}

@@ -328,11 +328,6 @@ Feature: Record and replay: the transport a caller given none uses, cassettes in
       {"o/r": {"recorded": "o/r", "files": {"README.md": "# r"}}}
       """
 
-  Scenario: GitHub's test steps cannot create a repository when recording yet
-    Given the environment sets "INTEGRATIONS_MODE" to "record"
-    When I set up the GitHub repository "o/r" holding "{}"
-    Then it is refused, saying "needs the GitHub test org: a later release"
-
   Scenario Outline: The pytest plugin loads GitHub's steps only when a suite asks: <ini>
     When pytest configures the integrations.testing plugin with integrations_testing <ini>
     Then the result is "<loaded>"

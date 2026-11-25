@@ -1,5 +1,6 @@
 """Record and replay: the transport a caller given none uses, cassettes in a child
-process, Caller.opener, and GitHub's test steps (integrations.testing)."""
+process, Caller.opener, faults and clocks a harness gives, and GitHub's test steps in
+replay (integrations.testing; recording them is github-recording.feature)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from pathlib import Path
 from integrations.calls import Caller, Network, Request
 from integrations.testing import plugin as testing_plugin
 from integrations.testing import github
-from integrations.testing.github import hold, repositories
+from integrations.testing.github import repositories
 from integrations.transports import (Cassette, Faulty, Recorder, cassette_reports, current_transport, promote, use,
                                      use_clock)
 from pytest_bdd import given, parsers, scenarios, when
@@ -151,11 +152,6 @@ def promote_cassette(ctx, key, path):
 @when("I list the scenario's GitHub repositories")
 def list_repositories(ctx):
     ctx.attempt(lambda: {name: {"recorded": r.recorded, "files": r.files} for name, r in repositories(ctx).items()})
-
-
-@when(parsers.parse('I set up the GitHub repository "{name}" holding "{files}"'))
-def set_up_repository(ctx, name, files):
-    ctx.attempt(lambda: hold(ctx, name, json.loads(files)))
 
 
 @when(parsers.parse("pytest configures the integrations.testing plugin with integrations_testing {ini}"))

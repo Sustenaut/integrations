@@ -1,0 +1,4 @@
+{
+  "category": "added",
+  "change": "@sustenaut/integrations/testing/github.js: GitHub's test steps for Node, the test customer `github` for pubtest's register(api, { customers: [github] })"
+}

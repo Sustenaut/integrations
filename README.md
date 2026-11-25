@@ -274,18 +274,29 @@ integrations[github-app] @ https://github.com/Sustenaut/integrations/releases/do
   recorded calls never made, and `close()` raises `UnusedCalls` for them (only a warning in
   record mode). It reads the old `{"responses": {"METHOD URL": answer}}` files and the shared
   vectors too.
-- `Recorder(inner, path, plugins=registry, scenario=...)` sends through `inner`, keeps every
-  call in order with its time, and `save()` writes the cassette.
+- `Recorder(inner, path, plugins=registry, scenario=..., names=...)` sends through `inner`,
+  keeps every call in order with its time, and `save()` writes the cassette. `names`, and
+  `INTEGRATIONS_NAMES` as it is when the recording is written (a JSON object from each real
+  name to the scenario's), are written as the scenario's names wherever one is a whole word,
+  so a recording made in the GitHub test org (`SustenautTest/rec-pubpr-…-1`) says `o/r`.
 - `Faulty(inner, rules, advance=...)` makes calls fail on purpose. A rule is
   `{"match": "PLUGIN[ OPERATION][ METHOD PATH]", "nth": "*"|"first"|N|"after N", "effect": ...}`,
   PATH a pattern in which `*` is anything, and the effect `no-answer`, `status N` (with the
   rule's `body` and `headers`), `slow S` (advances the test's clock, `advance(S)`, and never
   sleeps; past the call's timeout it is no answer), `malformed` (half the body, then text
   no parser reads) or `then-recorded` (passes through). The first rule that matches a call
-  and whose `nth` it is decides.
+  and whose `nth` it is decides. A rule's PLUGIN is also every plugin under it, before a
+  dot: `github` is every `github.*` plugin.
 - `use(transport)` installs a transport for the code it wraps: a context manager in Python
   (per context, a `ContextVar`), a function returning `restore()` in JS. Only test harnesses
   call it.
+- `use_clock(clock=, sleep=, random=)` (`useClock({ clock, sleep, random })` in JS) is the
+  clock, sleep and jitter a `Caller` given none of them uses, looked up at each call, so a
+  harness reaches a `Caller` made before it; each one not given stays as it was.
+- `Cassette.report()` says what was replayed (`calls`, the indices `used`, `sent`,
+  `answered`), and `cassette_reports()` (`cassetteReports()`) gives it, with the
+  `INTEGRATIONS_CASSETTE` it was given (`cassette`), for every cassette `current_transport()`
+  made in this process: what a harness's exit hook writes for the programs it runs.
 - `promote(path)` accepts a cassette's recording: it becomes the baseline.
 
 There is no `Replay` or `Recording` any more: `Cassette` and `Recorder` from
@@ -313,6 +324,11 @@ the one `INTEGRATIONS_MODE` picks:
 | `live`, or unset | `Network()`; `globalThis.fetch` in JS |
 | `replay` | `Cassette(INTEGRATIONS_CASSETTE)` |
 | `record` | `Recorder(Network(), INTEGRATIONS_CASSETTE)`, saved when the process exits |
+
+With `INTEGRATIONS_FAULTS` set, a JSON list of `Faulty`'s rules, that transport is under
+`Faulty` with them, so a harness's faults reach the programs it runs; each process counts
+its own calls for `nth`. It too needs `PUBTEST_RUN`, and a list that is no list of rules,
+or names an effect that is not one, is refused when the transport is made.
 
 `INTEGRATIONS_CASSETTE` is a file path: it is how a child process, a command line a scenario
 runs, learns its cassette. `INTEGRATIONS_CASSETTES`, when set, is the directory every
@@ -356,8 +372,10 @@ its name, of its kind's shape: a 40-hex sha, an ISO or HTTP date, a ten-digit id
 `ghs_` token. A stand-in the code sends back is read as its placeholder again, so a sha one
 call answers and the next sends still matches. Replayed stand-in dates are in the year
 2000, so one is never mistaken for a real date. A volatile value first seen in a request is
-one the code made itself, and matches any value of its kind; where an answer echoes it, it
-is replayed as a stand-in. Real text holding `⟦integrations:` is written
+one the code made itself: on replay its placeholder matches the first value of its kind the
+code sends there, and from then on is that value, in the answers that echo it and in what
+the code must send again, as one map, both ways. A value that is already another
+placeholder's matches none. Real text holding `⟦integrations:` is written
 `⟦integrations:escape⟧`, and replayed as it was.
 
 **Secrets.** A recording never holds a secret's value: secret headers (and
@@ -416,21 +434,54 @@ raises `Unavailable`.
 
 `integrations.testing` is an opt-in pytest plugin (the `pytest11` entry point
 `integrations.testing`), inert unless a suite sets `integrations_testing = true` in its
-pytest.ini or lists `pytest_plugins = ["integrations.testing.github"]`. In this release it
-is a stub: `Given the GitHub repository "o/r" holds:` (a JSON object of each file's path to
-its text) registers the repository under its own name in replay, and in record mode raises
-`NotImplementedError`, as creating it needs the GitHub test org.
+pytest.ini or lists `pytest_plugins = ["integrations.testing.github"]`. For Node,
+`@sustenaut/integrations/testing/github.js` exports the same steps as a test customer,
+`github`, for pubtest's `register(api, { customers: [github] })` (pubtest 0.3 or later).
+
+| Step | Recording (`INTEGRATIONS_MODE=record`) | Replaying |
+|---|---|---|
+| `Given the GitHub repository "o/r" holds:` + a JSON object from each file's path to its text | Makes the private repository `rec-<consumer>-<run>-<n>` in the test org holding exactly those files, in one commit on its default branch (`{}`: an empty repository) | Registers `o/r` under its own name |
+| `Given someone else pushes to "BRANCH" of "o/r":` + each file's path to its new text, or `null` to delete it | A real commit on BRANCH (made from the default branch when there is none), so the code under test meets the race for real | Nothing: the cassette holds what the code met |
+
+The code under test calls `repositories(ctx)["o/r"].recorded`: `o/r` replaying, the test
+org's repository recording. `token(ctx)` is the token it calls with: the recorder app's
+recording, a stand-in replaying (a request's `Authorization` is neither recorded nor
+matched). The repositories' real names reach the Recorder in `INTEGRATIONS_NAMES`, which
+every program the scenario runs inherits, so the cassette says `o/r`, `r` and `o`
+throughout; a scenario's repositories are all in the test org, so they share one owner.
+What the steps call themselves (making, pushing to and deleting repositories, the app's
+token) goes through a `Caller` of their own, straight to GitHub, and is never recorded: a
+replay makes none of it. When the scenario ends, passed or failed, its repositories are
+deleted and `INTEGRATIONS_NAMES` is as it was.
+
+The consumer is the repository under test's name (its origin's), the run `PUBTEST_RUN`,
+and n counts the run's repositories, the next number when one is taken. The org is
+`INTEGRATIONS_TEST_ORG`, else `SustenautTest`. The recorder app's credentials are
+`GITHUB_TEST_RECORDER_APP_ID`, `GITHUB_TEST_RECORDER_APP_KEY` and
+`GITHUB_TEST_RECORDER_INSTALLATION_ID` (or an installation token in
+`GITHUB_TEST_RECORDER_TOKEN`), which `./with-secrets` exports from Bitwarden's
+`github-test-recorder-*` items: recording without them stops at the first step, naming
+them. The calls are `github.repo-ops`' `test-org`, the token `github.app-token`'s.
+
+**The janitor.** `integrations test-org sweep [--org ORG] [--older-than-hours 24]` deletes
+the test org's `rec-*` repositories made more than that long ago (`github.repo-ops`'
+`test-org-sweep`), for a run cut short. The `test-org` workflow runs it daily as the
+recorder app, with the token `actions/create-github-app-token` mints from the
+`TEST_RECORDER_APP_ID` variable and the `TEST_RECORDER_APP_KEY` secret, which
+`./with-secrets ./pubsec app-secrets` sends from pubrules.json's `github_app` block; until
+they are there, it does nothing.
 
 #### Later steps
 
 pubtest 0.3 brings the harness: it installs a cassette per scenario with `use()`, sets
 `PUBTEST_RUN`, `INTEGRATIONS_MODE` and `INTEGRATIONS_CASSETTE` for the programs a scenario
 runs, puts its failure steps on `Faulty`, and adds `pubtest record "<scenario>"` (and
-`--accept`, which calls `promote`). Then come the GitHub test org and its recorder app,
-which record mode creates repositories in and `integrations.testing.github` fills out; then
-the consumers, pubpr and release-controlplane first, moving their tests onto cassettes; and
-last the production drift check, which reuses each plugin's `record.volatile` rules to
-compare what a provider answers now with the cassette's baseline.
+`--accept`, which calls `promote`). Next, pubtest takes the hooks above in place of what it
+reaches into (`cassette_reports()` for its exit report, `INTEGRATIONS_FAULTS` for its
+faults, `use_clock()` for its clock); then the consumers, pubpr and release-controlplane
+first, moving their tests onto cassettes; and last the production drift check, which
+reuses each plugin's `record.volatile` rules to compare what a provider answers now with
+the cassette's baseline.
 
 ### Releasing
 
