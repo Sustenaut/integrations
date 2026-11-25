@@ -34,6 +34,7 @@ export const OPERATIONS = Object.freeze({
   "google.calendar": {"read":{"class":"H","route":"routed"}},
   "google.cloud": {"provision":{"class":"M","route":"none"},"deploy":{"class":"E","route":"reported"}},
   "google.firestore": {"read":{"class":"H","route":"routed"},"write":{"class":"H","route":"routed"}},
+  "google.monitoring": {"write":{"class":"S","route":"routed"}},
   "ilert.alert": {"alert":{"class":"E","route":"routed"}},
   "inwx.registrar": {"set-ds":{"class":"M","route":"none"}},
   "jsdelivr.purge": {"purge":{"class":"E","route":"routed"}},

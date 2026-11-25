@@ -63,7 +63,7 @@ Feature: The registry and the consumer format, held to their JSON schemas
 
   Scenario: Every inventory row has its plugins and every plugin a row
     When I compare the inventory with the registry
-    Then the result's "rows" is "33"
+    Then the result's "rows" is "34"
     And the result's "not listed" is "[]"
     And the result's "not plugins" is "[]"
 

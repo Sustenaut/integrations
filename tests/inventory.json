@@ -10,6 +10,7 @@
     "Slack: channel healing": ["slack.channel-heal"],
     "Linear: issues and sync": ["linear.sync"],
     "Google: BigQuery": ["google.bigquery"],
+    "Google: Cloud Monitoring": ["google.monitoring"],
     "Google: Calendar": ["google.calendar"],
     "Google: Firestore": ["google.firestore"],
     "Google: Cloud Run, IAP, Secret Manager, Artifact Registry, budget": ["google.cloud", "terraform.google"],
