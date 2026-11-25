@@ -53,6 +53,7 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | graphql.json | A GraphQL request matches by its operation's name and variables, however its query is laid out |
       | host.json | The host is part of the match: api.github.com is not uploads.github.com |
       | in-order.json | The same request twice is answered by its recorded calls in order, each once |
+      | labels.json | A labelled commit is written as its label, before the sha pattern, and replayed as itself, in a URL percent-encoded or not; a short sha and other shas stay as they were, and real text that looks like another label is escaped |
       | loose.json | A placeholder first seen in a request binds to the first value the code sends there: answered as that value, and only that value matches it again; a value already another placeholder's binds none |
       | match.json | A request finds its recorded call: its query in any order, its host in any case, its headers aside |
       | names.json | A recording against the test org writes its real names as the scenario's, a whole name at a time, so the cassette and a replay only see o/r |
@@ -69,7 +70,7 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
     When I list the vectors of cassettes
     Then the result is:
       """
-      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "loose.json", "match.json", "names.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
+      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "labels.json", "loose.json", "match.json", "names.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
       """
 
   Scenario: A file the JS sink wrote reads as its records and report

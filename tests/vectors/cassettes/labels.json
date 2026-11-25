@@ -1,0 +1,305 @@
+{
+  "description": "A labelled commit is written as its label, before the sha pattern, and replayed as itself, in a URL percent-encoded or not; a short sha and other shas stay as they were, and real text that looks like another label is escaped",
+  "scenario": "vectors: labels",
+  "names": {
+    "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3": "⟦integrations:commit:start⟧"
+  },
+  "record": [
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "object": {
+            "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+          },
+          "short": "a94a8fe",
+          "other": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "message": "says ⟦integrations:commit:other⟧"
+        }
+      },
+      "elapsed_ms": 10
+    },
+    {
+      "status": 201,
+      "body": {
+        "json": {
+          "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+          "parents": [
+            {
+              "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            }
+          ]
+        }
+      },
+      "elapsed_ms": 10
+    },
+    {
+      "status": 200,
+      "body": {
+        "json": {
+          "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+        }
+      },
+      "elapsed_ms": 10
+    }
+  ],
+  "steps": [
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/ref/heads/main"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/commits",
+        "body": {
+          "json": {
+            "message": "m",
+            "tree": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "parents": [
+              "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/commits/a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+      }
+    },
+    {
+      "save": true
+    },
+    {
+      "replay": true
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/ref/heads/main"
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "open-pr",
+        "method": "POST",
+        "url": "https://api.github.com/repos/o/r/git/commits",
+        "body": {
+          "json": {
+            "message": "m",
+            "tree": "{{5.json.other}}",
+            "parents": [
+              "{{5.json.object.sha}}"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "call": {
+        "plugin": "github.edit-pr",
+        "operation": "read",
+        "method": "GET",
+        "url": "https://api.github.com/repos/o/r/git/commits/%E2%9F%A6integrations:commit:start%E2%9F%A7"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "absent": [
+    "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+  ],
+  "expect": {
+    "results": [
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+          },
+          "short": "a94a8fe",
+          "other": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "message": "says ⟦integrations:commit:other⟧"
+        }
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+          "parents": [
+            {
+              "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "sha": "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"
+        }
+      },
+      {
+        "saved": {
+          "format": "integrations.cassette/1",
+          "scenario": "vectors: labels",
+          "current": {
+            "volatile": {
+              "⟦integrations:commit:start⟧": {
+                "kind": "commit",
+                "first": "calls.0.response.body.object.sha"
+              },
+              "⟦integrations:sha:1⟧": {
+                "kind": "sha",
+                "first": "calls.0.response.body.other"
+              },
+              "⟦integrations:sha:2⟧": {
+                "kind": "sha",
+                "first": "calls.1.response.body.sha"
+              }
+            },
+            "calls": [
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/git/ref/heads/main",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "object": {
+                        "sha": "⟦integrations:commit:start⟧"
+                      },
+                      "short": "a94a8fe",
+                      "other": "⟦integrations:sha:1⟧",
+                      "message": "says ⟦integrations:escape⟧commit:other⟧"
+                    }
+                  }
+                },
+                "elapsed_ms": 10
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "open-pr",
+                "request": {
+                  "method": "POST",
+                  "url": "https://api.github.com/repos/o/r/git/commits",
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "message": "m",
+                      "tree": "⟦integrations:sha:1⟧",
+                      "parents": [
+                        "⟦integrations:commit:start⟧"
+                      ]
+                    }
+                  }
+                },
+                "response": {
+                  "status": 201,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "sha": "⟦integrations:sha:2⟧",
+                      "parents": [
+                        {
+                          "sha": "⟦integrations:commit:start⟧"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "elapsed_ms": 10
+              },
+              {
+                "kind": "http",
+                "plugin": "github.edit-pr",
+                "operation": "read",
+                "request": {
+                  "method": "GET",
+                  "url": "https://api.github.com/repos/o/r/git/commits/⟦integrations:commit:start⟧",
+                  "headers": {},
+                  "body": null
+                },
+                "response": {
+                  "status": 200,
+                  "headers": {},
+                  "body": {
+                    "json": {
+                      "sha": "⟦integrations:commit:start⟧"
+                    }
+                  }
+                },
+                "elapsed_ms": 10
+              }
+            ]
+          },
+          "baseline": null
+        },
+        "leaked": []
+      },
+      {
+        "replayed": true
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "object": {
+            "sha": "⟦integrations:commit:start⟧"
+          },
+          "short": "a94a8fe",
+          "other": "09dae5a91514e437af04471fdc2c04da5e3ee302",
+          "message": "says ⟦integrations:commit:other⟧"
+        }
+      },
+      {
+        "status": 201,
+        "headers": {},
+        "json": {
+          "sha": "c382a8fa741124531023e643c69cb41a655f3ab9",
+          "parents": [
+            {
+              "sha": "⟦integrations:commit:start⟧"
+            }
+          ]
+        }
+      },
+      {
+        "status": 200,
+        "headers": {},
+        "json": {
+          "sha": "⟦integrations:commit:start⟧"
+        }
+      },
+      {
+        "closed": true
+      }
+    ]
+  }
+}

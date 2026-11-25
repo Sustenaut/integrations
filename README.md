@@ -375,7 +375,10 @@ call answers and the next sends still matches. Replayed stand-in dates are in th
 one the code made itself: on replay its placeholder matches the first value of its kind the
 code sends there, and from then on is that value, in the answers that echo it and in what
 the code must send again, as one map, both ways. A value that is already another
-placeholder's matches none. Real text holding `⟦integrations:` is written
+placeholder's matches none. A name the Recorder writes may be a label,
+`⟦integrations:commit:L⟧` (GitHub's test steps' commit labels, below): replayed as itself,
+never loose, and kept as it is where the cassette's map holds it. Real text holding
+`⟦integrations:` is written
 `⟦integrations:escape⟧`, and replayed as it was.
 
 **Secrets.** A recording never holds a secret's value: secret headers (and
@@ -440,8 +443,9 @@ pytest.ini or lists `pytest_plugins = ["integrations.testing.github"]`. For Node
 
 | Step | Recording (`INTEGRATIONS_MODE=record`) | Replaying |
 |---|---|---|
-| `Given the GitHub repository "o/r" holds:` + a JSON object from each file's path to its text | Makes the private repository `rec-<consumer>-<run>-<n>` in the test org holding exactly those files, in one commit on its default branch (`{}`: an empty repository) | Registers `o/r` under its own name |
+| `Given the GitHub repository "o/r" holds:` + a JSON object from each file's path to its text | Makes the private repository `rec-<consumer>-<run>-<process>-<n>` in the test org holding exactly those files, in one commit on its default branch (`{}`: an empty repository), labelled `start` | Registers `o/r` under its own name, and its commit `start` |
 | `Given someone else pushes to "BRANCH" of "o/r":` + each file's path to its new text, or `null` to delete it | A real commit on BRANCH (made from the default branch when there is none), so the code under test meets the race for real | Nothing: the cassette holds what the code met |
+| `Given someone else pushes to "BRANCH" of "o/r" as commit "L":` + the same | The same commit, labelled `L` | Registers the label `L` |
 
 The code under test calls `repositories(ctx)["o/r"].recorded`: `o/r` replaying, the test
 org's repository recording. `token(ctx)` is the token it calls with: the recorder app's
@@ -454,8 +458,23 @@ token) goes through a `Caller` of their own, straight to GitHub, and is never re
 replay makes none of it. When the scenario ends, passed or failed, its repositories are
 deleted and `INTEGRATIONS_NAMES` is as it was.
 
+**Commit labels.** The commit a repository's files are in is labelled `start` (a later
+repository's in the scenario, `start-<name>`); a push may name its own label. Recording,
+each labelled commit's real sha goes in `INTEGRATIONS_NAMES` as `⟦integrations:commit:L⟧`,
+which the Recorder writes in place of the sha, before its volatile patterns, so the
+cassette says the label, never an ordinary `⟦integrations:sha:N⟧`; replaying, the cassette
+hands the code under test the label itself for that commit, and matches it when the code
+sends it back. `commit(ctx, "o/r", "L")` (the same export in JS) is the commit: its real
+sha recording, `⟦integrations:commit:L⟧` replaying, so a scenario's expectations of it hold
+in both. A scenario's labels are its own, one commit each; a label that is taken, not a
+word (a letter, then letters, digits, `_` and `-`) or unknown is refused, the last naming
+the repository's labels. A short sha is not its commit's label, and stays as it was.
+
 The consumer is the repository under test's name (its origin's), the run `PUBTEST_RUN`,
-and n counts the run's repositories, the next number when one is taken. The org is
+the process six hex digits of its own, so parallel workers (xdist's, or separate
+processes) never pick the same name, and n counts the process's repositories, the next
+number when one is taken all the same. Nothing else in the test org may be named `rec-*`:
+the janitor deletes every such repository older than a day. The org is
 `INTEGRATIONS_TEST_ORG`, else `SustenautTest`. The recorder app's credentials are
 `GITHUB_TEST_RECORDER_APP_ID`, `GITHUB_TEST_RECORDER_APP_KEY` and
 `GITHUB_TEST_RECORDER_INSTALLATION_ID` (or an installation token in

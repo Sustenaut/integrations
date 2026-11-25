@@ -1,11 +1,12 @@
 # The GitHub test org's janitor: daily, deletes the rec-* repositories a recording
 # (integrations.testing.github) left behind, those made more than a day ago. A run
 # deletes its own repositories as each scenario ends; this takes what a run cut
-# short left. It acts as the recorder app, installed on the test org only, with
-# the token actions/create-github-app-token mints from its id and key
-# (TEST_RECORDER_APP_ID, a variable, and TEST_RECORDER_APP_KEY, a secret, which
-# `./with-secrets ./pubsec app-secrets` sends from pubrules.json's github_app
-# block). Until they are there, it does nothing.
+# short left, so nothing else in the test org may be named rec-*. It acts as the
+# recorder app, installed on the test org only, with the token
+# actions/create-github-app-token mints from its id and key (TEST_RECORDER_APP_ID,
+# a variable, and TEST_RECORDER_APP_KEY, a secret, which `./with-secrets ./pubsec
+# app-secrets` sends from pubrules.json's github_app block). Until they are there,
+# it does nothing.
 name: test-org
 
 on:

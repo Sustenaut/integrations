@@ -38,7 +38,7 @@ Feature: Recording against the GitHub test org in Node: GitHub's test steps, as 
       {}
       """
     When I read INTEGRATIONS_NAMES
-    Then the result's "recorded" matches "SustenautTest/rec-*-run1-*"
+    Then the result's "recorded" matches "SustenautTest/rec-*-run1-*-*"
     And the result's "names" is:
       """
       {"SustenautTest/<r>": "o/r", "<r>": "r", "SustenautTest": "o"}
@@ -235,3 +235,142 @@ Feature: Recording against the GitHub test org in Node: GitHub's test steps, as 
       | mode   | token        |
       | record | ghs_recorder |
       | replay | ghs_0*       |
+
+  Scenario: Recording, a labelled race: the shas are written as their labels, and commit() is the real one
+    Given the environment sets "INTEGRATIONS_MODE" to "record"
+    And the environment sets "PUBTEST_RUN" to "run1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
+    And the environment sets "GITHUB_TEST_RECORDER_TOKEN" to "ghs_recorder"
+    And a stand-in GitHub test org
+    And the scenario runs under pubtest's harness
+    And the code under test records its calls
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    And the code under test read "main" of "o/r"
+    And someone else pushes to "main" of "o/r" as commit "theirs":
+      """
+      {"a.txt": "theirs\n"}
+      """
+    When the code under test commits "a.txt" as "mine" on what it read of "main" of "o/r"
+    Then the result is:
+      """
+      {"status": 422, "message": "Update is not a fast forward"}
+      """
+    And what the code under test read of "main" is the commit labelled "start" of "o/r"
+    And the commit labelled "theirs" of "o/r" is the stand-in's "main" of "o/r"
+    And the recording's URLs are:
+      """
+      GET https://api.github.com/repos/o/r/git/ref/heads/main 200
+      GET https://api.github.com/repos/o/r/git/commits/⟦integrations:commit:start⟧ 200
+      POST https://api.github.com/repos/o/r/git/trees 201
+      POST https://api.github.com/repos/o/r/git/commits 201
+      PATCH https://api.github.com/repos/o/r/git/refs/heads/main 422
+      """
+
+  Scenario: Replaying a labelled race Python recorded, commit() is the placeholder the cassette hands back, and the code still matches
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the code under test replays the cassette in "tests/vectors/github/race-labelled.json"
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    And the code under test read "main" of "o/r"
+    And someone else pushes to "main" of "o/r" as commit "theirs":
+      """
+      {"a.txt": "theirs\n"}
+      """
+    When the code under test commits "a.txt" as "mine" on what it read of "main" of "o/r"
+    Then the result is:
+      """
+      {"status": 422, "message": "Update is not a fast forward"}
+      """
+    And what the code under test read of "main" is the commit labelled "start" of "o/r"
+    And every call the cassette holds was made
+
+  Scenario: Replaying, a labelled commit is its placeholder
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    And someone else pushes to "main" of "o/r" as commit "theirs":
+      """
+      {"a.txt": "theirs\n"}
+      """
+    When I ask for the commit labelled "theirs" of "o/r"
+    Then the result is "⟦integrations:commit:theirs⟧"
+
+  Scenario: A later repository's first commit is labelled start-<name>
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    And the GitHub repository "o/s" holds:
+      """
+      {"b.txt": "old\n"}
+      """
+    When I ask for the commit labelled "start-s" of "o/s"
+    Then the result is "⟦integrations:commit:start-s⟧"
+
+  Scenario Outline: A commit label that is not one is refused: <why>
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    When I push to "main" of "o/r" as someone else, as commit "<label>"
+    Then it is refused, saying "<saying>"
+
+    Examples:
+      | why        | label | saying                                                                                               |
+      | taken      | start | the commit label \"start\" is taken already, by o/r: a scenario's labels are its own, one commit each |
+      | not a word | 1x    | \"1x\" is no commit label: a letter, then letters, digits, _ and -                                    |
+
+  Scenario Outline: An unknown commit label is refused, naming the repository's: <name>
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the GitHub repository "<name>" holds:
+      """
+      <files>
+      """
+    When I ask for the commit labelled "nope" of "<name>"
+    Then it is refused, saying "<name> has no commit labelled \"nope\": its labels are <labels>"
+
+    Examples:
+      | name | files          | labels |
+      | o/r  | {"a.txt": "x"} | start  |
+      | o/e  | {}             | none   |
+
+  Scenario: Recording, a short sha stays as it was, not its commit's label
+    Given the environment sets "INTEGRATIONS_MODE" to "record"
+    And the environment sets "PUBTEST_RUN" to "run1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
+    And the environment sets "GITHUB_TEST_RECORDER_TOKEN" to "ghs_recorder"
+    And a stand-in GitHub test org
+    And the scenario runs under pubtest's harness
+    And the code under test records its calls
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    When the code under test reads "o/r" at the short sha of its commit labelled "start"
+    Then the recording's call 0 holds that short sha as it was
+
+  Scenario: Recording, a new repository's first branch is waited for with the harness's sleep
+    Given the environment sets "INTEGRATIONS_MODE" to "record"
+    And the environment sets "PUBTEST_RUN" to "run1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
+    And the environment sets "GITHUB_TEST_RECORDER_TOKEN" to "ghs_recorder"
+    And a stand-in GitHub test org
+    And the scenario runs under pubtest's harness
+    And the stand-in test org makes a new repository's first branch only after 2 asks
+    And the harness's sleep is kept
+    And the GitHub repository "o/r" holds:
+      """
+      {"a.txt": "old\n"}
+      """
+    When I ask how long the harness slept
+    Then the result is "[1, 1]"
+

@@ -16,6 +16,7 @@ export class StandInGitHub {
   requests = [];
   taken = 0;
   refuse = {}; // "METHOD /path-pattern" -> status
+  unsettled = 0; // a new repository's first branch is not there for this many asks
   publicKey = null;
   appId = null;
 
@@ -93,6 +94,10 @@ export class StandInGitHub {
       return new Response(null, { status: 204 });
     }
     if ((m = /^\/git\/ref\/heads\/(.+)$/.exec(rest)) && method === "GET") {
+      if (this.unsettled > 0) {
+        this.unsettled -= 1;
+        return json(404, { message: "Not Found" });
+      }
       if (!Object.keys(repo.refs).length) return json(409, { message: "Git Repository is empty." });
       const at = repo.refs[decodeURIComponent(m[1])];
       return at ? json(200, { object: { sha: at, type: "commit" } }) : json(404, { message: "Not Found" });

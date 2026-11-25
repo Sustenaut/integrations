@@ -54,6 +54,7 @@ Feature: The vectors in tests/vectors/, which tests/steps/test_vectors.py runs o
       | graphql.json |
       | host.json |
       | in-order.json |
+      | labels.json |
       | loose.json |
       | match.json |
       | names.json |
@@ -70,5 +71,5 @@ Feature: The vectors in tests/vectors/, which tests/steps/test_vectors.py runs o
     When I list the vectors in "tests/vectors/cassettes"
     Then the result is:
       """
-      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "loose.json", "match.json", "names.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
+      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "labels.json", "loose.json", "match.json", "names.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
       """
