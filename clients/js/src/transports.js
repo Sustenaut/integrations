@@ -30,7 +30,11 @@
 // Names: a recording against a test org names its repositories for real where a
 // scenario says o/r. The Recorder's names, and INTEGRATIONS_NAMES (a JSON object from
 // each real name to the scenario's), are written as the scenario's names wherever they
-// appear as a whole word, so the cassette, and a replay, only ever see o/r.
+// appear as a whole word, so the cassette, and a replay, only ever see o/r. A name may be
+// a label, ⟦integrations:commit:start⟧ for a commit's real sha: names are applied before
+// the volatile patterns, so that sha is written as its label (kept in the cassette's map,
+// kind commit), and a label is replayed as itself, kept as it is where the map knows it,
+// in a URL percent-encoded or not.
 //
 // Where cassettes go: a cassette is written (save(), promote(), writeCassette()), and a
 // cassette the environment names is read, only at a path that resolves, symlinks
@@ -60,7 +64,10 @@ const MODES = ["live", "replay", "record"];
 const PREFIX = "⟦integrations:";
 const ESCAPE = "⟦integrations:escape⟧";
 const SECRET = "⟦integrations:secret⟧";
-const PLACEHOLDER_SOURCE = "⟦integrations:(?:escape|secret|([a-z][a-z0-9-]*):(\\d+|\\?))⟧";
+// A placeholder's name is a number, ? (any value of its kind), or a label a scenario gave a
+// value (⟦integrations:commit:start⟧), which is replayed as itself.
+const LABEL = "[A-Za-z][A-Za-z0-9_-]*";
+const PLACEHOLDER_SOURCE = `⟦integrations:(?:escape|secret|([a-z][a-z0-9-]*):(\\d+|\\?|${LABEL}))⟧`;
 const placeholders = () => new RegExp(PLACEHOLDER_SOURCE, "g");
 const isPlaceholder = (text) => new RegExp(`^${PLACEHOLDER_SOURCE}$`).exec(text);
 // A known value is replaced where it is a whole value or a path segment from this long,
@@ -171,8 +178,9 @@ export function kindOf(value, otherwise = "text") {
 }
 
 // The value a placeholder is replayed as: made from its name alone, of its kind's shape,
-// and different for every name.
+// and different for every name. A labelled one is itself.
 export function standIn(kind, n) {
+  if (typeof n !== "number") return placeholder(kind, n);
   const seed = sha256Hex(utf8(`integrations:${kind}:${n}`));
   const number = 7_000_000_000 + n * 1000 + (parseInt(seed.slice(0, 6), 16) % 1000);
   const at = new Date(STAND_IN_EPOCH + (n * 86400 + (parseInt(seed.slice(0, 8), 16) % 86400)) * 1000);
@@ -189,7 +197,32 @@ export function standIn(kind, n) {
 // A value as it reads inside text: a URL, a header, a string.
 const textOf = (value) => (typeof value === "string" ? value : JSON.stringify(value));
 const placeholder = (kind, n) => `⟦integrations:${kind}:${n}⟧`;
-const escapeText = (text) => text.split(PREFIX).join(ESCAPE);
+// Whether name is a labelled placeholder, ⟦integrations:KIND:LABEL⟧.
+export function isLabel(name) {
+  const m = isPlaceholder(name);
+  return Boolean(m && m[2] && m[2] !== "?" && !/^\d+$/.test(m[2]));
+}
+
+// The placeholder a scenario's label for a value is: ⟦integrations:commit:start⟧. Throws
+// for a label that is not a letter, then letters, digits, _ and -.
+export function label(kind, name) {
+  if (!new RegExp(`^${LABEL}$`).test(name ?? "") || !/^[a-z][a-z0-9-]*$/.test(kind)) throw new Error(`"${name}" is no label: a letter, then letters, digits, _ and -`);
+  return placeholder(kind, name);
+}
+
+// Real text holding the prefix, escaped; a label the map knows is kept as it is.
+function escapeText(text, labels = new Set()) {
+  if (!text.includes(PREFIX)) return text;
+  if (!labels.size) return text.split(PREFIX).join(ESCAPE);
+  const keep = new RegExp([...labels].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|"), "g");
+  let out = "";
+  let at = 0;
+  for (const m of text.matchAll(keep)) {
+    out += text.slice(at, m.index).split(PREFIX).join(ESCAPE) + m[0];
+    at = m.index + m[0].length;
+  }
+  return out + text.slice(at).split(PREFIX).join(ESCAPE);
+}
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The text split into placeholders (true) and what lies between them.
@@ -240,6 +273,7 @@ function renamer(names) {
 class ValueMap {
   known = new Map(); // a value's text -> its placeholder
   rename = null;
+  labels = new Set(); // the labelled placeholders, which text keeps as they are
   #inside;
 
   knownText(text) {
@@ -269,6 +303,14 @@ class Writer extends ValueMap {
   constructor(names = {}) {
     super();
     this.rename = renamer(names);
+    this.labels = new Set(Object.values(names).filter(isLabel));
+  }
+
+  // Each label in text is in the cassette's map, first seen at where.
+  labelled(text, where) {
+    for (const m of text.matchAll(placeholders())) {
+      if (this.labels.has(m[0]) && !(m[0] in this.entries)) this.entries[m[0]] = { kind: m[1], first: where };
+    }
   }
 
   volatile(value, kind, where) {
@@ -310,7 +352,8 @@ class Reader extends ValueMap {
     for (const name of Object.keys(volatile ?? {})) {
       const m = isPlaceholder(name);
       if (!m || !m[1] || m[2] === "?") continue;
-      const value = standIn(m[1], Number(m[2]));
+      if (isLabel(name)) this.labels.add(name);
+      const value = standIn(m[1], /^\d+$/.test(m[2]) ? Number(m[2]) : m[2]);
       this.values.set(name, value);
       this.known.set(textOf(value), name);
     }
@@ -323,7 +366,7 @@ class Reader extends ValueMap {
   // The same map, leaving a volatile value it does not know as it is.
   rawCopy() {
     const other = new Reader({});
-    Object.assign(other, { values: this.values, known: this.known, raw: true });
+    Object.assign(other, { values: this.values, known: this.known, labels: this.labels, raw: true });
     return other;
   }
 
@@ -348,7 +391,8 @@ class Reader extends ValueMap {
   standIn(name) {
     if (this.values.has(name)) return this.values.get(name);
     const m = isPlaceholder(name);
-    return standIn(m?.[1] ?? "secret", m?.[2] && m[2] !== "?" ? Number(m[2]) : 0);
+    const n = m?.[2] && m[2] !== "?" ? m[2] : "0";
+    return standIn(m?.[1] ?? "secret", /^\d+$/.test(n) ? Number(n) : n);
   }
 
   fill(value) {
@@ -398,8 +442,11 @@ class Normaliser {
   }
 
   text(text, where) {
-    text = escapeText(text);
-    if (this.map.rename) text = this.map.rename(text);
+    text = escapeText(text, this.map.labels);
+    if (this.map.rename) { // before the volatile patterns: a labelled sha is its label
+      text = this.map.rename(text);
+      if (this.map instanceof Writer && this.map.labels.size) this.map.labelled(text, where);
+    }
     const found = this.map.knownText(text);
     if (found) return found;
     text = subOutside(text, this.map.inside(), (v) => this.map.known.get(v));
@@ -408,6 +455,9 @@ class Normaliser {
   }
 
   url(url, where) {
+    for (const token of this.map.labels) { // a label sent back in a URL, percent-encoded or not
+      for (const encoded of [encodeURI(token), encodeURIComponent(token)]) url = url.split(encoded).join(token);
+    }
     const m = URL_PARTS.exec(url);
     if (!m) return this.text(url, where);
     const scheme = m[1].toLowerCase();
@@ -675,7 +725,7 @@ export class Cassette {
       this.calls = (current.calls ?? []).map((c) => ({ plugin: c.plugin ?? null, operation: c.operation ?? null, request: c.request, response: c.response, sticky: false, used: 0 }));
     } else throw new Error(`${scenario} is not a cassette: no format ${FORMAT} and no responses`);
     this.reader = new Reader(volatile);
-    this.loose = new Set(Object.entries(volatile).filter(([, e]) => (e.first ?? "").split(".")[2] === "request").map(([n]) => n));
+    this.loose = new Set(Object.entries(volatile).filter(([n, e]) => (e.first ?? "").split(".")[2] === "request" && !isLabel(n)).map(([n]) => n));
   }
 
   static #old(responses) {

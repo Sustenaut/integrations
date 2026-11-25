@@ -6,17 +6,20 @@ import { dig } from "@sustenaut/pubtest";
 import { generateKeyPairSync } from "node:crypto";
 import path from "node:path";
 import { Caller, MemorySink } from "../caller.js";
-import { github, hold, repositories, token, useNetwork } from "../testing-github.js";
-import { Cassette, NAMES, Recorder, namesFrom, use } from "../transports.js";
+import { commit, github, hold, push, repositories, token, useNetwork } from "../testing-github.js";
+import { Cassette, NAMES, Recorder, namesFrom, use, useClock } from "../transports.js";
 import { StandInGitHub } from "./github-standin.mjs";
 
 // The customer's steps, each given the scenario's pubtest context, as register() does.
-const [holds, pushes] = github.steps;
+const [holds, pushes, pushesLabelled] = github.steps;
 Given(holds[1], function (name, doc) {
   return holds[2](this.pubtest, name, doc);
 });
 Given(pushes[1], function (branch, name, doc) {
   return pushes[2](this.pubtest, branch, name, doc);
+});
+Given(pushesLabelled[1], function (branch, name, asCommit, doc) {
+  return pushesLabelled[2](this.pubtest, branch, name, asCommit, doc);
 });
 
 Given("a stand-in GitHub test org", function () {
@@ -59,6 +62,7 @@ function shown(world, value) {
   let text = JSON.stringify(value);
   for (const r of Object.values(repositories(world.pubtest))) {
     if (r.recorded !== r.name) text = text.replaceAll(r.recorded.split("/")[1], "<r>");
+    for (const [l, at] of Object.entries(r.commits)) text = text.replaceAll(at, `<sha of ${l}>`);
   }
   return JSON.parse(text);
 }
@@ -172,4 +176,55 @@ Then("the result's {string} is:", function (key, doc) {
   const wanted = JSON.parse(doc);
   const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort()) : x));
   if (canonical(got) !== canonical(wanted)) throw new Error(`the result's ${key} is ${JSON.stringify(got)}, not ${doc}`);
+});
+
+// --- commit labels ----------------------------------------------------------------------
+
+When("I push to {string} of {string} as someone else, as commit {string}", async function (branch, name, asCommit) {
+  await this.attempt(() => push(this.pubtest, name, branch, { "a.txt": "x" }, asCommit));
+});
+
+When("I ask for the commit labelled {string} of {string}", async function (wanted, name) {
+  await this.attempt(() => commit(this.pubtest, name, wanted));
+});
+
+Then("what the code under test read of {string} is the commit labelled {string} of {string}", function (branch, wanted, name) {
+  const want = commit(this.pubtest, name, wanted);
+  if (this.read[branch] !== want) throw new Error(`it read ${this.read[branch]}, not ${want}`);
+});
+
+Then("the commit labelled {string} of {string} is the stand-in's {string} of {string}", function (wanted, name, branch, repo) {
+  const real = repositories(this.pubtest)[repo].recorded.split("/")[1];
+  const at = this.standin.repos[real].refs[branch];
+  if (commit(this.pubtest, name, wanted) !== at) throw new Error(`${commit(this.pubtest, name, wanted)} is not ${at}`);
+  if (namesFrom()[at] !== `⟦integrations:commit:${wanted}⟧`) throw new Error(JSON.stringify(namesFrom()));
+});
+
+Then("the recording's URLs are:", function (doc) {
+  const got = this.recorder.recording().calls.map((c) => `${c.request.method} ${c.request.url} ${c.response.status}`);
+  const wanted = doc.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (JSON.stringify(got) !== JSON.stringify(wanted)) throw new Error(`the recording's URLs are ${JSON.stringify(got, null, 1)}`);
+});
+
+When("the code under test reads {string} at the short sha of its commit labelled {string}", async function (name, wanted) {
+  this.short = commit(this.pubtest, name, wanted).slice(0, 7);
+  await this.attempt(async () => (await (await codeUnderTest(this, name))("read", "GET", `/git/ref/heads/${this.short}`)).status);
+});
+
+Then("the recording's call 0 holds that short sha as it was", function () {
+  const { url } = this.recorder.recording().calls[0].request;
+  if (!url.endsWith(`/git/ref/heads/${this.short}`)) throw new Error(url);
+});
+
+Given("the stand-in test org makes a new repository's first branch only after {int} asks", function (count) {
+  this.standin.unsettled = count;
+});
+
+Given("the harness's sleep is kept", function () {
+  this.slept = [];
+  this.pubtest.cleanup(useClock({ sleep: async (s) => { this.slept.push(s); } }));
+});
+
+When("I ask how long the harness slept", async function () {
+  await this.attempt(() => this.slept);
 });

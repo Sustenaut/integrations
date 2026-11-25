@@ -47,7 +47,15 @@ Names. A recording made against a test org names its repositories for real
 (`SustenautTest/rec-pubpr-…-1`) where a scenario says `o/r`: the Recorder's
 `names`, and `INTEGRATIONS_NAMES` (a JSON object from each real name to the one
 the scenario gives it), are written as the scenario's names wherever they appear
-as a whole word, so the cassette, and a replay, only ever see `o/r`.
+as a whole word, so the cassette, and a replay, only ever see `o/r`. A name may be
+a label, `⟦integrations:commit:start⟧` for a commit's real sha: the names are
+applied before the volatile patterns, so that sha is written as its label, not as
+an ordinary `⟦integrations:sha:N⟧`, and is kept in the cassette's map (`volatile`,
+its kind `commit`). A label is replayed as itself, so the code under test is handed
+the label for the sha and sends it back, in a URL percent-encoded or not; it is
+never loose, and is not escaped where the map knows it (real text holding any other
+`⟦integrations:` is escaped as before). Labels are letters, digits, `_` and `-`,
+starting with a letter, so one never reads as a numbered placeholder.
 """
 
 from __future__ import annotations
@@ -68,6 +76,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from urllib.parse import quote
 
 from . import __version__, registry
 from .calls import Network, Request, Response, Transport
@@ -86,7 +95,10 @@ MODES = ("live", "replay", "record")
 PREFIX = "⟦integrations:"
 ESCAPE = "⟦integrations:escape⟧"
 SECRET = "⟦integrations:secret⟧"
-PLACEHOLDER = re.compile(r"⟦integrations:(?:escape|secret|([a-z][a-z0-9-]*):(\d+|\?))⟧")
+# A placeholder's name is a number, `?` (any value of its kind), or a label a scenario gave
+# a value (`⟦integrations:commit:start⟧`), which is replayed as itself.
+LABEL = r"[A-Za-z][A-Za-z0-9_-]*"
+PLACEHOLDER = re.compile(rf"⟦integrations:(?:escape|secret|([a-z][a-z0-9-]*):(\d+|\?|{LABEL}))⟧")
 # A known value is replaced where it is a whole value or a path segment from this
 # long, and inside other text from MIN_INSIDE, so a short one can't hit by chance.
 MIN_WHOLE = 4
@@ -145,9 +157,11 @@ def kind_of(value: Any, default: str = "text") -> str | None:
     return default
 
 
-def stand_in(kind: str, n: int) -> Any:
+def stand_in(kind: str, n: int | str) -> Any:
     """The value a placeholder is replayed as: made from its name alone, of its kind's
-    shape, and different for every name."""
+    shape, and different for every name. A labelled one is itself."""
+    if not isinstance(n, int):
+        return _placeholder(kind, n)
     seed = hashlib.sha256(f"integrations:{kind}:{n}".encode()).hexdigest()
     number = 7_000_000_000 + n * 1000 + int(seed[:6], 16) % 1000
     at = STAND_IN_EPOCH + timedelta(days=n, seconds=int(seed[:8], 16) % 86400)
@@ -195,8 +209,33 @@ def _sub_outside(text: str, pattern: re.Pattern, fn: Callable[[str], str]) -> st
     return "".join(p if held else pattern.sub(lambda m: fn(m.group(0)), p) for held, p in _pieces(text))
 
 
-def _escape(text: str) -> str:
-    return text.replace(PREFIX, ESCAPE)
+def is_label(name: str) -> bool:
+    """Whether `name` is a labelled placeholder, `⟦integrations:KIND:LABEL⟧`."""
+    m = PLACEHOLDER.fullmatch(name)
+    return bool(m and m.group(2) and m.group(2) != "?" and not m.group(2).isdigit())
+
+
+def label(kind: str, name: str) -> str:
+    """The placeholder a scenario's label for a value is: `⟦integrations:commit:start⟧`.
+    Raises ValueError for a label that is not a letter, then letters, digits, _ and -."""
+    if not re.fullmatch(LABEL, name or "") or not re.fullmatch(r"[a-z][a-z0-9-]*", kind):
+        raise ValueError(f'"{name}" is no label: a letter, then letters, digits, _ and -')
+    return _placeholder(kind, name)
+
+
+def _escape(text: str, labels: frozenset[str] | set[str] = frozenset()) -> str:
+    """Real text holding the prefix, escaped; a label the map knows is kept as it is."""
+    if PREFIX not in text:
+        return text
+    if not labels:
+        return text.replace(PREFIX, ESCAPE)
+    keep = re.compile("|".join(re.escape(t) for t in sorted(labels, key=len, reverse=True)))
+    out, at = [], 0
+    for m in keep.finditer(text):
+        out += [text[at:m.start()].replace(PREFIX, ESCAPE), m.group(0)]
+        at = m.end()
+    out.append(text[at:].replace(PREFIX, ESCAPE))
+    return "".join(out)
 
 
 def names_from(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -237,6 +276,7 @@ class _Map:
 
     def __init__(self) -> None:
         self.known: dict[str, str] = {}  # a value's text -> its placeholder
+        self.labels: set[str] = set()  # the labelled placeholders, which text keeps as they are
         self._inside: re.Pattern | None = None
 
     def known_text(self, text: str) -> str | None:
@@ -256,10 +296,17 @@ class _Writer(_Map):
     def __init__(self, names: dict[str, str] | None = None) -> None:
         super().__init__()
         self.rename = _renamer(names or {})
+        self.labels = {v for v in (names or {}).values() if is_label(v)}
         self.by_value: dict[str, str] = {}
         self.entries: dict[str, dict[str, str]] = {}
         self.counts: dict[str, int] = {}
         self.secrets: dict[str, str] = {}  # a secret value -> where it was seen
+
+    def labelled(self, text: str, where: str) -> None:
+        """Each label in `text` is in the cassette's map, first seen at `where`."""
+        for m in PLACEHOLDER.finditer(text):
+            if m.group(0) in self.labels and m.group(0) not in self.entries:
+                self.entries[m.group(0)] = {"kind": m.group(1), "first": where}
 
     def volatile(self, value: Any, kind: str, where: str) -> str:
         key = json.dumps(value)
@@ -300,7 +347,9 @@ class _Reader(_Map):
             m = PLACEHOLDER.fullmatch(name)
             if not m or not m.group(1) or m.group(2) == "?":
                 continue
-            value = stand_in(m.group(1), int(m.group(2)))
+            if is_label(name):
+                self.labels.add(name)
+            value = stand_in(m.group(1), int(m.group(2)) if m.group(2).isdigit() else m.group(2))
             self.values[name] = value
             self.known[text_of(value)] = name
 
@@ -313,7 +362,7 @@ class _Reader(_Map):
     def raw_copy(self) -> _Reader:
         """The same map, leaving a volatile value it does not know as it is."""
         other = _Reader({})
-        other.values, other.known, other.raw = self.values, self.known, True
+        other.values, other.known, other.labels, other.raw = self.values, self.known, self.labels, True
         return other
 
     def bind(self, name: str, value: Any) -> None:
@@ -341,7 +390,9 @@ class _Reader(_Map):
             return self.values[name]
         m = PLACEHOLDER.fullmatch(name)
         kind = m.group(1) if m and m.group(1) else "secret"
-        n = int(m.group(2)) if m and m.group(2) and m.group(2) != "?" else 0
+        n: int | str = 0
+        if m and m.group(2) and m.group(2) != "?":
+            n = int(m.group(2)) if m.group(2).isdigit() else m.group(2)
         return stand_in(kind, n)
 
     def fill(self, value: Any) -> Any:
@@ -404,9 +455,11 @@ class _Normaliser:
         self.secret_query = set(rules["secret"]["query"])
 
     def text(self, text: str, where: str) -> str:
-        text = _escape(text)
-        if self.map.rename is not None:
+        text = _escape(text, self.map.labels)
+        if self.map.rename is not None:  # before the volatile patterns: a labelled sha is its label
             text = self.map.rename(text)
+            if isinstance(self.map, _Writer) and self.map.labels:
+                self.map.labelled(text, where)
         whole = self.map.known_text(text)
         if whole:
             return whole
@@ -416,6 +469,9 @@ class _Normaliser:
         return text
 
     def url(self, url: str, where: str) -> str:
+        for token in self.map.labels:  # a label sent back in a URL, percent-encoded or not
+            for encoded in (quote(token, safe=":"), quote(token, safe="")):
+                url = url.replace(encoded, token)
         m = URL.match(url)
         if not m:
             return self.text(url, where)
@@ -600,7 +656,8 @@ class Cassette:
         else:
             raise ValueError(f"{self.scenario} is not a cassette: no format {FORMAT} and no responses")
         self.reader = _Reader(volatile)
-        self.loose = {name for name, e in volatile.items() if e.get("first", "").split(".")[2:3] == ["request"]}
+        self.loose = {name for name, e in volatile.items()
+                      if e.get("first", "").split(".")[2:3] == ["request"] and not is_label(name)}
 
     @staticmethod
     def _old(responses: dict) -> list[_Call]:
