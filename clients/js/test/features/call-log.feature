@@ -310,3 +310,38 @@ Feature: workers/call-log's Durable Object, on fakes of its storage and R2, and 
       080200-storage-b54b25193a65b295.avro
       """
     And the object keeps the records ""
+
+  Scenario: With a deadline and no heartbeat, the object sets no alarm while nothing is kept
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30"}
+      """
+    When "storage" sends the records ""
+    Then no alarm is set
+
+  Scenario: With a deadline and no heartbeat, a file goes at the deadline, and then no alarm until a record comes
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30"}
+      """
+    When "storage" sends the records "r1"
+    And 30 seconds pass and the alarm rings
+    Then the directory "calls-storage/inbox/calls/2027-01-15" holds:
+      """
+      080030-storage-76fb94eeee0959be.avro
+      """
+    And the report in "calls-storage/inbox/calls/2027-01-15/080030-storage-76fb94eeee0959be.avro" has "calls" equal to "1"
+    And no alarm is set
+    When 600 seconds pass, the alarm silent
+    And "storage" sends the records "r2"
+    Then the alarm is set for 660 s after the start
+
+  Scenario: With a deadline and no heartbeat, a file R2 didn't take still goes again a deadline later
+    Given the object's vars are:
+      """
+      {"CALL_LOG_DEADLINE_SECONDS": "30"}
+      """
+    And R2 is down
+    When "storage" sends the records "r1"
+    And 30 seconds pass and the alarm rings
+    Then the alarm is set for 60 s after the start

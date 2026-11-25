@@ -1,4 +1,4 @@
 {
   "category": "added",
-  "change": "A sender can write only when it has calls to send: with CALL_LOG_DEADLINE_SECONDS or CALL_LOG_HEARTBEAT_SECONDS (StorageSink's deadline_seconds and heartbeat_seconds; in JS deadlineSeconds, heartbeatSeconds and flushDue(); the call-log object's vars), each dataset's file goes once its first unsent call has waited the deadline, and a quiet dataset writes its report alone each heartbeat; with neither set, a file every two minutes as before"
+  "change": "A sender can write only when it has calls to send: with CALL_LOG_DEADLINE_SECONDS (StorageSink's deadline_seconds; in JS deadlineSeconds and flushDue(); the call-log object's vars), each dataset's file goes once its first unsent call has waited the deadline, and no report goes alone, the counters riding in the next call file; with CALL_LOG_HEARTBEAT_SECONDS too, a quiet dataset also writes its report alone each heartbeat (a heartbeat alone has a deadline of two minutes); with neither set, a file every two minutes as before"
 }
