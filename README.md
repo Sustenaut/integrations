@@ -614,6 +614,18 @@ a file every two minutes, as below. The call-log object, which puts its files in
 itself, tells the ingest pod of each one, signed with `INGEST_NOTIFY_KEY`, as storage does
 for the files it takes.
 
+A sender's liveness can be a metric instead of a file: with `CALL_LOG_METRIC_SECONDS`
+(at least 10), `StorageSink` also starts `integrations.heartbeat`, which every that many
+seconds writes 1 to the Cloud Monitoring gauge `custom.googleapis.com/sustenaut/heartbeat`
+on the resource `global`, with exactly the labels `project` (each dataset's project:
+`calls_visit_ee` is `visit_ee`), `sender` (the instance's name without its generated
+suffix, as observability names a sender) and `instance` (the pod's or revision's name).
+shared-infra's `sla-monitoring.tf` alerts when no instance of a sender has written for its
+SLA tier's window. It writes through the Caller as `google.monitoring write`, with a Google
+token for the account `CALL_LOG_METRIC_CREDENTIAL_FILE` (else `GOOGLE_APPLICATION_CREDENTIALS`)
+gives, a key or an external_account credential, which needs `roles/monitoring.metricWriter`.
+A beat that fails is counted and logged, never raised. Unset, nothing is written.
+
 Every sender writes a file every two minutes, even with no calls in it, and the file's
 metadata is its report: who it is, its version, the cycle, its calls, drops, buffer size and
 storage failures. Those load into a `status` table next to `calls`, so a quiet service can

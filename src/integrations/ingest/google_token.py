@@ -22,8 +22,9 @@ MARGIN = 300
 class GoogleToken:
     """Callable: gives a token good for now."""
 
-    def __init__(self, caller: Caller, key: dict, clock: Callable[[], float] = time.time):
-        self.caller, self.key, self.clock = caller, key, clock
+    def __init__(self, caller: Caller, key: dict, clock: Callable[[], float] = time.time, *,
+                 scope: str = SCOPE, plugin: tuple[str, str] = (PLUGIN, "load")):
+        self.caller, self.key, self.clock, self.scope, self.plugin = caller, key, clock, scope, plugin
         self._token: tuple[str, float] = ("", 0.0)
         self._lock = threading.Lock()
 
@@ -33,7 +34,7 @@ class GoogleToken:
 
         now = int(self.clock())
         head = _b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-        claims = _b64url(json.dumps({"iss": self.key["client_email"], "scope": SCOPE, "aud": self.key["token_uri"],
+        claims = _b64url(json.dumps({"iss": self.key["client_email"], "scope": self.scope, "aud": self.key["token_uri"],
                                      "iat": now, "exp": now + LIFETIME}).encode())
         private = serialization.load_pem_private_key(self.key["private_key"].encode(), password=None)
         signature = private.sign(f"{head}.{claims}".encode(), padding.PKCS1v15(), hashes.SHA256())
@@ -46,11 +47,11 @@ class GoogleToken:
                 return token
             body = urlencode({"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
                               "assertion": self._assertion()}).encode()
-            answer = self.caller.call(PLUGIN, "load", Request(
+            answer = self.caller.call(*self.plugin, Request(
                 "POST", self.key["token_uri"], {"Content-Type": "application/x-www-form-urlencoded"}, body,
                 repeatable=True))
             if not answer.ok:
-                raise Refused(PLUGIN, "load", f"token: HTTP {answer.status}")
+                raise Refused(*self.plugin, f"token: HTTP {answer.status}")
             self._token = (answer.json()["access_token"], self.clock() + LIFETIME - MARGIN)
             return self._token[0]
 
@@ -70,18 +71,19 @@ class FederatedToken:
     account's access token."""
 
     def __init__(self, caller: Caller, config: dict, clock: Callable[[], float] = time.time,
-                 read: Callable[[str], str] | None = None):
+                 read: Callable[[str], str] | None = None, *, scope: str = SCOPE,
+                 plugin: tuple[str, str] = (PLUGIN, "load")):
         if config.get("type") != "external_account" or not config.get("service_account_impersonation_url"):
             raise ValueError("not an external_account credential that impersonates a service account")
-        self.caller, self.config, self.clock = caller, config, clock
+        self.caller, self.config, self.clock, self.scope, self.plugin = caller, config, clock, scope, plugin
         self.read = read or (lambda path: open(path, encoding="utf-8").read())
         self._token: tuple[str, float] = ("", 0.0)
         self._lock = threading.Lock()
 
     def _post(self, url: str, headers: dict, body: bytes, what: str) -> dict:
-        answer = self.caller.call(PLUGIN, "load", Request("POST", url, headers, body, repeatable=True))
+        answer = self.caller.call(*self.plugin, Request("POST", url, headers, body, repeatable=True))
         if not answer.ok:
-            raise Refused(PLUGIN, "load", f"{what}: HTTP {answer.status}")
+            raise Refused(*self.plugin, f"{what}: HTTP {answer.status}")
         return answer.json() or {}
 
     def __call__(self) -> str:
@@ -100,7 +102,7 @@ class FederatedToken:
             access = self._post(c["service_account_impersonation_url"],
                                 {"Authorization": f"Bearer {federated['access_token']}",
                                  "Content-Type": "application/json"},
-                                json.dumps({"scope": [SCOPE], "lifetime": f"{LIFETIME}s"}).encode(), "impersonation")
+                                json.dumps({"scope": [self.scope], "lifetime": f"{LIFETIME}s"}).encode(), "impersonation")
             self._token = (access["accessToken"], self.clock() + LIFETIME - MARGIN)
             return self._token[0]
 
@@ -116,8 +118,10 @@ def project_of(credential: dict) -> str:
     raise ValueError("the credential names no project")
 
 
-def google_token(caller: Caller, credential: dict, clock: Callable[[], float] = time.time) -> Callable[[], str]:
-    """The token callable for a credential: a key's (GoogleToken) or an external_account's (FederatedToken)."""
+def google_token(caller: Caller, credential: dict, clock: Callable[[], float] = time.time, *,
+                 scope: str = SCOPE, plugin: tuple[str, str] = (PLUGIN, "load")) -> Callable[[], str]:
+    """The token callable for a credential: a key's (GoogleToken) or an external_account's
+    (FederatedToken), for `scope`, its calls recorded as `plugin` (an id and an operation)."""
     if credential.get("type") == "external_account":
-        return FederatedToken(caller, credential, clock)
-    return GoogleToken(caller, credential, clock)
+        return FederatedToken(caller, credential, clock, scope=scope, plugin=plugin)
+    return GoogleToken(caller, credential, clock, scope=scope, plugin=plugin)

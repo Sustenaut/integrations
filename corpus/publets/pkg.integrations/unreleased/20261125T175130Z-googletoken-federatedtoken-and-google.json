@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "GoogleToken, FederatedToken and google_token take the scope and the plugin operation their calls are recorded as (BigQuery's load by default)"
+}

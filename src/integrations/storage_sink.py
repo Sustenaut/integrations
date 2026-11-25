@@ -28,6 +28,9 @@ report alone once ``heartbeat`` seconds have passed since its last file; the one
 is ``every_seconds``. A file storage didn't take is tried again once a deadline later.
 The report's counters (drops, failures, the page times) keep counting until the next
 file. With neither set, it is the cycle above, a file every ``every_seconds``.
+
+With CALL_LOG_METRIC_SECONDS, the sink also starts the sender's heartbeat metric in Cloud
+Monitoring (integrations.heartbeat), for its datasets' projects, as its sender.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from typing import Callable
 
 from . import __version__
 from .avrofile import encode, file_name, timestamp
+from . import heartbeat as heartbeat_metric
 from .calls import CallRecord, Caller, Transport
 from .clients.storage import Storage, StorageError, StorageUnavailable
 
@@ -90,6 +94,8 @@ class StorageSink:
         self.beat = {name: self.started + random() * self.heartbeat for name in names}
         self.lock = threading.Lock()
         self.flushing = threading.Lock()  # one flush at a time, whoever starts it
+        # The heartbeat metric in Cloud Monitoring (heartbeat.py), with CALL_LOG_METRIC_SECONDS.
+        self.metric = heartbeat_metric.from_environment(names, sender, transport, start=start)
         if start:  # pragma: no cover - the process's own thread
             threading.Thread(target=self._run, daemon=True).start()
             atexit.register(self.flush)

@@ -1,0 +1,24 @@
+{
+  "id": "google.monitoring",
+  "provider": "Google",
+  "use": "Cloud Monitoring: the senders' heartbeat metric, the SLAs' uptime checks and alerts",
+  "operations": [
+    {
+      "name": "write",
+      "class": "S",
+      "route": "routed"
+    }
+  ],
+  "setup": [
+    "Enable the Monitoring API",
+    "Grant the sender's account roles/monitoring.metricWriter"
+  ],
+  "detect": {
+    "hosts": [
+      "monitoring.googleapis.com"
+    ],
+    "patterns": [
+      "\\bgoogle_monitoring_\\w+|custom\\.googleapis\\.com/"
+    ]
+  }
+}

@@ -88,7 +88,15 @@
       "plugin": "google.cloud",
       "paths": [
         "k8s/google-credential.yaml",
+        "src/integrations/heartbeat.py",
         "src/integrations/ingest/google_token.py"
+      ],
+      "mode": "required"
+    },
+    {
+      "plugin": "google.monitoring",
+      "paths": [
+        "src/integrations/heartbeat.py"
       ],
       "mode": "required"
     },
