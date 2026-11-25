@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "A Caller given no clock, sleep or random looks them up at each call; use_clock() (useClock() in JS) sets them for a harness, reaching a Caller made before it"
+}

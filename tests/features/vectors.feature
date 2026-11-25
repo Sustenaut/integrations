@@ -53,7 +53,9 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | graphql.json | A GraphQL request matches by its operation's name and variables, however its query is laid out |
       | host.json | The host is part of the match: api.github.com is not uploads.github.com |
       | in-order.json | The same request twice is answered by its recorded calls in order, each once |
+      | loose.json | A placeholder first seen in a request binds to the first value the code sends there: answered as that value, and only that value matches it again; a value already another placeholder's binds none |
       | match.json | A request finds its recorded call: its query in any order, its host in any case, its headers aside |
+      | names.json | A recording against the test org writes its real names as the scenario's, a whole name at a time, so the cassette and a replay only see o/r |
       | no-snapshot.json | A call with no recording raises NoSnapshot, naming the scenario, the call, the nearest recorded one and how they differ |
       | old-format.json | The old responses format reads as a cassette: answers by METHOD url, a list in turn and its last for good |
       | repeats.json | A request made again is kept again, in order, each with how long it took, and replayed in that order |
@@ -61,13 +63,13 @@ Feature: The vectors in tests/vectors/, which clients/js/caller.js runs too, so 
       | secret-leak.json | A secret the recorder saw that would still be written, here echoed in a body, stops the save |
       | secret.json | A secret is never written: the Authorization header dropped, a secret query parameter and JSON path replaced; replay answers a stand-in token |
       | unused.json | A recorded call never made is listed, and closing the cassette fails on it |
-      | volatile.json | Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches |
+      | volatile.json | Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches; a value the code sent first (the tree) is answered as it sent it |
 
   Scenario: Every cassette vector is run above
     When I list the vectors of cassettes
     Then the result is:
       """
-      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "match.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
+      ["baseline.json", "bodies.json", "digest.json", "escape.json", "faulty.json", "graphql.json", "host.json", "in-order.json", "loose.json", "match.json", "names.json", "no-snapshot.json", "old-format.json", "repeats.json", "rules.json", "secret-leak.json", "secret.json", "unused.json", "volatile.json"]
       """
 
   Scenario: A file the JS sink wrote reads as its records and report

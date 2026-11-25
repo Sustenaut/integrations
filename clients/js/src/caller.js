@@ -20,7 +20,7 @@
 // unless a test harness says otherwise. caller.fetch(plugin, operation) is a fetch for code
 // that takes one, each of its requests a call.
 
-import { checkMode, currentTransport, NoSnapshot, readRequest } from "./transports.js";
+import { checkMode, currentClock, currentTransport, NoSnapshot, readRequest } from "./transports.js";
 
 const IDEMPOTENT = new Set(["GET", "HEAD", "PUT", "DELETE"]);
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
@@ -79,8 +79,6 @@ function byteLength(body) {
 }
 
 const now = () => new Date().toISOString().slice(0, 19) + "Z";
-const nap = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-const monotonic = globalThis.performance?.now ? () => performance.now() : () => Date.now();
 
 // Each plugin's mode in a repository's integrations.json (already read: a Worker has no
 // files). A plugin declared both ways counts as required.
@@ -96,15 +94,46 @@ export class Caller {
   // fetch is the only thing that reaches the network: the one given, else the current
   // transport's, looked up at each call, so a harness's use() reaches a caller made before
   // it. clock() is in milliseconds, sleep() takes seconds, as calls.py's do; random() is
-  // the jitter's, from 0 to 1.
-  constructor(repo, app = "", { sink = new NullSink(), fetch = null, modes = {}, clock = monotonic, sleep = nap, newId = () => crypto.randomUUID().replaceAll("-", ""), random = Math.random } = {}) {
-    Object.assign(this, { repo, app, sink, fetcher: fetch, modes, clock, sleep, newId, random });
+  // the jitter's, from 0 to 1. Each defaults to the current one (currentClock(): the
+  // performance clock, a timer and Math.random unless a harness's useClock() says
+  // otherwise), looked up at each call.
+  #clock;
+  #sleep;
+  #random;
+
+  constructor(repo, app = "", { sink = new NullSink(), fetch = null, modes = {}, clock = null, sleep = null, newId = () => crypto.randomUUID().replaceAll("-", ""), random = null } = {}) {
+    Object.assign(this, { repo, app, sink, fetcher: fetch, modes, newId });
+    [this.#clock, this.#sleep, this.#random] = [clock, sleep, random];
+  }
+
+  get clock() {
+    return this.#clock ?? currentClock().clock;
+  }
+
+  set clock(clock) {
+    this.#clock = clock;
+  }
+
+  get sleep() {
+    return this.#sleep ?? currentClock().sleep;
+  }
+
+  set sleep(sleep) {
+    this.#sleep = sleep;
+  }
+
+  get random() {
+    return this.#random ?? currentClock().random;
+  }
+
+  set random(random) {
+    this.#random = random;
   }
 
   // The same caller, on behalf of a project, so its records are that project's.
   forRepo(repo) {
-    const { app, sink, fetcher, modes, clock, sleep, newId, random } = this;
-    return new this.constructor(repo, app, { sink, fetch: fetcher, modes, clock, sleep, newId, random });
+    const { app, sink, fetcher, modes, newId } = this;
+    return new this.constructor(repo, app, { sink, fetch: fetcher, modes, clock: this.#clock, sleep: this.#sleep, newId, random: this.#random });
   }
 
   // A fetch(url, init) for code that takes one in place of making its own requests, such as

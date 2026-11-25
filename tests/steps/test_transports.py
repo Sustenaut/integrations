@@ -1,5 +1,6 @@
 """Record and replay: the transport a caller given none uses, cassettes in a child
-process, Caller.opener, and GitHub's test steps (integrations.testing)."""
+process, Caller.opener, faults and clocks a harness gives, and GitHub's test steps in
+replay (integrations.testing; recording them is github-recording.feature)."""
 
 from __future__ import annotations
 
@@ -10,8 +11,9 @@ from pathlib import Path
 from integrations.calls import Caller, Network, Request
 from integrations.testing import plugin as testing_plugin
 from integrations.testing import github
-from integrations.testing.github import hold, repositories
-from integrations.transports import Cassette, Faulty, Recorder, current_transport, promote, use
+from integrations.testing.github import repositories
+from integrations.transports import (Cassette, Faulty, Recorder, cassette_reports, current_transport, promote, use,
+                                     use_clock)
 from pytest_bdd import given, parsers, scenarios, when
 
 from .providers import records
@@ -26,7 +28,7 @@ globals().update({k: v for k, v in vars(github).items() if k.startswith("pytestb
 
 def named(transport) -> str:
     name = type(transport).__name__
-    return f"{name} around {type(transport.inner).__name__}" if isinstance(transport, Recorder) else name
+    return f"{name} around {type(transport.inner).__name__}" if isinstance(transport, (Recorder, Faulty)) else name
 
 
 @when("I ask for the current transport")
@@ -152,11 +154,6 @@ def list_repositories(ctx):
     ctx.attempt(lambda: {name: {"recorded": r.recorded, "files": r.files} for name, r in repositories(ctx).items()})
 
 
-@when(parsers.parse('I set up the GitHub repository "{name}" holding "{files}"'))
-def set_up_repository(ctx, name, files):
-    ctx.attempt(lambda: hold(ctx, name, json.loads(files)))
-
-
 @when(parsers.parse("pytest configures the integrations.testing plugin with integrations_testing {ini}"))
 def configure_plugin(ctx, ini):
     loaded: list[str] = []
@@ -176,3 +173,60 @@ def configure_plugin(ctx, ini):
         testing_plugin.pytest_configure(Config())
         return loaded
     ctx.attempt(configure)
+
+
+@given(parsers.parse('a file "{path}" holding the cassette of "{file}"'))
+def file_of_cassette(ctx, path, file):
+    cassette = json.loads((REPOSITORY / file).read_text(encoding="utf-8"))["cassette"]
+    (ctx.directory / path).write_text(json.dumps(cassette), encoding="utf-8")
+
+
+def call_current(ctx, plugin, operation, asked):
+    method, url = asked.split(" ", 1)
+    answer = a_caller(ctx).call(plugin, operation, Request(method, url))
+    return {"status": answer.status, "json": answer.json()}
+
+
+@when(parsers.parse('a caller given no transport calls "{plugin}" "{operation}" with "{asked}", and the process '
+                    'reports "{cassette}"'))
+def call_and_report(ctx, plugin, operation, asked, cassette):
+    def reported():
+        call_current(ctx, plugin, operation, asked)
+        return [r for r in cassette_reports() if r["cassette"] == cassette][-1]
+    ctx.attempt(reported)
+
+
+@when(parsers.parse('a caller given no transport calls "{plugin}" "{operation}" with "{asked}"'))
+def call_through_current(ctx, plugin, operation, asked):
+    ctx.attempt(lambda: call_current(ctx, plugin, operation, asked))
+
+
+def under_harness_clock(ctx, plugin, operation, asked, **given):
+    """A 503 then a 200, on a caller made before the harness's clock, which starts at
+    100 s, moves on with each sleep, and jitters a quarter of the way."""
+    method, url = asked.split(" ", 1)
+    now, slept = [100.0], []
+    caller = Caller("a-repo", "web", sink=records(ctx), new_id=lambda: "id-1",
+                    transport=Cassette({"responses": {f"{method} {url}": [{"status": 503}, {"status": 200, "json": {}}]}}),
+                    **given)
+
+    def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
+    with use_clock(clock=lambda: now[0], sleep=sleep, random=lambda: 0.25):
+        answer = caller.call(plugin, operation, Request(method, url))
+    return {"status": answer.status, "slept": slept, "latency_ms": records(ctx).records[-1].latency_ms}
+
+
+@when(parsers.parse('a caller made before the harness\'s clock calls "{plugin}" "{operation}" with "{asked}", '
+                    'answered 503 and then 200'))
+def call_under_harness_clock(ctx, plugin, operation, asked):
+    ctx.attempt(lambda: under_harness_clock(ctx, plugin, operation, asked))
+
+
+@when(parsers.parse('a caller with its own sleep, made before the harness\'s clock, calls "{plugin}" "{operation}" '
+                    'with "{asked}", answered 503 and then 200'))
+def call_with_own_sleep(ctx, plugin, operation, asked):
+    own: list[float] = []
+    ctx.attempt(lambda: {**under_harness_clock(ctx, plugin, operation, asked, sleep=own.append), "own": own})

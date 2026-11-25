@@ -1,5 +1,5 @@
 {
-  "description": "Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches",
+  "description": "Volatile values are written as placeholders in requests and answers, replayed as stand-ins, and a stand-in sent back matches; a value the code sent first (the tree) is answered as it sent it",
   "scenario": "vectors: volatile",
   "record": [
     {
@@ -370,7 +370,7 @@
             }
           ],
           "tree": {
-            "sha": "c382a8fa741124531023e643c69cb41a655f3ab9"
+            "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
           }
         }
       },

@@ -6,7 +6,7 @@ import { dig } from "@sustenaut/pubtest";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Caller, MemorySink, pythonJson } from "../caller.js";
-import { Cassette, Faulty, LIVE, Recorder, checkMode, currentTransport, promote, record, use } from "../transports.js";
+import { Cassette, Faulty, LIVE, Recorder, cassetteReports, checkMode, currentTransport, promote, record, use, useClock } from "../transports.js";
 import { repositoryJson } from "./helpers.mjs";
 
 const utf8 = (text) => new TextEncoder().encode(text);
@@ -79,7 +79,7 @@ When("the transports run it", async function () {
   await this.attempt(async () => {
     const clock = { now: 0 };
     let slept = 0;
-    const recorder = vector.record ? new Recorder(scripted(vector.record, clock), null, { scenario: vector.scenario ?? null, clock: () => clock.now }) : null;
+    const recorder = vector.record ? new Recorder(scripted(vector.record, clock), null, { scenario: vector.scenario ?? null, clock: () => clock.now, names: vector.names ?? {} }) : null;
     const chain = (base) => (vector.faults ? new Faulty(base, vector.faults, { advance: (s) => { slept += s; } }) : base);
     let cassette = vector.cassette ? new Cassette(vector.cassette, { mode: "replay" }) : null;
     let transport = chain(recorder ?? cassette);
@@ -220,4 +220,56 @@ When("a recorder made for {string} is saved", async function (made) {
 
 When("I promote {string}", async function (file) {
   await this.attempt(() => promote(scratch(this, file)));
+});
+
+Given("a file {string} holding the cassette of {string}", async function (file, vector) {
+  await writeFile(scratch(this, file), JSON.stringify((await repositoryJson(this, vector)).cassette));
+});
+
+async function callCurrent(world, plugin, operation, asked) {
+  const [method, url] = asked.split(" ");
+  world.sink ??= new MemorySink();
+  const caller = new Caller("a-repo", "web", { sink: world.sink, newId: () => "id-1", sleep: async () => {} });
+  const answer = await caller.call(plugin, operation, { method, url });
+  return { status: answer.status, json: answer.json() };
+}
+
+When("a caller given no fetch calls {string} {string} with {string}", async function (plugin, operation, asked) {
+  await this.attempt(() => callCurrent(this, plugin, operation, asked));
+});
+
+When("a caller given no fetch calls {string} {string} with {string}, and the process reports its cassette", async function (plugin, operation, asked) {
+  const file = process.env.INTEGRATIONS_CASSETTE;
+  await this.attempt(async () => {
+    await callCurrent(this, plugin, operation, asked);
+    const { cassette, ...report } = cassetteReports().filter((r) => r.cassette === file).at(-1);
+    return { ...report, named: cassette === file };
+  });
+});
+
+// A 503 then a 200, on a caller made before the harness's clock, which starts at 100 s,
+// moves on with each sleep, and jitters a quarter of the way.
+async function underHarnessClock(world, plugin, operation, asked, given = {}) {
+  const [method, url] = asked.split(" ");
+  let now = 100_000;
+  const slept = [];
+  world.sink = new MemorySink();
+  const replay = new Cassette({ responses: { [`${method} ${url}`]: [{ status: 503 }, { status: 200, json: {} }] } });
+  const caller = new Caller("a-repo", "web", { sink: world.sink, fetch: replay.fetch, newId: () => "id-1", ...given });
+  const restore = useClock({ clock: () => now, sleep: async (s) => { slept.push(s); now += s * 1000; }, random: () => 0.25 });
+  try {
+    const answer = await caller.call(plugin, operation, { method, url });
+    return { status: answer.status, slept, latency_ms: world.sink.records.at(-1).latency_ms };
+  } finally {
+    restore();
+  }
+}
+
+When("a caller made before the harness's clock calls {string} {string} with {string}, answered 503 and then 200", async function (plugin, operation, asked) {
+  await this.attempt(() => underHarnessClock(this, plugin, operation, asked));
+});
+
+When("a caller with its own sleep, made before the harness's clock, calls {string} {string} with {string}, answered 503 and then 200", async function (plugin, operation, asked) {
+  const own = [];
+  await this.attempt(async () => ({ ...(await underHarnessClock(this, plugin, operation, asked, { sleep: async (s) => { own.push(s); } })), own }));
 });

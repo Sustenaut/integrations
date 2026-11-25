@@ -19,7 +19,6 @@ class's timeout times its tries, waits included.
 from __future__ import annotations
 
 import json
-import random
 import sys
 import time
 import urllib.error
@@ -222,16 +221,49 @@ def _policy(operation: dict) -> Policy:
 
 
 class Caller:
+    """`clock` (seconds), `sleep` and `random` default to the current ones
+    (`transports.current_clock()`: time.monotonic, time.sleep and random.random unless
+    a harness's `use_clock()` says otherwise), looked up at each call."""
+
     def __init__(self, repo: str, app: str = "", *, sink: Sink | None = None, transport: Transport | None = None,
-                 modes: dict[str, str] | None = None, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep, new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
-                 random: Callable[[], float] = random.random):
+                 modes: dict[str, str] | None = None, clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], None] | None = None, new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+                 random: Callable[[], float] | None = None):
         self.repo, self.app = repo, app
         self.sink = sink or NullSink()
         self._transport = transport
         self.modes = modes or {}
-        self.clock, self.sleep, self.new_id, self.random = clock, sleep, new_id, random
+        self._clock, self._sleep, self._random = clock, sleep, random
+        self.new_id = new_id
         self.classes = {(p.id, o["name"]): o for p in registry.plugins().values() for o in p.operations}
+
+    def _current(self, which: int) -> Callable:
+        from .transports import current_clock
+        return current_clock()[which]
+
+    @property
+    def clock(self) -> Callable[[], float]:
+        return self._clock or self._current(0)
+
+    @clock.setter
+    def clock(self, clock: Callable[[], float] | None) -> None:
+        self._clock = clock
+
+    @property
+    def sleep(self) -> Callable[[float], None]:
+        return self._sleep or self._current(1)
+
+    @sleep.setter
+    def sleep(self, sleep: Callable[[float], None] | None) -> None:
+        self._sleep = sleep
+
+    @property
+    def random(self) -> Callable[[], float]:
+        return self._random or self._current(2)
+
+    @random.setter
+    def random(self, random: Callable[[], float] | None) -> None:
+        self._random = random
 
     @property
     def transport(self) -> Transport:
