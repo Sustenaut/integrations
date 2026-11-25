@@ -608,9 +608,11 @@ A sender can write only when it has something to say: with `CALL_LOG_DEADLINE_SE
 or `CALL_LOG_HEARTBEAT_SECONDS` in its environment (or `StorageSink`'s `deadline_seconds`
 and `heartbeat_seconds`; in JS `deadlineSeconds` and `heartbeatSeconds`; for the call-log
 object, its vars), each dataset's file goes once its first unsent call has waited the
-deadline, and a dataset with no calls writes its report alone once a heartbeat has passed
-since its last file. The one not set is two minutes, and with neither set the sender writes
-a file every two minutes, as below. The call-log object, which puts its files into R2
+deadline. With a deadline alone it writes no report alone: a file only when it has calls,
+whose report carries the counters since the last one, its liveness watched elsewhere. With
+a heartbeat too, a dataset with no calls also writes its report alone once a heartbeat has
+passed since its last file. A heartbeat alone has a deadline of two minutes, and with
+neither set the sender writes a file every two minutes, as below. The call-log object, which puts its files into R2
 itself, tells the ingest pod of each one, signed with `INGEST_NOTIFY_KEY`, as storage does
 for the files it takes.
 

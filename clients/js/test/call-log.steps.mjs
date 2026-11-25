@@ -33,6 +33,8 @@ function durable() {
     },
     async getAlarm() { return alarm; },
     async setAlarm(at) { alarm = at; },
+    // An alarm that rings is gone, as Durable Objects' are, until the object sets another.
+    rang() { alarm = null; },
   };
 }
 
@@ -62,6 +64,7 @@ Given("ingest is down", function () {
 
 When("{int} seconds pass and the alarm rings", async function (seconds) {
   this.clock.now += seconds * 1000;
+  this.storage.rang();
   await this.attempt(() => this.object.alarm());
 });
 
@@ -118,10 +121,12 @@ When("a minute passes", function () {
 
 When("two minutes pass and the alarm rings", async function () {
   this.clock.now += 120_000;
+  this.storage.rang();
   await this.attempt(() => this.object.alarm());
 });
 
 When("the alarm rings", async function () {
+  this.storage.rang();
   await this.attempt(() => this.object.alarm());
 });
 
@@ -168,6 +173,10 @@ When("it writes the records {string} and sends twice", async function (ids) {
     await this.callLogSink.send(); // nothing left: no call
     return this.callLogSink.pending;
   });
+});
+
+Then("no alarm is set", function () {
+  if (this.storage.alarm !== null) throw new Error(`the alarm is set for ${(this.storage.alarm - START) / 1000} s after the start`);
 });
 
 Then("the alarm is set for {int} s after the start", function (seconds) {

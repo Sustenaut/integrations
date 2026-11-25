@@ -18,9 +18,11 @@
 //
 // With CALL_LOG_DEADLINE_SECONDS or CALL_LOG_HEARTBEAT_SECONDS (wrangler.toml's vars), as
 // caller.js's StorageSink: the alarm rings once the first record kept has waited the
-// deadline, and with nothing kept it writes a report alone a heartbeat after its last
-// file; the one not set is EVERY_SECONDS. A file R2 didn't take goes again a deadline
-// later. With neither, it is the cycle above.
+// deadline, and with a heartbeat and nothing kept it writes a report alone a heartbeat
+// after its last file. With a deadline and no heartbeat it writes no report alone, and
+// with nothing kept sets no alarm. A heartbeat with no deadline has a deadline of
+// EVERY_SECONDS. A file R2 didn't take goes again a deadline later. With neither, it is
+// the cycle above.
 //
 // After R2 takes a file, the object tells the ingest pod of it (caller.js's notifyIngest),
 // as storage does for the files it takes, since this one never passes through storage:
@@ -43,7 +45,8 @@ export class CallLog {
     const heartbeat = envSeconds("CALL_LOG_HEARTBEAT_SECONDS", vars);
     // null: the cycle. Else when a record must be sent by, and how often a quiet sender reports, in ms.
     this.deadline = deadline === undefined && heartbeat === undefined ? null : (deadline ?? EVERY_SECONDS) * 1000;
-    this.heartbeat = (heartbeat ?? EVERY_SECONDS) * 1000;
+    // null: no report alone, a file only when there are records (with a deadline).
+    this.heartbeat = this.deadline === null ? EVERY_SECONDS * 1000 : heartbeat === undefined ? null : heartbeat * 1000;
   }
 
   async fetch(request) {
@@ -70,7 +73,7 @@ export class CallLog {
       // The first record kept since the last file: it must go by the deadline.
       const due = this.now() + this.deadline;
       if (alarm === null || alarm > due) await this.storage.setAlarm(due);
-    } else if (alarm === null) {
+    } else if (alarm === null && this.heartbeat !== null) {
       await this.storage.setAlarm(this.now() + this.heartbeat);
     }
     return Response.json({ kept: records.length });
@@ -116,11 +119,12 @@ export class CallLog {
       const records = [...kept.values()];
       const c = await this.#counters();
       if (this.deadline !== null) {
-        // Nothing kept: a report alone once its heartbeat comes, and until then nothing.
-        const beat = (c.started ?? ended) + this.heartbeat;
-        next = ended + this.heartbeat;
+        // Nothing kept: a report alone once its heartbeat comes, and until then nothing;
+        // with no heartbeat, never, and no alarm until a record comes.
+        const beat = this.heartbeat === null ? Infinity : (c.started ?? ended) + this.heartbeat;
+        next = this.heartbeat === null ? null : ended + this.heartbeat;
         if (!records.length && ended < beat) {
-          next = beat;
+          next = this.heartbeat === null ? null : beat;
           return;
         }
       }
@@ -132,7 +136,7 @@ export class CallLog {
       if (await this.#put(tenant, name, data)) await this.storage.delete("held");
       else if (this.deadline !== null) next = this.now() + this.deadline;
     } finally {
-      await this.storage.setAlarm(next);
+      if (next !== null) await this.storage.setAlarm(next);
     }
   }
 

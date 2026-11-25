@@ -112,6 +112,12 @@ def two_deadline_sink(ctx, sender, one, first, two, second, deadline, heartbeat)
          random=lambda: 1.0)
 
 
+@given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", with a deadline of '
+                     "{deadline:d} seconds and no heartbeat"))
+def deadline_only_sink(ctx, sender, repo, dataset, deadline):
+    sink(ctx, {repo: dataset}, sender, deadline_seconds=deadline, random=lambda: 1.0)
+
+
 @given(parsers.parse('a sink for the sender "{sender}" sending "{repo}" to "{dataset}", with a heartbeat of '
                      "{heartbeat:d} seconds whose first comes {share:g} of the way in"))
 def heartbeat_sink(ctx, sender, repo, dataset, heartbeat, share):
