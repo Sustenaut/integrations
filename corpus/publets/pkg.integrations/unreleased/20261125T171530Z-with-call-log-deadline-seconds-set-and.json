@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "With CALL_LOG_DEADLINE_SECONDS set and CALL_LOG_HEARTBEAT_SECONDS not, a sender (StorageSink, caller.js's StorageSink, the call-log object) writes no report-only files: a file only when it has calls, the counters riding in the next; a heartbeat alone keeps a two-minute deadline, and neither set a file every two minutes"
+}
