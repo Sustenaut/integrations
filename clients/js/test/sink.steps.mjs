@@ -58,6 +58,10 @@ Given("a StorageSink {string} into an R2 bucket with the prefix {string}, for:",
   this.sinkOptions = { sender, bucket: this.calls, prefix, clock: () => this.clock.now, flushOnWrite: false };
 });
 
+Given("its deadline is {int} seconds and no heartbeat", function (deadline) {
+  Object.assign(this.sinkOptions, { deadlineSeconds: deadline, heartbeatSeconds: undefined, random: () => 1 });
+});
+
 Given("its deadline is {int} seconds and its heartbeat {int}", function (deadline, heartbeat) {
   Object.assign(this.sinkOptions, { deadlineSeconds: deadline, heartbeatSeconds: heartbeat, random: () => 1 });
 });

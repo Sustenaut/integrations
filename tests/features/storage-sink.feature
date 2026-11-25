@@ -398,3 +398,36 @@ Feature: A sender's files: one every cycle, or when its calls are due, and nothi
       | 0    |
       | soon |
       | inf  |
+
+  Scenario: With a deadline and no heartbeat, a quiet sender writes nothing, however long
+    Given the environment does not set "CALL_LOG_HEARTBEAT_SECONDS"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and no heartbeat
+    And 86400 seconds pass
+    And the sink sent what was due
+    When the sink flushes
+    Then the result's "count" is "0"
+
+  Scenario: With a deadline and no heartbeat, calls go at the deadline, and the counters ride with the next
+    Given the environment does not set "CALL_LOG_HEARTBEAT_SECONDS"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", with a deadline of 30 seconds and no heartbeat
+    And storage takes no PUT
+    And the sink was given call 1 of "a-repo"
+    And 30 seconds pass
+    And the sink sent what was due
+    And storage takes files again
+    And 3600 seconds pass
+    And the sink sent what was due
+    And the sink was given call 2 of "a-repo"
+    And 30 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "2"
+    And the result's "files.1.request_ids" is "["r2"]"
+    And the result's "files.1.report.storage_failures" is "1"
+
+  Scenario: The deadline alone from the environment writes no report alone
+    Given the environment sets "CALL_LOG_DEADLINE_SECONDS" to "30"
+    And the environment does not set "CALL_LOG_HEARTBEAT_SECONDS"
+    And a sink for the sender "app-1" sending "a-repo" to "ds", as the environment says
+    And 600 seconds pass
+    When the sink sends what is due
+    Then the result's "count" is "0"

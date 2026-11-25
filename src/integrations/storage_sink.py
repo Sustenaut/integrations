@@ -23,11 +23,14 @@ started together don't all send at the same moment.
 A sender can instead write only when it has something to say. With a deadline
 (``deadline_seconds``, else CALL_LOG_DEADLINE_SECONDS) or a heartbeat
 (``heartbeat_seconds``, else CALL_LOG_HEARTBEAT_SECONDS), each dataset's file goes once
-its first unsent call is ``deadline`` seconds old, and a dataset with no calls writes a
-report alone once ``heartbeat`` seconds have passed since its last file; the one not set
-is ``every_seconds``. A file storage didn't take is tried again once a deadline later.
-The report's counters (drops, failures, the page times) keep counting until the next
-file. With neither set, it is the cycle above, a file every ``every_seconds``.
+its first unsent call is ``deadline`` seconds old, and with a heartbeat, a dataset with
+no calls writes a report alone once ``heartbeat`` seconds have passed since its last
+file. With a deadline and no heartbeat, a sender writes no report alone at all: a file
+only when it has calls, its liveness being watched elsewhere. A heartbeat with no
+deadline has a deadline of ``every_seconds``. A file storage didn't take is tried again
+once a deadline later. The report's counters (drops, failures, the page times) keep
+counting until the next file. With neither set, it is the cycle above, a file every
+``every_seconds``.
 
 With CALL_LOG_METRIC_SECONDS, the sink also starts the sender's heartbeat metric in Cloud
 Monitoring (integrations.heartbeat), for its datasets' projects, as its sender.
@@ -36,6 +39,7 @@ Monitoring (integrations.heartbeat), for its datasets' projects, as its sender.
 from __future__ import annotations
 
 import atexit
+import math
 import os
 import random
 import statistics
@@ -72,7 +76,8 @@ class StorageSink:
         heartbeat = heartbeat_seconds if heartbeat_seconds is not None else seconds(HEARTBEAT_VARIABLE)
         # None: the cycle. Else when a call must be sent by, and how often a quiet dataset reports.
         self.deadline = None if deadline is None and heartbeat is None else (deadline or every_seconds)
-        self.heartbeat = heartbeat or every_seconds
+        # None: no report alone, a file only when there are calls (with a deadline).
+        self.heartbeat = heartbeat if self.deadline is not None else every_seconds
         # Its own calls to storage are the call log's plumbing, so nothing records them.
         self.caller = Caller("integrations", f"storage-sink:{sender}", transport=transport)
         self.base, self.sender, self.every_seconds, self.limit = base_url.rstrip("/"), sender, every_seconds, limit
@@ -91,7 +96,8 @@ class StorageSink:
         # when it next reports with nothing to say, the first a random part of a heartbeat in.
         self.since = dict.fromkeys(names, self.started)
         self.first: dict[str, float | None] = dict.fromkeys(names)
-        self.beat = {name: self.started + random() * self.heartbeat for name in names}
+        self.beat = {name: self.started + random() * self.heartbeat if self.heartbeat else math.inf
+                     for name in names}
         self.lock = threading.Lock()
         self.flushing = threading.Lock()  # one flush at a time, whoever starts it
         # The heartbeat metric in Cloud Monitoring (heartbeat.py), with CALL_LOG_METRIC_SECONDS.
@@ -165,7 +171,8 @@ class StorageSink:
             self._flush_due()
 
     def _flush_all(self) -> None:
-        self._flush_these(sorted(self.waiting), every=True)
+        # With no heartbeat, even a flush that sends everything sends no report alone.
+        self._flush_these(sorted(self.waiting), every=self.deadline is None or self.heartbeat is not None)
 
     def _flush_due(self) -> None:
         names = self.due()
@@ -185,7 +192,7 @@ class StorageSink:
             self.since[dataset] = ended
             if new:
                 self.first[dataset] = None
-                self.beat[dataset] = ended + self.heartbeat
+                self.beat[dataset] = ended + self.heartbeat if self.heartbeat else math.inf
             self._flush(dataset, since, ended, pages, new)
 
     def _flush(self, dataset: str, started: float, ended: float, pages: dict, new: bool = True) -> None:

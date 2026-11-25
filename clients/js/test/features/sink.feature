@@ -469,3 +469,31 @@ Feature: caller.js's StorageSink, as tests/steps/test_storage_sink.py holds stor
     And its deadline and heartbeat are the environment's
     When it is made
     Then it is refused, saying "CALL_LOG_DEADLINE_SECONDS is a number of seconds above 0"
+
+  Scenario: With a deadline and no heartbeat, a quiet sender writes nothing, however long
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline is 30 seconds and no heartbeat
+    When 86400 seconds pass
+    And it sends what is due
+    Then the result is "[]"
+    When it flushes
+    Then the directory "." holds:
+      """
+      """
+
+  Scenario: With a deadline and no heartbeat, calls still go at the deadline
+    Given a StorageSink "app-1" for:
+      """
+      {"a-repo": "ds"}
+      """
+    And its deadline is 30 seconds and no heartbeat
+    When it is given the records "r1"
+    And 30 seconds pass
+    And it sends what is due
+    Then the result is:
+      """
+      ["ds"]
+      """

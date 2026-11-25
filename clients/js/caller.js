@@ -358,10 +358,12 @@ export function pythonJson(value) {
 //
 // With deadlineSeconds or heartbeatSeconds (in Node, else CALL_LOG_DEADLINE_SECONDS and
 // CALL_LOG_HEARTBEAT_SECONDS), as storage_sink.py: each dataset's file goes once its first
-// unsent call is deadline seconds old, and a dataset with no calls writes a report alone
-// once heartbeat seconds have passed since its last file (the first a random part of one
-// in); the one not set is everySeconds. A file storage didn't take is tried again a
-// deadline later. flushDue() sends what is due; start: true looks each second.
+// unsent call is deadline seconds old, and with a heartbeat, a dataset with no calls writes
+// a report alone once heartbeat seconds have passed since its last file (the first a random
+// part of one in). With a deadline and no heartbeat it writes no report alone: a file only
+// when it has calls. A heartbeat with no deadline has a deadline of everySeconds. A file
+// storage didn't take is tried again a deadline later. flushDue() sends what is due; start:
+// true looks each second.
 
 const EVERY_SECONDS = 120;
 const LOOK_MS = 1000;
@@ -384,7 +386,8 @@ export class StorageSink {
     Object.assign(this, { datasets, sender, version, everySeconds, limit, clock, fetch, waitUntil, flushOnWrite });
     // null: the cycle. Else when a call must be sent by, and how often a quiet dataset reports.
     this.deadline = deadlineSeconds == null && heartbeatSeconds == null ? null : (deadlineSeconds ?? everySeconds);
-    this.heartbeat = heartbeatSeconds ?? everySeconds;
+    // null: no report alone, a file only when there are calls (with a deadline).
+    this.heartbeat = this.deadline === null ? everySeconds : (heartbeatSeconds ?? null);
     this.target = bucket ? { bucket, prefix } : { url: url.replace(/\/+$/, ""), token, tokenFile, readFile };
     const names = [...new Set(Object.values(datasets))].sort();
     this.waiting = Object.fromEntries(names.map((n) => [n, []]));
@@ -400,7 +403,7 @@ export class StorageSink {
     // it next reports with nothing to say.
     this.since = Object.fromEntries(names.map((n) => [n, this.started]));
     this.first = Object.fromEntries(names.map((n) => [n, null]));
-    this.beat = Object.fromEntries(names.map((n) => [n, this.started + random() * this.heartbeat * 1000]));
+    this.beat = Object.fromEntries(names.map((n) => [n, this.heartbeat === null ? Infinity : this.started + random() * this.heartbeat * 1000]));
     this.flushing = null; // one flush at a time, whoever starts it
     if (start && this.deadline !== null) {
       this.timer = setInterval(() => void this.flushDue(), Math.min(LOOK_MS, this.deadline * 1000));
@@ -460,7 +463,9 @@ export class StorageSink {
 
   // One file per project, whatever has happened since the last. Never rejects.
   flush() {
-    if (!this.flushing) this.flushing = this.#flushThese(Object.keys(this.waiting).sort(), true).finally(() => (this.flushing = null));
+    // With no heartbeat, even a flush that sends everything sends no report alone.
+    const every = this.deadline === null || this.heartbeat !== null;
+    if (!this.flushing) this.flushing = this.#flushThese(Object.keys(this.waiting).sort(), every).finally(() => (this.flushing = null));
     return this.flushing;
   }
 
@@ -504,7 +509,7 @@ export class StorageSink {
       this.since[dataset] = ended;
       if (fresh) {
         this.first[dataset] = null;
-        this.beat[dataset] = ended + this.heartbeat * 1000;
+        this.beat[dataset] = this.heartbeat === null ? Infinity : ended + this.heartbeat * 1000;
       }
       await this.#flush(dataset, since, ended, pages, fresh);
     }
