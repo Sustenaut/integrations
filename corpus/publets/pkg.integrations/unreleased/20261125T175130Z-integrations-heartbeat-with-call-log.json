@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "integrations.heartbeat: with CALL_LOG_METRIC_SECONDS, StorageSink writes each instance's heartbeat to Cloud Monitoring (custom.googleapis.com/sustenaut/heartbeat on global, labels project, sender and instance) through the Caller as google.monitoring write, with the Google credential CALL_LOG_METRIC_CREDENTIAL_FILE or GOOGLE_APPLICATION_CREDENTIALS names; unset, nothing is written; the google.monitoring plugin is registered"
-}

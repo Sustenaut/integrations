@@ -1,4 +1,0 @@
-{
-  "category": "fixed",
-  "change": "The wait for a new test org repository's first branch sleeps with its Caller's sleep, which a harness's use_clock() reaches, not time.sleep (both languages)"
-}

@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "Recording, `Given the GitHub repository \"o/r\" holds:` (integrations.testing.github) makes a private rec-<consumer>-<run>-<n> repository in the GitHub test org (INTEGRATIONS_TEST_ORG, else SustenautTest) holding exactly its files, with the recorder app's credentials (GITHUB_TEST_RECORDER_APP_ID, _APP_KEY and _INSTALLATION_ID, or GITHUB_TEST_RECORDER_TOKEN), puts its real names in INTEGRATIONS_NAMES so the cassette says o/r, and deletes it when the scenario ends; token(ctx) is the token the code under test calls with"
-}

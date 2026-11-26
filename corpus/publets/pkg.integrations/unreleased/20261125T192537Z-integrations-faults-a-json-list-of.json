@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "INTEGRATIONS_FAULTS, a JSON list of Faulty's rules, puts the transport current_transport() gives a process under them, so a harness's faults reach the programs it runs; a fault's plugin also covers every plugin under it, before a dot (both languages)"
-}

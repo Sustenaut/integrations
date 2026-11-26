@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "`Given someone else pushes to \"BRANCH\" of \"o/r\":` makes a real commit on the branch when recording, which the code under test meets as a race, and does nothing replaying"
-}
