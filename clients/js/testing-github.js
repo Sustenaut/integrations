@@ -11,13 +11,22 @@
 // - Given the GitHub repository "o/r" holds: + docstring (a JSON object from each file's
 //   path to its text). Replaying, it registers the repository under its own name: the
 //   code under test calls o/r, as the cassette does. Recording (INTEGRATIONS_MODE=record),
-//   it makes the private repository rec-<consumer>-<run>-<n> in the test org holding
-//   exactly those files, in one commit on its default branch (an empty object: an empty
-//   repository), and the code under test calls that: repositories(ctx)["o/r"].recorded.
+//   it makes the private repository rec-<consumer>-<run>-<process>-<n> in the test org
+//   holding exactly those files, in one commit on its default branch (an empty object: an
+//   empty repository), and the code under test calls that: repositories(ctx)["o/r"].recorded.
+//   That commit is labelled "start" (a later repository's, "start-<name>").
 // - Given someone else pushes to "BRANCH" of "o/r": + docstring (each file's path to its
-//   new text, or null to delete it). Recording, a real commit on BRANCH (made from the
-//   default branch when there is none), so the code under test meets the race for real;
-//   replaying, nothing, as the cassette holds what the code met.
+//   new text, or null to delete it), or ... of "o/r" as commit "L": to label the commit.
+//   Recording, a real commit on BRANCH (made from the default branch when there is none),
+//   so the code under test meets the race for real; replaying, nothing, as the cassette
+//   holds what the code met.
+//
+// Commit labels: a labelled commit's real sha goes in INTEGRATIONS_NAMES as
+// ⟦integrations:commit:L⟧, so the Recorder writes the label and a replay hands the code
+// under test the label itself. commit(ctx, "o/r", "L") is that commit: its real sha
+// recording, the placeholder replaying. A scenario's labels are its own, one commit each;
+// an unknown one throws. The process part of a repository's name keeps parallel workers'
+// names apart; nothing else in the test org may be named rec-*, as the janitor deletes them.
 //
 // What the steps themselves call when recording goes through a Caller of their own,
 // straight to GitHub (useNetwork() puts a stand-in there for a suite's own tests), and is
@@ -35,7 +44,7 @@
 // ./with-secrets exports from Bitwarden.
 
 import { Caller } from "./caller.js";
-import { LIVE, MARKER, MODE, NAMES, namesFrom } from "./transports.js";
+import { LIVE, MARKER, MODE, NAMES, label, namesFrom } from "./transports.js";
 
 export const CUSTOMER = "github.test";
 export const ORG = "INTEGRATIONS_TEST_ORG";
@@ -54,7 +63,12 @@ const SETTLE_TRIES = 10;
 const env = () => globalThis.process?.env ?? {};
 const recordingMode = () => env()[MODE] === "record";
 let network = null;
+// This process's part of a repository's name, so parallel workers' and separate runs'
+// processes never pick the same one; the number counts within it.
+const PROCESS = crypto.randomUUID().replaceAll("-", "").slice(0, 6);
 let numbers = 0;
+const START = "start";
+const LABEL = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const recordings = new WeakMap(); // a scenario's tape -> its recording
 
 // Until restore() is called, the steps' own calls go to fetch: a suite's tests of recording
@@ -117,8 +131,14 @@ const encBranch = (b) => b.split("/").map(enc).join("/");
 
 // The test org's repositories, as src/integrations/clients/github_test_org.py has them.
 export class TestOrg {
-  constructor(caller, token, org = DEFAULT_ORG, { sleep = (s) => new Promise((r) => setTimeout(r, s * 1000)) } = {}) {
-    Object.assign(this, { caller, token, org, sleep });
+  // sleep is the wait for a new repository's first branch: the one given, else the
+  // Caller's, looked up at each call, so a harness's useClock() reaches it.
+  constructor(caller, token, org = DEFAULT_ORG, { sleep = null } = {}) {
+    Object.assign(this, { caller, token, org, given: sleep });
+  }
+
+  sleep(seconds) {
+    return (this.given ?? this.caller.sleep)(seconds);
   }
 
   async #call(method, path, body) {
@@ -234,7 +254,7 @@ export class Recording {
     let name = null;
     let result = null;
     for (let i = 0; i < 100 && result === null; i++) {
-      name = `rec-${this.consumer}-${this.run}-${(numbers += 1)}`;
+      name = `rec-${this.consumer}-${this.run}-${PROCESS}-${(numbers += 1)}`;
       this.made.push(name); // deleted when the scenario ends, however far this gets
       try {
         result = await this.org.create(name, files);
@@ -243,12 +263,18 @@ export class Recording {
         this.made.splice(this.made.indexOf(name), 1); // another process's: the next number
       }
     }
-    if (result === null) throw new Error(`the test org has every name rec-${this.consumer}-${this.run}-N tried`);
+    if (result === null) throw new Error(`the test org has every name rec-${this.consumer}-${this.run}-${PROCESS}-N tried`);
     this.owner = owner;
     const real = `${this.org.org}/${name}`;
     Object.assign(this.names, { [real]: logical, [name]: repo, [this.org.org]: owner });
     process.env[NAMES] = JSON.stringify({ ...namesFrom(), ...this.names });
-    return { name: logical, recorded: real, files: { ...files }, branch: result[0], head: result[1], pushes: [] };
+    return { name: logical, recorded: real, files: { ...files }, branch: result[0], head: result[1], pushes: [], commits: {} };
+  }
+
+  // A labelled commit's real sha is written as its label, ⟦integrations:commit:L⟧.
+  label(sha, name) {
+    this.names[sha] = label("commit", name);
+    process.env[NAMES] = JSON.stringify({ ...namesFrom(), ...this.names });
   }
 
   async push(repository, branch, files) {
@@ -302,25 +328,66 @@ function checkFiles(name, files, deleting) {
   return files;
 }
 
+// The scenario's commit labels, each to the repository it is in: one map for the
+// scenario, as its placeholders are.
+const labels = (ctx) => (ctx.githubLabels ??= {});
+
+function claim(ctx, name, wanted) {
+  if (!LABEL.test(wanted)) throw new Error(`"${wanted}" is no commit label: a letter, then letters, digits, _ and -`);
+  if (wanted in labels(ctx)) throw new Error(`the commit label "${wanted}" is taken already, by ${labels(ctx)[wanted]}: a scenario's labels are its own, one commit each`);
+  labels(ctx)[wanted] = name;
+  return wanted;
+}
+
+// The label of the commit a repository's files are in: "start" for the first repository a
+// scenario fills, "start-<name>" for each later one.
+export function startLabel(ctx, name) {
+  if (!(START in labels(ctx))) return START;
+  return `${START}-${ownerAndName(name)[1].replace(/[^A-Za-z0-9_-]+/g, "-")}`;
+}
+
+async function labelled(ctx, repository, wanted, sha) {
+  const name = claim(ctx, repository.name, wanted);
+  if (recordingMode()) {
+    (await recording(ctx)).label(sha, name);
+    repository.commits[name] = sha;
+  } else repository.commits[name] = label("commit", name);
+}
+
 // Registers the repository name holding files: replaying, under its own name; recording,
-// made in the test org.
+// made in the test org. The commit its files are in is labelled (startLabel()).
 export async function hold(ctx, name, files) {
   ownerAndName(name);
   checkFiles(name, files, false);
-  const repository = recordingMode() ? await (await recording(ctx)).create(name, files) : { name, recorded: name, files: { ...files }, branch: null, head: null, pushes: [] };
+  const repository = recordingMode() ? await (await recording(ctx)).create(name, files) : { name, recorded: name, files: { ...files }, branch: null, head: null, pushes: [], commits: {} };
+  if (Object.keys(files).length) await labelled(ctx, repository, startLabel(ctx, name), repository.head);
   repositories(ctx)[name] = repository;
   return repository;
 }
 
-// Someone else's commit on branch of name: made for real when recording, only noted
-// when replaying.
-export async function push(ctx, name, branch, files) {
+// Someone else's commit on branch of name, labelled asCommit if given: made for real when
+// recording, only noted when replaying.
+export async function push(ctx, name, branch, files, asCommit = null) {
   const repository = repositories(ctx)[name];
   if (!repository) throw new Error(`no GitHub repository "${name}": a step says what it holds first`);
   checkFiles(name, files, true);
-  if (recordingMode()) repository.pushes.push({ branch, files: { ...files }, commit: await (await recording(ctx)).push(repository, branch, files) });
-  else repository.pushes.push({ branch, files: { ...files } });
+  if (asCommit !== null && (!LABEL.test(asCommit) || asCommit in labels(ctx))) claim(ctx, name, asCommit); // says why it can't be
+  const pushed = { branch, files: { ...files }, ...(asCommit === null ? {} : { label: asCommit }) };
+  let sha = null;
+  if (recordingMode()) sha = pushed.commit = await (await recording(ctx)).push(repository, branch, files);
+  if (asCommit !== null) await labelled(ctx, repository, asCommit, sha);
+  repository.pushes.push(pushed);
   return repository;
+}
+
+// The commit of name a step labelled wanted: its real sha recording, its placeholder
+// ⟦integrations:commit:L⟧ replaying, which is what the cassette hands the code under test
+// for it, so a scenario's expectations are the same in both.
+export function commit(ctx, name, wanted) {
+  const repository = repositories(ctx)[name];
+  if (!repository) throw new Error(`no GitHub repository "${name}": a step says what it holds first`);
+  if (!(wanted in repository.commits)) throw new Error(`${name} has no commit labelled "${wanted}": its labels are ${Object.keys(repository.commits).sort().join(", ") || "none"}`);
+  return repository.commits[wanted];
 }
 
 // The token the code under test calls GitHub with: the recorder app's when recording, a
@@ -345,5 +412,6 @@ export const github = {
   steps: [
     ["Given", "the GitHub repository {string} holds:", (ctx, name, doc) => hold(ctx, name, JSON.parse(doc))],
     ["Given", "someone else pushes to {string} of {string}:", (ctx, branch, name, doc) => push(ctx, name, branch, JSON.parse(doc))],
+    ["Given", "someone else pushes to {string} of {string} as commit {string}:", (ctx, branch, name, asCommit, doc) => push(ctx, name, branch, JSON.parse(doc), asCommit)],
   ],
 };

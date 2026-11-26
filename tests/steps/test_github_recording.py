@@ -11,8 +11,8 @@ from pathlib import Path
 from integrations import cli
 from integrations.calls import Caller, Request
 from integrations.testing import github
-from integrations.testing.github import hold, push, repositories, token
-from integrations.transports import NAMES, Cassette, Recorder, names_from, use
+from integrations.testing.github import commit, hold, push, repositories, token
+from integrations.transports import NAMES, Cassette, Recorder, names_from, use, use_clock
 from pubtest.core import dig, same, show
 from pytest_bdd import given, parsers, scenarios, then, when
 
@@ -87,6 +87,8 @@ def shown(ctx, value):
     for repository in repositories(ctx).values():
         if repository.recorded != repository.name:
             text = text.replace(repository.recorded.split("/", 1)[1], "<r>")
+        for label, sha in repository.commits.items():
+            text = text.replace(sha, f"<sha of {label}>")
     return json.loads(text)
 
 
@@ -295,3 +297,67 @@ def run_janitor(ctx, hours):
         return {"code": code, "stdout": out.getvalue().splitlines(), "stderr": err.getvalue(),
                 "left": sorted(standin(ctx).repos)}
     ctx.attempt(janitor)
+
+
+# --- commit labels ----------------------------------------------------------------------
+
+@when(parsers.parse('I push to "{branch}" of "{name}" as someone else, as commit "{label}"'))
+def push_labelled(ctx, request, branch, name, label):
+    ctx.attempt(lambda: push(ctx, name, branch, {"a.txt": "x"}, request, label))
+
+
+@when(parsers.parse('I ask for the commit labelled "{label}" of "{name}"'))
+def ask_commit(ctx, name, label):
+    ctx.attempt(lambda: commit(ctx, name, label))
+
+
+@then(parsers.parse('what the code under test read of "{branch}" is the commit labelled "{label}" of "{name}"'))
+def read_is_labelled(ctx, branch, label, name):
+    assert ctx.read[branch] == commit(ctx, name, label), f"it read {ctx.read[branch]}, not {commit(ctx, name, label)}"
+
+
+@then(parsers.parse('the commit labelled "{label}" of "{name}" is the stand-in\'s "{branch}" of "{repo}"'))
+def labelled_is_standins(ctx, label, name, branch, repo):
+    real = repositories(ctx)[repo].recorded.split("/", 1)[1]
+    sha = standin(ctx).repos[real]["refs"][branch]
+    assert commit(ctx, name, label) == sha, f"{commit(ctx, name, label)} is not {sha}"
+    assert names_from()[sha] == f"⟦integrations:commit:{label}⟧", show(names_from())
+
+
+@when(parsers.parse('the code under test reads "{name}" at the short sha of its commit labelled "{label}"'))
+def read_short(ctx, name, label):
+    ctx.short = commit(ctx, name, label)[:7]
+    ctx.attempt(lambda: CodeUnderTest(ctx, name).call("read", "GET", f"/git/ref/heads/{ctx.short}").status)
+
+
+@then("the recording's call 0 holds that short sha as it was")
+def short_as_it_was(ctx):
+    url = ctx.recorder.recording()["calls"][0]["request"]["url"]
+    assert url.endswith(f"/git/ref/heads/{ctx.short}"), url
+
+
+@given(parsers.parse("the stand-in test org makes a new repository's first branch only after {count:d} asks"))
+def unsettled(ctx, count):
+    standin(ctx).unsettled = count
+
+
+@given("the harness's sleep is kept")
+def harness_sleep(ctx):
+    ctx.slept = []
+    block = use_clock(sleep=ctx.slept.append)
+    block.__enter__()
+    ctx.cleanup(lambda: block.__exit__(None, None, None))
+
+
+@when("I ask how long the harness slept")
+def how_long_slept(ctx):
+    ctx.attempt(lambda: ctx.slept)
+
+
+@then(parsers.parse('the result is "SustenautTest/rec-<consumer>-run1-<this process\'s part>-<n>"'))
+def name_has_process(ctx):
+    from integrations.testing.github import _PROCESS, consumer_name
+
+    got = ctx.result
+    head = f"SustenautTest/rec-{github._slug(consumer_name(REPOSITORY / 'tests'), 40)}-run1-{_PROCESS}-"
+    assert got.startswith(head) and got[len(head):].isdigit(), f"{got} is not {head}<n>"

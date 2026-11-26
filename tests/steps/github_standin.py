@@ -33,6 +33,7 @@ class StandInGitHub:
         self.requests: list[dict] = []
         self.taken: int = 0  # this many names are taken, as another process's
         self.refuse: dict[str, int] = {}  # "METHOD /path-pattern" -> status
+        self.unsettled = 0  # a new repository's first branch is not there for this many asks
         self.now = lambda: datetime.now(timezone.utc)
 
     # --- state ---------------------------------------------------------------------
@@ -103,6 +104,9 @@ class StandInGitHub:
             return Response(204)
         m = re.fullmatch(r"/git/ref/heads/(.+)", rest)
         if m and request.method == "GET":
+            if self.unsettled > 0:
+                self.unsettled -= 1
+                return self._json(404, {"message": "Not Found"})
             if not repo["refs"]:
                 return self._json(409, {"message": "Git Repository is empty."})
             sha = repo["refs"].get(unquote(m.group(1)))

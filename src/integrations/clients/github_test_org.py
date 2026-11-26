@@ -1,8 +1,8 @@
 """The GitHub test org: the repositories a recording makes there (`integrations.testing.github`),
 and the janitor that deletes those a run left behind (`integrations test-org sweep`).
 
-Every repository a recording makes is named `rec-<consumer>-<run>-<n>` and is private;
-a run deletes its own when each scenario ends, and the janitor deletes any `rec-*`
+Every repository a recording makes is named `rec-<consumer>-<run>-<process>-<n>` and is
+private; a run deletes its own when each scenario ends, and the janitor deletes any `rec-*`
 older than a day. The calls are github.repo-ops' `test-org` (a recording's) and
 `test-org-sweep` (the janitor's), with the recorder app's installation token
 (github.app-token), through a Caller given its own transport: none of them is ever
@@ -77,8 +77,14 @@ class GitHubTestOrg:
     a recording, `test-org-sweep` for the janitor."""
 
     def __init__(self, caller: Caller, token: Callable[[], str], org: str = DEFAULT_ORG, *,
-                 operation: str = SET_UP, sleep: Callable[[float], None] = time.sleep):
-        self.caller, self.token, self.org, self.operation, self.sleep = caller, token, org, operation, sleep
+                 operation: str = SET_UP, sleep: Callable[[float], None] | None = None):
+        self.caller, self.token, self.org, self.operation, self._sleep = caller, token, org, operation, sleep
+
+    def sleep(self, seconds: float) -> None:
+        """The wait for a new repository's first branch: the one given, else the Caller's
+        (its clock and sleep are looked up at each call, so a harness's `use_clock()`
+        reaches it)."""
+        (self._sleep or self.caller.sleep)(seconds)
 
     # --- calls ---------------------------------------------------------------------
 
