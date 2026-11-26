@@ -15,6 +15,7 @@
     "release_app": 5529889
   },
   "variables": {
+    "version": 2,
     "names": [
       "INGEST_DATASETS",
       "INGEST_SIGNALS",
@@ -27,6 +28,11 @@
       "INTEGRATIONS_ORIGINS",
       "INTEGRATIONS_EDIT_PR_REPOS"
     ],
+    "defaults": {
+      "INGEST_SWEEP_SECONDS": "120",
+      "INGEST_REPORT_SECONDS": "120",
+      "INGEST_BATCH_GAP_SECONDS": "120"
+    },
     "deploy": "deploy.yml"
   },
   "signing_keys": [
