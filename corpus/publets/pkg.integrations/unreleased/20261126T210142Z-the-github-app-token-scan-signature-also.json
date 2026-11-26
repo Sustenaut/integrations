@@ -1,0 +1,4 @@
+{
+  "category": "fixed",
+  "change": "The github.app-token scan signature also matches a GitHub App's client id (*_APP_CLIENT_ID, as create-github-app-token's client-id takes), so DATA_APP_CLIENT_ID or RELEASE_APP_CLIENT_ID in a workflow is a use of github.app-token, not an unregistered secret"
+}

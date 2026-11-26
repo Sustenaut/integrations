@@ -152,6 +152,29 @@ Feature: Comparing a repository's calls with its integrations.json
     When I run "integrations scan ."
     Then it succeeds
 
+  Scenario Outline: A GitHub App's credentials in a workflow are uses of github.app-token
+    Given a file ".github/workflows/a.yml" holding "<line>"
+    And its integrations.json declares nothing
+    When I run "integrations scan ."
+    Then it fails
+    And it prints ".github/workflows/a.yml:1: undeclared: "
+    And it prints "(github.app-token)"
+    And it does not print "is not registered"
+
+    Examples:
+      | line                                         |
+      | client-id: ${{ secrets.DATA_APP_CLIENT_ID }} |
+      | client-id: ${{ vars.RELEASE_APP_CLIENT_ID }} |
+      | app-id: ${{ secrets.RELEASE_APP_ID }}        |
+      | private-key: ${{ secrets.DATA_APP_KEY }}     |
+
+  Scenario: A GitHub App's client id is declared by github.app-token, so it needs no other reason
+    Given a file ".github/workflows/a.yml" holding "client-id: ${{ secrets.DATA_APP_CLIENT_ID }}"
+    And its integrations.json declares "github.app-token" in ".github/workflows/**"
+    When I run "integrations scan ."
+    Then it succeeds
+    And it prints "all accounted for"
+
   Scenario: A Terraform provider no plugin names fails
     Given a file "infra/versions.tf" holding:
       """
