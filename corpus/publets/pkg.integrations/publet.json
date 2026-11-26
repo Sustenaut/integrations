@@ -2,7 +2,7 @@
   "claims": {
     "identity": {
       "class": "archival",
-      "content": "integrations 0.16.0 is released as v0.16.0 from commit 8beb1d984eff998d6790da72de6cafd27d4c506e.",
+      "content": "integrations 0.17.0 is released as v0.17.0 from commit 4afc2272dec5b5a91d94976072f39f800d9a3193.",
       "data": {
         "columns": [
           {
@@ -27,25 +27,25 @@
         "rows": [
           [
             "integrations",
-            "0.16.0",
+            "0.17.0",
             "",
             "",
-            "v0.16.0",
-            "8beb1d984eff998d6790da72de6cafd27d4c506e"
+            "v0.17.0",
+            "4afc2272dec5b5a91d94976072f39f800d9a3193"
           ]
         ]
       },
-      "scope": "the published release v0.16.0 of integrations",
+      "scope": "the published release v0.17.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "8beb1d984eff998d6790da72de6cafd27d4c506e"
+          "revision": "4afc2272dec5b5a91d94976072f39f800d9a3193"
         }
       ]
     },
     "release": {
       "class": "archival",
-      "content": "integrations 0.16.0 was released on 2026-11-19 from commit 8beb1d984eff998d6790da72de6cafd27d4c506e with these changes.",
+      "content": "integrations 0.17.0 was released on 2026-11-26 from commit 4afc2272dec5b5a91d94976072f39f800d9a3193 with these changes.",
       "data": {
         "columns": [
           {
@@ -57,48 +57,104 @@
         ],
         "rows": [
           [
-            "fixed",
-            "integrations ci-usage jobs keeps its state (the job ids written) to the look back on every save, so it stays well under storage's 1 MiB for a file: the 90-day backfill's state outgrew it and storage refused the save (413). Jobs a pass writes are also kept in memory for that pass, so a run two days' queries both list is written once"
-          ],
-          [
-            "internal",
-            "pubkit is now pubrules: the repository runs on pubrules 0.43.0 (pubrules.json, ./pubrules, the managed workflows and test pins)"
-          ],
-          [
             "changed",
-            "The platform's nightly pubrules checks move to their new names: INGEST_PUBRULES_CHECKS (was INGEST_PUBKIT_CHECKS) names the pubrules-checks tenant, whose files load into platform.pubrules_checks (was pubkit_checks)"
-          ],
-          [
-            "internal",
-            "The test suite's scenarios, Python and JavaScript, are Given/When/Then on pubtest's steps"
-          ],
-          [
-            "changed",
-            "A Caller given no transport (in JS, no fetch) now calls through the current transport, the network unless INTEGRATIONS_MODE or a test harness says otherwise; and a mode other than live without PUBTEST_RUN makes every call refuse to start"
+            "The ingest pod no longer writes its report of each pass as a file into the project's buffer: it goes with that project's next reports job, or as a job of its own once none has gone for INGEST_REPORT_SECONDS"
           ],
           [
             "added",
-            "Record and replay: integrations.transports (and transports.js) with Cassette, Recorder, Faulty, current_transport() and use(), the integrations.cassette/1 format with its baseline and promote(), a plugin's record block and plugins/_github.json, Caller.opener and caller.fetch, and the opt-in integrations.testing pytest plugin"
+            "The ingest pod takes storage's signed notices of files in a buffer's inbox (POST /ingest/notify, HMAC-SHA256 with INGEST_NOTIFY_KEY over the timestamp and body; refused without the key) and loads the named files without listing, a buffer's batches at least INGEST_BATCH_GAP_SECONDS apart; INGEST_SWEEP_SECONDS and INGEST_REPORT_SECONDS set how often it lists every buffer and loads its own reports (120 each, as before)"
           ],
           [
-            "removed",
-            "Replay and Recording are gone: use integrations.transports' Cassette and Recorder (one import to change); Cassette still reads the old {\"responses\": …} files"
+            "added",
+            "A sender can write only when it has calls to send: with CALL_LOG_DEADLINE_SECONDS (StorageSink's deadline_seconds; in JS deadlineSeconds and flushDue(); the call-log object's vars), each dataset's file goes once its first unsent call has waited the deadline, and no report goes alone, the counters riding in the next call file; with CALL_LOG_HEARTBEAT_SECONDS too, a quiet dataset also writes its report alone each heartbeat (a heartbeat alone has a deadline of two minutes); with neither set, a file every two minutes as before"
+          ],
+          [
+            "added",
+            "The call-log object tells the ingest pod of each file R2 takes, signed with its secret INGEST_NOTIFY_KEY (caller.js's notifyIngest and noticeSignature), and tells no one without it"
+          ],
+          [
+            "changed",
+            "With CALL_LOG_DEADLINE_SECONDS set and CALL_LOG_HEARTBEAT_SECONDS not, a sender (StorageSink, caller.js's StorageSink, the call-log object) writes no report-only files: a file only when it has calls, the counters riding in the next; a heartbeat alone keeps a two-minute deadline, and neither set a file every two minutes"
+          ],
+          [
+            "changed",
+            "GoogleToken, FederatedToken and google_token take the scope and the plugin operation their calls are recorded as (BigQuery's load by default)"
+          ],
+          [
+            "added",
+            "integrations.heartbeat: with CALL_LOG_METRIC_SECONDS, StorageSink writes each instance's heartbeat to Cloud Monitoring (custom.googleapis.com/sustenaut/heartbeat on global, labels project, sender and instance) through the Caller as google.monitoring write, with the Google credential CALL_LOG_METRIC_CREDENTIAL_FILE or GOOGLE_APPLICATION_CREDENTIALS names; unset, nothing is written; the google.monitoring plugin is registered"
+          ],
+          [
+            "changed",
+            "A Caller given no clock, sleep or random looks them up at each call; use_clock() (useClock() in JS) sets them for a harness, reaching a Caller made before it"
+          ],
+          [
+            "added",
+            "cassette_reports() (cassetteReports() in JS) and Cassette.report(): what each cassette current_transport() made answered, for a harness's exit report in place of reading _by_mode"
+          ],
+          [
+            "added",
+            "`Given someone else pushes to \"BRANCH\" of \"o/r\":` makes a real commit on the branch when recording, which the code under test meets as a race, and does nothing replaying"
+          ],
+          [
+            "added",
+            "INTEGRATIONS_FAULTS, a JSON list of Faulty's rules, puts the transport current_transport() gives a process under them, so a harness's faults reach the programs it runs; a fault's plugin also covers every plugin under it, before a dot (both languages)"
+          ],
+          [
+            "added",
+            "`integrations test-org sweep` deletes the GitHub test org's rec-* repositories older than a day (--older-than-hours), and the test-org workflow runs it daily; github.repo-ops has the test-org and test-org-sweep operations for them"
+          ],
+          [
+            "added",
+            "Recorder(names=...) (both languages) and INTEGRATIONS_NAMES write each real name a recording meets as the scenario's, wherever it is a whole word"
+          ],
+          [
+            "added",
+            "Recording, `Given the GitHub repository \"o/r\" holds:` (integrations.testing.github) makes a private rec-<consumer>-<run>-<n> repository in the GitHub test org (INTEGRATIONS_TEST_ORG, else SustenautTest) holding exactly its files, with the recorder app's credentials (GITHUB_TEST_RECORDER_APP_ID, _APP_KEY and _INSTALLATION_ID, or GITHUB_TEST_RECORDER_TOKEN), puts its real names in INTEGRATIONS_NAMES so the cassette says o/r, and deletes it when the scenario ends; token(ctx) is the token the code under test calls with"
+          ],
+          [
+            "changed",
+            "Replaying, a placeholder first seen in a request binds to the first value of its kind the code sends there, and is that value from then on: answered as it, where before a stand-in, and only it matches again; a value already another placeholder's matches none (both languages)"
+          ],
+          [
+            "added",
+            "@sustenaut/integrations/testing/github.js: GitHub's test steps for Node, the test customer `github` for pubtest's register(api, { customers: [github] })"
+          ],
+          [
+            "added",
+            "A Recorder name may be a label, ⟦integrations:commit:L⟧: applied before the volatile patterns, so a labelled sha is written as its label, kept in the cassette's map, replayed as itself, and matched when the code sends it back, in a URL percent-encoded or not (both languages)"
+          ],
+          [
+            "changed",
+            "A test org repository's name has a part of its process's own, rec-<consumer>-<run>-<process>-<n>, so parallel workers never pick the same one; nothing else in the test org may be named rec-*"
+          ],
+          [
+            "added",
+            "GitHub's test steps label commits: the holds step's commit is \"start\" (a later repository's \"start-<name>\"), `Given someone else pushes to \"BRANCH\" of \"o/r\" as commit \"L\":` labels its own, and commit(ctx, \"o/r\", \"L\") (both languages) is the real sha recording and ⟦integrations:commit:L⟧ replaying; a label taken, not a word, or unknown is refused"
+          ],
+          [
+            "fixed",
+            "The wait for a new test org repository's first branch sleeps with its Caller's sleep, which a harness's use_clock() reaches, not time.sleep (both languages)"
+          ],
+          [
+            "added",
+            "pubrules.json's variables block is version 2 and gives INGEST_SWEEP_SECONDS, INGEST_REPORT_SECONDS and INGEST_BATCH_GAP_SECONDS the default \"120\", the code's constant, so the deploy walk (pubdeploy 0.8.1, pubsec 0.4.0) finds them ready unset; a scenario holds each default to the constant and reads \"\" as unset"
           ]
         ]
       },
       "depends": [
         "#identity"
       ],
-      "scope": "the published release v0.16.0 of integrations",
+      "scope": "the published release v0.17.0 of integrations",
       "sources": [
         {
           "ref": "integrations",
-          "revision": "8beb1d984eff998d6790da72de6cafd27d4c506e"
+          "revision": "4afc2272dec5b5a91d94976072f39f800d9a3193"
         }
       ]
     }
   },
-  "created": "2026-11-19T00:00:00Z",
+  "created": "2026-11-26T00:00:00Z",
   "sections": [
     {
       "heading": "Identity",

@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "The call-log object tells the ingest pod of each file R2 takes, signed with its secret INGEST_NOTIFY_KEY (caller.js's notifyIngest and noticeSignature), and tells no one without it"
-}

@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "GitHub's test steps label commits: the holds step's commit is \"start\" (a later repository's \"start-<name>\"), `Given someone else pushes to \"BRANCH\" of \"o/r\" as commit \"L\":` labels its own, and commit(ctx, \"o/r\", \"L\") (both languages) is the real sha recording and ⟦integrations:commit:L⟧ replaying; a label taken, not a word, or unknown is refused"
-}

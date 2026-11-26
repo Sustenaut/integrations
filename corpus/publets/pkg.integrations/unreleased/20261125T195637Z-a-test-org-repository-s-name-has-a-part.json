@@ -1,4 +1,0 @@
-{
-  "category": "changed",
-  "change": "A test org repository's name has a part of its process's own, rec-<consumer>-<run>-<process>-<n>, so parallel workers never pick the same one; nothing else in the test org may be named rec-*"
-}

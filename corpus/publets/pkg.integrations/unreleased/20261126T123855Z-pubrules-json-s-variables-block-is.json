@@ -1,4 +1,0 @@
-{
-  "category": "added",
-  "change": "pubrules.json's variables block is version 2 and gives INGEST_SWEEP_SECONDS, INGEST_REPORT_SECONDS and INGEST_BATCH_GAP_SECONDS the default \"120\", the code's constant, so the deploy walk (pubdeploy 0.8.1, pubsec 0.4.0) finds them ready unset; a scenario holds each default to the constant and reads \"\" as unset"
-}
