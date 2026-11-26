@@ -1,0 +1,179 @@
+{
+ "format": "integrations.cassette/1",
+ "scenario": "github-recording.feature: Replaying, the code under test meets the race as it was recorded, and the steps call nothing",
+ "current": {
+  "recorded": {
+   "at": "2026-11-25T09:00:00Z",
+   "integrations": "0.16.0",
+   "consumer": "integrations@0000000"
+  },
+  "volatile": {
+   "⟦integrations:sha:1⟧": {
+    "kind": "sha",
+    "first": "calls.0.response.body.object.sha"
+   },
+   "⟦integrations:sha:2⟧": {
+    "kind": "sha",
+    "first": "calls.1.response.body.tree.sha"
+   },
+   "⟦integrations:sha:3⟧": {
+    "kind": "sha",
+    "first": "calls.2.response.body.sha"
+   },
+   "⟦integrations:sha:4⟧": {
+    "kind": "sha",
+    "first": "calls.3.response.body.sha"
+   }
+  },
+  "calls": [
+   {
+    "kind": "http",
+    "plugin": "github.edit-pr",
+    "operation": "read",
+    "request": {
+     "method": "GET",
+     "url": "https://api.github.com/repos/o/r/git/ref/heads/main",
+     "headers": {},
+     "body": null
+    },
+    "response": {
+     "status": 200,
+     "headers": {
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "object": {
+        "sha": "⟦integrations:sha:1⟧",
+        "type": "commit"
+       }
+      }
+     }
+    },
+    "elapsed_ms": 0
+   },
+   {
+    "kind": "http",
+    "plugin": "github.edit-pr",
+    "operation": "read",
+    "request": {
+     "method": "GET",
+     "url": "https://api.github.com/repos/o/r/git/commits/⟦integrations:sha:1⟧",
+     "headers": {},
+     "body": null
+    },
+    "response": {
+     "status": 200,
+     "headers": {
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "sha": "⟦integrations:sha:1⟧",
+       "tree": {
+        "sha": "⟦integrations:sha:2⟧"
+       },
+       "parents": []
+      }
+     }
+    },
+    "elapsed_ms": 0
+   },
+   {
+    "kind": "http",
+    "plugin": "github.edit-pr",
+    "operation": "open-pr",
+    "request": {
+     "method": "POST",
+     "url": "https://api.github.com/repos/o/r/git/trees",
+     "headers": {},
+     "body": {
+      "json": {
+       "base_tree": "⟦integrations:sha:2⟧",
+       "tree": [
+        {
+         "path": "a.txt",
+         "mode": "100644",
+         "type": "blob",
+         "content": "mine"
+        }
+       ]
+      }
+     }
+    },
+    "response": {
+     "status": 201,
+     "headers": {
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "sha": "⟦integrations:sha:3⟧"
+      }
+     }
+    },
+    "elapsed_ms": 0
+   },
+   {
+    "kind": "http",
+    "plugin": "github.edit-pr",
+    "operation": "open-pr",
+    "request": {
+     "method": "POST",
+     "url": "https://api.github.com/repos/o/r/git/commits",
+     "headers": {},
+     "body": {
+      "json": {
+       "message": "mine",
+       "tree": "⟦integrations:sha:3⟧",
+       "parents": [
+        "⟦integrations:sha:1⟧"
+       ]
+      }
+     }
+    },
+    "response": {
+     "status": 201,
+     "headers": {
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "sha": "⟦integrations:sha:4⟧"
+      }
+     }
+    },
+    "elapsed_ms": 0
+   },
+   {
+    "kind": "http",
+    "plugin": "github.edit-pr",
+    "operation": "open-pr",
+    "request": {
+     "method": "PATCH",
+     "url": "https://api.github.com/repos/o/r/git/refs/heads/main",
+     "headers": {},
+     "body": {
+      "json": {
+       "sha": "⟦integrations:sha:4⟧",
+       "force": false
+      }
+     }
+    },
+    "response": {
+     "status": 422,
+     "headers": {
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "message": "Update is not a fast forward"
+      }
+     }
+    },
+    "elapsed_ms": 0
+   }
+  ]
+ },
+ "baseline": null
+}

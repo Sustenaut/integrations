@@ -9,6 +9,7 @@ always there, and loads nothing until a suite asks, either way:
 - `pytest_plugins = ["integrations.testing.github"]` in its top conftest.py.
 
 `integrations.testing.github` is GitHub's: steps that set up what a scenario's
-repositories hold, recorded against the GitHub test org and replayed from the
-cassette. In this release it is a stub (its docstring says what works).
+repositories hold, made in the GitHub test org when recording and replayed from the
+cassette (its docstring says how). The same steps for Node are
+clients/js/testing-github.js, a pubtest test customer.
 """

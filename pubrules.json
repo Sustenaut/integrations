@@ -41,6 +41,20 @@
       }
     }
   ],
+  "github_app": {
+    "id": {
+      "from": "github-test-recorder-app-id",
+      "to": "TEST_RECORDER_APP_ID"
+    },
+    "installation_id": {
+      "from": "github-test-recorder-installation-id",
+      "to": "TEST_RECORDER_APP_INSTALLATION_ID"
+    },
+    "key": {
+      "from": "github-test-recorder-app-key",
+      "to": "TEST_RECORDER_APP_KEY"
+    }
+  },
   "deploy": {
     "providers": [
       {

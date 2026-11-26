@@ -106,6 +106,31 @@ def ci_usage(action: str, since_days: int | None, except_board: bool = False) ->
     return ci.jobs(days, except_board)
 
 
+def test_org_sweep(org: str | None, older_than_hours: float, caller: Caller | None = None) -> int:
+    """The test org's janitor: delete the rec-* repositories older than the hours given.
+    `caller` is for tests: by default one of its own, to the network."""
+    from datetime import timedelta  # noqa: PLC0415
+
+    from .clients.github_test_org import MissingCredentials, sweep_from_env  # noqa: PLC0415
+
+    if older_than_hours <= 0:
+        print("integrations: --older-than-hours is more than 0", file=sys.stderr)
+        return 2
+    try:
+        swept = sweep_from_env(timedelta(hours=older_than_hours), org=org, caller=caller)
+    except MissingCredentials as e:
+        print(f"integrations: {e}", file=sys.stderr)
+        return 2
+    except IntegrationError as e:
+        print(f"integrations: {e}", file=sys.stderr)
+        return 1
+    for name in swept["deleted"]:
+        print(f"deleted {swept['org']}/{name}")
+    print(f"{swept['org']}: deleted {len(swept['deleted'])} rec-* repositories older than {older_than_hours:g} h, "
+          f"kept {len(swept['kept'])} newer")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="integrations", description=__doc__)
     parser.add_argument("--version", action="version", version=f"integrations {__version__}")
@@ -126,7 +151,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--except-board", action="store_true",
                    help="leave out the release board's repositories (release-state's state.json): a backfill of the others")
     actions.add_parser("cluster", help="write one sample of the k3s server's usage")
+    p = commands.add_parser("test-org", help="the GitHub test org recordings make repositories in")
+    actions = p.add_subparsers(dest="action", required=True)
+    p = actions.add_parser("sweep", help="delete the rec-* repositories a recording left behind (the janitor)")
+    p.add_argument("--org", default=None, help="the test org: INTEGRATIONS_TEST_ORG, else SustenautTest")
+    p.add_argument("--older-than-hours", type=float, default=24.0,
+                   help="delete only those made longer ago than this (24: a day)")
     args = parser.parse_args(argv)
+    if args.command == "test-org":
+        return test_org_sweep(args.org, args.older_than_hours)
     if args.command == "slack":
         return slack_post(args.channel, args.text)
     if args.command == "ci-usage":

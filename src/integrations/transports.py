@@ -11,7 +11,10 @@ process gets when it is given none.
 - `Faulty(inner, rules)` makes calls fail on purpose: no answer, a status, a slow
   answer, a malformed body.
 - `current_transport()` is the transport a `Caller` given none uses: the one a
-  test harness installed with `use()`, else the one `INTEGRATIONS_MODE` names.
+  test harness installed with `use()`, else the one `INTEGRATIONS_MODE` names,
+  under the faults `INTEGRATIONS_FAULTS` names; `cassette_reports()` says which
+  recorded calls the cassettes it made answered, for a harness to check at exit.
+- `use_clock()` is the clock, sleep and jitter a `Caller` given none of them uses.
 
 The same in clients/js/src/transports.js, and the vectors in tests/vectors/cassettes/
 run on both.
@@ -34,6 +37,17 @@ from its name (a 40-hex sha, an ISO date, a numeric id, a ghs_ token), and a
 stand-in the code sends back is read as its placeholder again, so a sha one call
 answers and the next sends matches. Real text holding `⟦integrations:` is written
 `⟦integrations:escape⟧`, and read back as it was.
+
+A placeholder first seen in a request is a value the code made itself: on replay
+it matches the first value of its kind the code sends there, and from then on is
+that value, in the answers and in what the code must send again, as a recorded
+value is. A value already another placeholder's matches none.
+
+Names. A recording made against a test org names its repositories for real
+(`SustenautTest/rec-pubpr-…-1`) where a scenario says `o/r`: the Recorder's
+`names`, and `INTEGRATIONS_NAMES` (a JSON object from each real name to the one
+the scenario gives it), are written as the scenario's names wherever they appear
+as a whole word, so the cassette, and a replay, only ever see `o/r`.
 """
 
 from __future__ import annotations
@@ -65,6 +79,8 @@ MODE = "INTEGRATIONS_MODE"
 CASSETTE = "INTEGRATIONS_CASSETTE"
 CASSETTES = "INTEGRATIONS_CASSETTES"
 MARKER = "PUBTEST_RUN"
+NAMES = "INTEGRATIONS_NAMES"
+FAULTS = "INTEGRATIONS_FAULTS"
 MODES = ("live", "replay", "record")
 
 PREFIX = "⟦integrations:"
@@ -183,10 +199,41 @@ def _escape(text: str) -> str:
     return text.replace(PREFIX, ESCAPE)
 
 
+def names_from(env: dict[str, str] | None = None) -> dict[str, str]:
+    """INTEGRATIONS_NAMES: a JSON object from each real name a recording meets to the
+    name the scenario gives it; {} when it is not set. Raises ValueError when it is
+    not such an object."""
+    env = os.environ if env is None else env
+    raw = env.get(NAMES)
+    if not raw:
+        return {}
+    try:
+        names = json.loads(raw)
+    except ValueError:
+        names = None
+    if not isinstance(names, dict) or not all(isinstance(k, str) and k and isinstance(v, str)
+                                              for k, v in names.items()):
+        raise ValueError(f"{NAMES} is a JSON object from each real name to the scenario's, not {raw!r}")
+    return names
+
+
+def _renamer(names: dict[str, str]) -> Callable[[str], str] | None:
+    """Each real name in `names`, where it is a whole word (not inside a longer name),
+    as the scenario's; the longest first."""
+    names = {k: v for k, v in names.items() if k != v}
+    if not names:
+        return None
+    pattern = re.compile(r"(?<![A-Za-z0-9_.-])(?:" + "|".join(
+        re.escape(k) for k in sorted(names, key=lambda k: (-len(k), k))) + r")(?![A-Za-z0-9_-])")
+    return lambda text: _sub_outside(text, pattern, lambda v: names[v])
+
+
 class _Map:
     """Values to placeholders, for one cassette. The writer's assigns them to real
     values as it meets them; the reader's knows each placeholder's stand-in and reads
     a stand-in back as it, and any other volatile value as `⟦integrations:KIND:?⟧`."""
+
+    rename: Callable[[str], str] | None = None
 
     def __init__(self) -> None:
         self.known: dict[str, str] = {}  # a value's text -> its placeholder
@@ -206,8 +253,9 @@ class _Map:
 
 
 class _Writer(_Map):
-    def __init__(self) -> None:
+    def __init__(self, names: dict[str, str] | None = None) -> None:
         super().__init__()
+        self.rename = _renamer(names or {})
         self.by_value: dict[str, str] = {}
         self.entries: dict[str, dict[str, str]] = {}
         self.counts: dict[str, int] = {}
@@ -246,7 +294,8 @@ class _Writer(_Map):
 class _Reader(_Map):
     def __init__(self, volatile: dict[str, dict]) -> None:
         super().__init__()
-        self.values: dict[str, Any] = {}  # a placeholder -> its stand-in
+        self.values: dict[str, Any] = {}  # a placeholder -> its stand-in, or the value it was bound to
+        self.raw = False  # True: a volatile value no placeholder stands for is left as it is
         for name, entry in volatile.items():
             m = PLACEHOLDER.fullmatch(name)
             if not m or not m.group(1) or m.group(2) == "?":
@@ -255,8 +304,26 @@ class _Reader(_Map):
             self.values[name] = value
             self.known[text_of(value)] = name
 
-    def volatile(self, value: Any, kind: str, where: str) -> str:
-        return self.known.get(text_of(value)) or _placeholder(kind, "?")
+    def volatile(self, value: Any, kind: str, where: str) -> Any:
+        known = self.known.get(text_of(value))
+        if known:
+            return known
+        return value if self.raw else _placeholder(kind, "?")
+
+    def raw_copy(self) -> _Reader:
+        """The same map, leaving a volatile value it does not know as it is."""
+        other = _Reader({})
+        other.values, other.known, other.raw = self.values, self.known, True
+        return other
+
+    def bind(self, name: str, value: Any) -> None:
+        """`name` is `value` from now on: its stand-in no longer stands for it."""
+        old = self.values.get(name)
+        if old is not None and self.known.get(text_of(old)) == name:
+            del self.known[text_of(old)]
+        self.values[name] = value
+        self.known[text_of(value)] = name
+        self._learnt()
 
     def secret(self, value: Any, side: str, where: str) -> str:
         return SECRET
@@ -338,6 +405,8 @@ class _Normaliser:
 
     def text(self, text: str, where: str) -> str:
         text = _escape(text)
+        if self.map.rename is not None:
+            text = self.map.rename(text)
         whole = self.map.known_text(text)
         if whole:
             return whole
@@ -555,8 +624,8 @@ class Cassette:
                                                                                         request.get("body"), rules)
 
     def _loosen(self, text: str) -> str:
-        """A placeholder first seen in a request is a value the code made itself, which
-        matches any value of its kind."""
+        """A placeholder first seen in a request, and not yet bound, is a value the code
+        made itself, which matches any value of its kind."""
         return PLACEHOLDER.sub(lambda m: _placeholder(m.group(1), "?") if m.group(0) in self.loose else m.group(0),
                                text)
 
@@ -584,6 +653,12 @@ class Cassette:
             if want[:2] != (method, url) or want[2] not in ("*", body):
                 continue
             if not call.used:
+                bound = self._bindings(call, request, rules)
+                if bound is None:
+                    continue
+                for name, value in bound.items():
+                    self.reader.bind(name, value)
+                    self.loose.discard(name)
                 found = call
                 break
             if call.sticky and found is None:
@@ -592,6 +667,45 @@ class Cassette:
             raise NoSnapshot(self._no_snapshot(request, asked, body, rules))
         found.used += 1
         return self._answer(found.response)
+
+    def _bindings(self, call: _Call, request: Request, rules: dict) -> dict[str, Any] | None:
+        """The values `request` sends where `call`'s recorded request holds a loose
+        placeholder: each one binds it. {} when there is none; None when they do not
+        fit the map: one placeholder sent as two values, or a value that is already
+        another placeholder's."""
+        if call.plugin is None or not self.loose:
+            return {}
+        recorded = call.request
+        body = recorded.get("body")
+        if body is not None and "sha256" in body:
+            return {}
+        texts = [recorded["url"], canonical(_graphql(recorded["url"], body, rules))]
+        if not any(m.group(0) in self.loose for t in texts for m in PLACEHOLDER.finditer(t)):
+            return {}
+        raw = _Normaliser(rules, self.reader.raw_copy()).request(request, "calls.?.request")
+        sent = [raw["url"], canonical(_graphql(raw["url"], raw["body"], rules))]
+        found: dict[str, Any] = {}
+        for i, (text, live) in enumerate(zip(texts, sent)):
+            pattern, groups = _binding_pattern(text, self.loose, json_text=i == 1)
+            m = pattern.fullmatch(live)
+            if m is None:
+                return {}
+            for group, (name, how) in groups.items():
+                value = _bound_value(m.group(group), how)
+                if isinstance(value, str) and PLACEHOLDER.fullmatch(value):
+                    if value != name:
+                        return None
+                    continue
+                if name in found and found[name] != value:
+                    return None
+                found[name] = value
+        seen: set[str] = set()
+        for name, value in found.items():
+            known = self.reader.known.get(text_of(value))
+            if (known is not None and known != name) or text_of(value) in seen:
+                return None
+            seen.add(text_of(value))
+        return found
 
     def _answer(self, recorded: dict) -> Response:
         if recorded.get("status") is None:
@@ -635,6 +749,12 @@ class Cassette:
         lines.append(f'record it: pubtest record "{self.scenario}"')
         return "\n".join(lines)
 
+    def report(self) -> dict:
+        """What was replayed: how many calls the cassette holds, which of them (by
+        index) answered, how many requests were sent and how many were answered."""
+        return {"calls": len(self.calls), "used": [i for i, c in enumerate(self.calls) if c.used],
+                "sent": len(self.sent), "answered": sum(c.used for c in self.calls)}
+
     def unused(self) -> list[str]:
         """The recorded calls never made, as "plugin operation METHOD url"."""
         return [self._describe(c.plugin, c.operation, c.request["method"].upper(), c.request["url"])
@@ -652,6 +772,43 @@ class Cassette:
             warnings.warn(message, stacklevel=2)
             return
         raise UnusedCalls(message)
+
+
+def _binding_pattern(text: str, loose: set[str], *, json_text: bool) -> tuple[re.Pattern, dict[str, tuple]]:
+    """`text` as a pattern a request's text matches, each loose placeholder in it a
+    group: in JSON, a whole value (a string or a number) or a piece of a string."""
+    out, groups, pieces = [], {}, _pieces(text)
+    i = 0
+    while i < len(pieces):
+        held, piece = pieces[i]
+        if not held or piece not in loose:
+            out.append(re.escape(piece))
+            i += 1
+            continue
+        group = f"g{len(groups)}"
+        before = "".join(out)
+        after = pieces[i + 1][1] if i + 1 < len(pieces) else ""
+        if json_text and before.endswith('"') and after.startswith('"'):
+            out[-1] = out[-1][:-1]  # the quote goes into the group: a string, or the number it stood for
+            pieces[i + 1] = (pieces[i + 1][0], after[1:])
+            out.append(rf'(?P<{group}>"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)')
+            groups[group] = (piece, "json")
+        elif json_text:
+            out.append(rf'(?P<{group}>(?:[^"\\]|\\.)+?)')
+            groups[group] = (piece, "inside")
+        else:
+            out.append(rf"(?P<{group}>.+?)")
+            groups[group] = (piece, "text")
+        i += 1
+    return re.compile("".join(out), re.S), groups
+
+
+def _bound_value(text: str, how: str) -> Any:
+    if how == "json":
+        return json.loads(text)
+    if how == "inside":
+        return json.loads(f'"{text}"')
+    return text
 
 
 def _short(text: str, limit: int = 60) -> str:
@@ -721,6 +878,9 @@ class Recorder:
     replaced, and `save()` refuses (`SecretInRecording`) when a secret it saw would
     still be written anywhere.
 
+    `names` (from each real name to the scenario's), over INTEGRATIONS_NAMES as it is
+    when the recording is written, are written as the scenario's names.
+
     `save()` writes only inside the cassettes directory (`cassettes_dir()`), which
     is settled when the recorder is made: `INTEGRATIONS_CASSETTES`, else the
     directory of `INTEGRATIONS_CASSETTE`, else that of `path`. A path that resolves
@@ -728,8 +888,10 @@ class Recorder:
 
     def __init__(self, inner: Transport, path: Path | str | None = None, plugins: Any = registry, *,
                  scenario: str | None = None, consumer: str | None = None,
-                 clock: Callable[[], float] = time.monotonic, now: Callable[[], datetime] | None = None):
+                 clock: Callable[[], float] = time.monotonic, now: Callable[[], datetime] | None = None,
+                 names: dict[str, str] | None = None):
         self.inner, self.path, self.plugins = inner, Path(path) if path else None, plugins
+        self.names = dict(names or {})
         self.root = cassettes_dir(self.path)
         self.scenario, self.consumer, self.clock = scenario, consumer, clock
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -744,7 +906,7 @@ class Recorder:
     def recording(self) -> dict:
         """The calls kept so far, normalised: a cassette's `current`. Raises
         `SecretInRecording` when a secret would be in it."""
-        values = _Writer()
+        values = _Writer({**names_from(), **self.names})
         calls: list[dict] = []
         for _ in range(2):  # the second time, every value the first met is known everywhere
             calls = []
@@ -874,7 +1036,8 @@ class Fault:
         self.seen = 0
 
     def matches(self, request: Request) -> bool:
-        if self.plugin != "*" and self.plugin != request.plugin:
+        plugin = request.plugin or ""
+        if self.plugin != "*" and plugin != self.plugin and not plugin.startswith(self.plugin + "."):
             return False
         if self.operation and self.operation != request.operation:
             return False
@@ -898,7 +1061,9 @@ class Faulty:
     a dict:
 
     - `match`: "PLUGIN[ OPERATION][ METHOD PATH]", PATH a pattern in which `*` is
-      anything (`"github.edit-pr open-pr POST /repos/*/pulls"`); "*" is any plugin;
+      anything (`"github.edit-pr open-pr POST /repos/*/pulls"`); "*" is any plugin,
+      and a PLUGIN is also every plugin under it, before a dot (`github` is every
+      github.* plugin);
     - `nth`: which of the calls it matches: "*" (every one, the default), "first",
       N (the Nth, from 1) or "after N";
     - `effect`: "no-answer"; "status N", with the rule's `body` (text, or JSON) and
@@ -953,6 +1118,9 @@ class Faulty:
 
 _installed: ContextVar[tuple] = ContextVar("integrations_transports", default=())
 _by_mode: dict[tuple[str, str], Any] = {}
+_named: dict[tuple[str, str], str] = {}  # each cassette's INTEGRATIONS_CASSETTE, as it was given
+_faulty: dict[tuple[str, str, str], Faulty] = {}
+_clocks: ContextVar[tuple] = ContextVar("integrations_clocks", default=())
 
 
 def check_mode(env: dict[str, str] | None = None) -> str:
@@ -973,29 +1141,69 @@ def check_mode(env: dict[str, str] | None = None) -> str:
     return mode
 
 
+def fault_rules(env: dict[str, str] | None = None) -> list[dict]:
+    """INTEGRATIONS_FAULTS: a JSON list of `Faulty`'s rules, which a harness sets so
+    the programs it runs fail as it does; [] when it is not set. Raises `ModeError`
+    when it is set without PUBTEST_RUN, and ValueError when it is no list of rules."""
+    env = os.environ if env is None else env
+    raw = env.get(FAULTS)
+    if not raw:
+        return []
+    if not env.get(MARKER):
+        raise ModeError(f"{FAULTS} without {MARKER}: only a test harness makes calls fail on purpose, "
+                        "so this process does not start")
+    try:
+        rules = json.loads(raw)
+    except ValueError:
+        rules = None
+    if not isinstance(rules, list) or not all(isinstance(r, dict) and "effect" in r for r in rules):
+        raise ValueError(f"{FAULTS} is a JSON list of Faulty's rules, each with an effect, not {raw!r}")
+    for rule in rules:
+        Fault(rule)  # an effect that is not one is refused here, not at the call
+    return rules
+
+
 def current_transport() -> Transport:
     """The transport installed by `use()` in this context, else the one
     INTEGRATIONS_MODE picks: `Network()` (live), `Cassette(INTEGRATIONS_CASSETTE)`
     (replay) or `Recorder(Network(), INTEGRATIONS_CASSETTE)` (record), which saves
-    when the process exits. Raises `ModeError` as `check_mode()` does, and
-    `CassettePathError` when INTEGRATIONS_CASSETTE resolves outside the cassettes
-    directory (`INTEGRATIONS_CASSETTES`, if set)."""
+    when the process exits; under `Faulty` with INTEGRATIONS_FAULTS's rules when it
+    names some (`fault_rules()`), which count this process's calls. Raises
+    `ModeError` as `check_mode()` does, and `CassettePathError` when
+    INTEGRATIONS_CASSETTE resolves outside the cassettes directory
+    (`INTEGRATIONS_CASSETTES`, if set)."""
     mode = check_mode()
     installed = _installed.get()
     if installed:
         return installed[-1]
     path = str(cassette_path(os.environ[CASSETTE])) if mode != "live" else ""
+    rules = fault_rules()
     key = (mode, path)
     if key not in _by_mode:
         if mode == "live":
             _by_mode[key] = Network()
         elif mode == "replay":
             _by_mode[key] = Cassette(path, mode="replay")
+            _named[key] = os.environ[CASSETTE]
         else:
             recorder = Recorder(Network(), path)
             atexit.register(_save_at_exit, recorder)
             _by_mode[key] = recorder
-    return _by_mode[key]
+    if not rules:
+        return _by_mode[key]
+    faulted = (mode, path, os.environ[FAULTS])
+    if faulted not in _faulty:
+        _faulty[faulted] = Faulty(_by_mode[key], rules)
+    return _faulty[faulted]
+
+
+def cassette_reports() -> list[dict]:
+    """For a harness to check at exit what a process it ran replayed: one entry per
+    cassette `current_transport()` answered from in this process, its
+    INTEGRATIONS_CASSETTE as the process was given it (`cassette`) and its
+    `Cassette.report()`."""
+    return [{"cassette": _named[key], **transport.report()} for key, transport in list(_by_mode.items())
+            if isinstance(transport, Cassette) and key in _named]
 
 
 def _save_at_exit(recorder: Recorder) -> None:
@@ -1004,6 +1212,31 @@ def _save_at_exit(recorder: Recorder) -> None:
             recorder.save()
         except (OSError, SecretInRecording) as e:
             print(f"integrations: the recording was not saved: {e}", file=sys.stderr)
+
+
+def current_clock() -> tuple[Callable[[], float], Callable[[float], None], Callable[[], float]]:
+    """The clock (seconds), sleep and random a `Caller` given none of them uses: the
+    ones `use_clock()` installed in this context, else time.monotonic, time.sleep and
+    random.random."""
+    import random  # noqa: PLC0415
+
+    clock, sleep, jitter = time.monotonic, time.sleep, random.random
+    for installed in _clocks.get():
+        clock, sleep, jitter = (installed[0] or clock, installed[1] or sleep, installed[2] or jitter)
+    return clock, sleep, jitter
+
+
+@contextmanager
+def use_clock(clock: Callable[[], float] | None = None, sleep: Callable[[float], None] | None = None,
+              random: Callable[[], float] | None = None) -> Iterator[None]:
+    """Within the block, a Caller given no clock, sleep or random uses these, each
+    looked up at each call, so a harness reaches a Caller made before it. Each one
+    not given stays as it was. For test harnesses only."""
+    token = _clocks.set((*_clocks.get(), (clock, sleep, random)))
+    try:
+        yield
+    finally:
+        _clocks.reset(token)
 
 
 @contextmanager

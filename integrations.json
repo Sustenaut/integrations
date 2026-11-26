@@ -41,7 +41,13 @@
       "paths": [
         ".github/workflows/main.yml",
         ".github/workflows/pr.yml",
-        "src/integrations/clients/github_app_token.py"
+        "src/integrations/clients/github_app_token.py",
+        ".github/workflows/test-org.yml",
+        "pubrules.json",
+        "src/integrations/clients/github_test_org.py",
+        "src/integrations/testing/github.py",
+        "clients/js/testing-github.js",
+        "clients/js/test/github-recording.steps.mjs"
       ],
       "mode": "required"
     },
@@ -73,7 +79,11 @@
     {
       "plugin": "github.repo-ops",
       "paths": [
-        ".github/workflows/wheel.yml"
+        ".github/workflows/wheel.yml",
+        "src/integrations/clients/github_test_org.py",
+        "clients/js/testing-github.js",
+        "clients/js/test/github-recording.steps.mjs",
+        "clients/js/test/github-standin.mjs"
       ],
       "mode": "required"
     },

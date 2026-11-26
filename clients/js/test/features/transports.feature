@@ -156,3 +156,74 @@ Feature: Record and replay in JavaScript: the transport a Caller given no fetch 
   Scenario: caller.fetch of an operation not in the registry is refused when it is made
     When I make a fetch of "github.edit-pr" "nope" from a caller
     Then it is refused, saying "github.edit-pr nope is not a registered operation"
+
+  Scenario: A process under INTEGRATIONS_FAULTS fails as its harness says, on every plugin under a name
+    Given a scratch directory
+    And a file "c.json" holding the cassette of "tests/vectors/cassettes/match.json"
+    And the environment sets "INTEGRATIONS_MODE" to "replay"
+    And the environment sets "PUBTEST_RUN" to "1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json" in the scratch directory
+    And the environment sets "INTEGRATIONS_FAULTS" to "[{\"match\": \"github GET /repos/*/pulls\", \"effect\": \"status 418\", \"body\": {\"message\": \"no\"}}]"
+    When a caller given no fetch calls "github.board-read" "read" with "GET https://api.github.com/repos/o/r/pulls?state=open&per_page=100"
+    Then the result is:
+      """
+      {"status": 418, "json": {"message": "no"}}
+      """
+    And the calls recorded are:
+      | plugin            | outcome | status |
+      | github.board-read | refused | 418    |
+
+  Scenario: Under INTEGRATIONS_FAULTS the current transport is Faulty
+    Given a scratch directory
+    And a file "c.json" holding "{\"responses\": {}}"
+    And the environment sets "INTEGRATIONS_MODE" to "replay"
+    And the environment sets "PUBTEST_RUN" to "1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json" in the scratch directory
+    And the environment sets "INTEGRATIONS_FAULTS" to "[{\"match\": \"*\", \"effect\": \"no-answer\"}]"
+    When I ask for the current transport
+    Then the result is "Faulty"
+
+  Scenario: INTEGRATIONS_FAULTS without PUBTEST_RUN does not start
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the environment does not set "PUBTEST_RUN"
+    And the environment sets "INTEGRATIONS_FAULTS" to "[{\"match\": \"*\", \"effect\": \"no-answer\"}]"
+    When I ask for the current transport
+    Then it is refused, saying "INTEGRATIONS_FAULTS without PUBTEST_RUN: only a test harness makes calls fail on purpose, so this process does not start"
+    And the refusal's "name" is "ModeError"
+
+  Scenario Outline: INTEGRATIONS_FAULTS that is no list of rules is refused: <given>
+    Given the environment does not set "INTEGRATIONS_MODE"
+    And the environment sets "PUBTEST_RUN" to "1"
+    And the environment sets "INTEGRATIONS_FAULTS" to "<given>"
+    When I ask for the current transport
+    Then it is refused, saying "<saying>"
+
+    Examples:
+      | given                    | saying                                                                     |
+      | {\"effect\": \"no-answer\"}  | INTEGRATIONS_FAULTS is a JSON list of Faulty's rules, each with an effect |
+      | [{\"match\": \"*\"}]           | INTEGRATIONS_FAULTS is a JSON list of Faulty's rules, each with an effect |
+      | [{\"effect\": \"explode\"}]    | no fault \"explode\"                                                         |
+
+  Scenario: A process reports what its cassette answered, as a harness checks at exit
+    Given a scratch directory
+    And a file "reported.json" holding the cassette of "tests/vectors/cassettes/match.json"
+    And the environment sets "INTEGRATIONS_MODE" to "replay"
+    And the environment sets "PUBTEST_RUN" to "1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "reported.json" in the scratch directory
+    When a caller given no fetch calls "github.board-read" "read" with "GET https://api.github.com/repos/o/r/pulls?state=open&per_page=100", and the process reports its cassette
+    Then the result is:
+      """
+      {"calls": 1, "used": [0], "sent": 1, "answered": 1, "named": true}
+      """
+
+  Scenario: A harness's clock, sleep and jitter reach a caller made before them
+    When a caller made before the harness's clock calls "github.board-read" "read" with "GET https://api.github.com/x", answered 503 and then 200
+    Then the result is:
+      """
+      {"status": 200, "slept": [0.25], "latency_ms": 250}
+      """
+
+  Scenario: A caller given its own sleep keeps it under a harness's clock
+    When a caller with its own sleep, made before the harness's clock, calls "github.board-read" "read" with "GET https://api.github.com/x", answered 503 and then 200
+    Then the result's "slept" is "[]"
+    And the result's "own" is "[0.25]"

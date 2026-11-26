@@ -1,7 +1,7 @@
 {
   "id": "github.repo-ops",
   "provider": "GitHub",
-  "use": "Releases, repository settings and other calls a job or tool makes with its own token",
+  "use": "Releases, repository settings and other calls a job or tool makes with its own token; the repositories a recording makes in the GitHub test org, and the janitor that deletes them",
   "operations": [
     {
       "name": "call",
@@ -12,10 +12,21 @@
       "name": "check-push",
       "class": "H",
       "route": "routed"
+    },
+    {
+      "name": "test-org",
+      "class": "E",
+      "route": "reported"
+    },
+    {
+      "name": "test-org-sweep",
+      "class": "S",
+      "route": "reported"
     }
   ],
   "setup": [
-    "Grant the workflow the permission it needs, or sign in to gh"
+    "Grant the workflow the permission it needs, or sign in to gh",
+    "For the test org: install the recorder app on it, its id, key and installation id in Bitwarden (github-test-recorder-*)"
   ],
   "detect": {
     "hosts": [

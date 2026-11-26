@@ -26,8 +26,9 @@ what is in it; `test_vectors.py` reads it with `integrations.avrofile`. Rewrite 
 
 - `cassette` is a cassette (`integrations.cassette/1`, or the old `responses` format) the
   steps replay from; or `record` is the provider's answers in turn (each a cassette answer,
-  with its `elapsed_ms`), recorded by a `Recorder` with the vector's `scenario`; `faults`
-  wraps either in `Faulty`, whose clock is counted as `slept`.
+  with its `elapsed_ms`), recorded by a `Recorder` with the vector's `scenario` and
+  `names` (each real name to the scenario's); `faults` wraps either in `Faulty`, whose
+  clock is counted as `slept`.
 - A step is `{"call": {...}}` (plugin, operation, method, url, headers, body as
   `json`/`text`/`base64`/`{"repeat", "times"}`; `{{N.key}}` in it is the value at `key` of
   result N), `save` and `promote` (the file, less `recorded`, and which of `absent`'s texts
@@ -36,3 +37,12 @@ what is in it; `test_vectors.py` reads it with `integrations.avrofile`. Rewrite 
 - `expect.results` has one entry a step: an answer (`status`, `headers` in lower case and
   the body) or `{"error": ...}`; a refusal is its class and which of the expected
   `mentions` its message holds.
+
+## GitHub
+
+`github/race.json` is a cassette recorded by `tests/features/github-recording.feature`'s
+steps against the stand-in test org: a scenario's repository, the code under test's read of
+`main`, someone else's push, and the code's update of `main` refused as not a fast
+forward. Both languages replay it (`github-recording.feature` here and in `clients/js`),
+with the steps calling nothing, and meet the race as it was recorded.
+
