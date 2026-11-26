@@ -15,6 +15,7 @@
     "release_app": 5529889
   },
   "variables": {
+    "version": 2,
     "names": [
       "INGEST_DATASETS",
       "INGEST_SIGNALS",
@@ -27,6 +28,11 @@
       "INTEGRATIONS_ORIGINS",
       "INTEGRATIONS_EDIT_PR_REPOS"
     ],
+    "defaults": {
+      "INGEST_SWEEP_SECONDS": "120",
+      "INGEST_REPORT_SECONDS": "120",
+      "INGEST_BATCH_GAP_SECONDS": "120"
+    },
     "deploy": "deploy.yml"
   },
   "signing_keys": [
@@ -59,13 +65,13 @@
     "providers": [
       {
         "distribution": "pubdeploy",
-        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl",
-        "sha256": "d783284288181f025e11d64505c1a28cf52ba24231d5309e03d1073914cfa457"
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl",
+        "sha256": "b51b7551a0da6cc9165e3429f443a0a3b9a2a311871f759fb27d11d68501aed2"
       },
       {
         "distribution": "pubsec",
-        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl",
-        "sha256": "a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18"
+        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.4.0/pubsec-0.4.0-py3-none-any.whl",
+        "sha256": "b6e493d2b05c10ce0524a5e97397bd2a459a9ac67f6059eea7646457698bed45"
       }
     ],
     "namespace": "integrations",

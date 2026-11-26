@@ -1,4 +1,4 @@
-# Managed by pubrules 0.45.0: `pubrules sync` rewrites this file, and
+# Managed by pubrules 0.49.1: `pubrules sync` rewrites this file, and
 # `pubrules sync --check` fails when it differs. Add your own requirements to
 # requirements.txt, which includes this one; `pubrules lock` then pins the lot
 # with hashes in requirements.lock.
@@ -6,9 +6,14 @@ pytest==9.0.3
 pytest-bdd==8.1.0
 pytest-xdist==3.8.0
 hypothesis==6.170.5
-# The steps and the pytest plugin every suite loads (pubtest's GRAMMAR.md).
-pubtest @ https://github.com/Sustenaut/pubtest/releases/download/v0.2.1/pubtest-0.2.1-py3-none-any.whl
-pubrules @ https://github.com/Sustenaut/pubrules/releases/download/v0.45.0/pubrules-0.45.0-py3-none-any.whl
+# The steps and the pytest plugin every suite loads (pubtest's GRAMMAR.md),
+# by pubtest's PyPI name, pubtestrules (PyPI's pubtest is another project):
+# requirements.txt pins the release, which the nightly moves, and
+# `pubrules sync --check` fails on one older than this floor, the release
+# whose steps pubrules' own files use.
+# pubtest floor: 0.4.0
+pubtestrules>=0.4.0
+pubrules==0.49.1
 # deploy.providers' packages, whose need types `pubrules sync --check` reads:
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.5.2/pubdeploy-0.5.2-py3-none-any.whl
-pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl
+pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.4.0/pubsec-0.4.0-py3-none-any.whl

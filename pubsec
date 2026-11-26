@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Managed by pubrules 0.45.0: `pubrules sync` rewrites this file, and
+# Managed by pubrules 0.49.1: `pubrules sync` rewrites this file, and
 # `pubrules sync --check` fails when it differs.
 #
 # Run this repository's pinned pubsec, which holds what pubrules does not: a
@@ -9,8 +9,8 @@
 #   ./pubsec run -- terraform plan
 #   ./pubsec --version
 #
-# The release is deploy.providers' pubsec, or the oldest pubrules 0.45.0
-# works with where it lists none, or an older one.
+# The release is deploy.providers' pubsec, or where it lists none the one
+# this file fetched when sync first wrote it; the nightly moves it.
 # Its wheel is fetched once into the user's cache (from the wheel mirror,
 # when pubrules.json names one and GitHub fails) and checked against its
 # sha256 on every run, and uvx runs that file; nothing is installed into the
@@ -43,5 +43,5 @@ fetch() {
   fi
 }
 
-fetch https://github.com/Sustenaut/pubsec/releases/download/v0.3.0/pubsec-0.3.0-py3-none-any.whl a9036c741e29098cdd04baf64c7873e0ff1dd6e7bde12e9671a3940370724e18 providers deploy.providers
+fetch https://github.com/Sustenaut/pubsec/releases/download/v0.4.0/pubsec-0.4.0-py3-none-any.whl b6e493d2b05c10ce0524a5e97397bd2a459a9ac67f6059eea7646457698bed45 providers deploy.providers
 exec uvx --from "$fetched" pubsec "$@"
