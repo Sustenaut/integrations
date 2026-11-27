@@ -1,9 +1,10 @@
 # Compare a repository's calls to outside services with its integrations.json.
-# A repository calls this, pinned by commit like every other reusable workflow:
+# A repository calls this pinned by a release's commit, with its version in a
+# comment, like every other reusable workflow, so the pubrules nightly moves it:
 #
 #   jobs:
 #     integrations:
-#       uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
+#       uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit of vX.Y.Z> # vX.Y.Z
 #       with: { runs-on: my-runners }   # optional: a self-hosted runner label
 #
 # It runs the scanner at the commit the caller pinned, from a plain checkout:
