@@ -70,11 +70,3 @@ When("the timings are sent", async function () {
   await this.attempt(() => flushTimings());
 });
 
-Then("the {string} service was asked {string} without the header {string}", function (name, request, header) {
-  const fake = this.pubtest.fakes[name];
-  if (!fake) throw new Error(`there is no fake ${name} service`);
-  const found = fake.requests.filter((q) => `${q.method} ${q.path}` === request || `${q.method} ${q.path.split("?")[0]}` === request);
-  if (!found.length) throw new Error(`${name} was not asked ${request}`);
-  const carried = found.filter((q) => header.toLowerCase() in q.headers);
-  if (carried.length) throw new Error(`${name} was asked ${request} with ${header}: ${carried.map((q) => q.headers[header.toLowerCase()])}`);
-});

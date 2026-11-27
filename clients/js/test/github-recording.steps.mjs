@@ -35,6 +35,15 @@ Given("the scenario runs under pubtest's harness", function () {
     async namesOf(customer) {
       return (this.names[customer] ??= {});
     },
+    // What pubtest's After asks of a tape: the scenario's own cleanups, and its problems.
+    async end(close) {
+      try {
+        await close();
+      } catch (err) {
+        return [`a cleanup failed: ${err?.stack ?? err}`];
+      }
+      return [];
+    },
   };
   this.pubtest.tape = tape;
   this.pubtest.cleanup(async () => {
@@ -164,11 +173,6 @@ Then("every call the cassette holds was made", function () {
 // All of text is pattern, in which only * is special, as pubtest's matches.
 const matches = (pattern, text) => new RegExp(`^${pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "s").test(text);
 
-Then("the result's {string} matches {string}", function (key, pattern) {
-  if (this.pubtest.refused) throw new Error(`it was refused: ${this.pubtest.refused.message}`);
-  const got = dig(this.pubtest.result, key);
-  if (typeof got !== "string" || !matches(pattern, got)) throw new Error(`the result's ${key} is ${JSON.stringify(got)}, not ${pattern}`);
-});
 
 Then("the result's {string} is:", function (key, doc) {
   if (this.pubtest.refused) throw new Error(`it was refused: ${this.pubtest.refused.message}`);

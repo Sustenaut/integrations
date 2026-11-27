@@ -1,4 +1,4 @@
 {
   "category": "internal",
-  "change": "pubtest's record/replay harness scenarios (harness-recording.feature, harness-replay.feature) run here, moved from pubtest's suite so pubtest's tests no longer depend on integrations; the suite tests on pubtestrules 0.4.1"
+  "change": "pubtest's record/replay harness scenarios (harness-recording.feature, harness-replay.feature) run here, moved from pubtest's suite so pubtest's tests no longer depend on integrations; under pytest-bdd and cucumber-js; the suites test on pubtestrules 0.4.1 and @sustenaut/pubtest v0.4.1, clients/js taking this checkout as @sustenaut/integrations"
 }

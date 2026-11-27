@@ -32,14 +32,6 @@ When("I make a {string} from {string} of:", async function (name, file, doc) {
   await this.attempt(() => new made(...JSON.parse(doc)));
 });
 
-// A refusal's own fields: its message whole, its class, its plugin.
-Then("the refusal's {string} is {string}", function (key, wanted) {
-  const ctx = this.pubtest;
-  ctx.refusalRead = true;
-  if (!ctx.refused) throw new Error(`it was not refused: the result is ${show(ctx.result)}`);
-  const got = dig(ctx.refused.error, key);
-  if (!same(got, wanted)) throw new Error(`the refusal's ${key} is ${show(got)}, not ${wanted}`);
-});
 
 // The result, or a part of it, is what a repository file holds at a dotted key.
 Then("the result is the JSON at {string} in {string}", async function (key, file) {
