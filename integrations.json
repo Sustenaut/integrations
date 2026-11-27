@@ -83,7 +83,8 @@
         "src/integrations/clients/github_test_org.py",
         "clients/js/testing-github.js",
         "clients/js/test/github-recording.steps.mjs",
-        "clients/js/test/github-standin.mjs"
+        "clients/js/test/github-standin.mjs",
+        "clients/js/test/harness.steps.mjs"
       ],
       "mode": "required"
     },

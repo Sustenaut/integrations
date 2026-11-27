@@ -1,0 +1,2 @@
+[pubtest.customers]
+pubtest.example = pubtest_example_customer
