@@ -1,5 +1,8 @@
 """github.app-token: a GitHub App's installation tokens, for code that acts as
-the app. Needs the `github-app` extra, which signs the app's JWT."""
+the app. Needs the `github-app` extra, which signs the app's JWT.
+
+The JWT's issuer is the app's client id (Iv...), or its app id, which GitHub
+still takes: AppToken signs with whichever it is given."""
 
 from __future__ import annotations
 
@@ -21,21 +24,23 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def signed_jwt(app_id: str, private_key: str, now: int) -> str:
+def signed_jwt(issuer: str, private_key: str, now: int) -> str:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
 
     head = _b64url(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
-    claims = _b64url(json.dumps({"iat": now - 60, "exp": now + 540, "iss": str(app_id)}).encode())
+    claims = _b64url(json.dumps({"iat": now - 60, "exp": now + 540, "iss": str(issuer)}).encode())
     key = serialization.load_pem_private_key(private_key.encode(), password=None)
     signature = key.sign(f"{head}.{claims}".encode(), padding.PKCS1v15(), hashes.SHA256())
     return f"{head}.{claims}.{_b64url(signature)}"
 
 
 class AppToken:
-    def __init__(self, caller: Caller, app_id: str, private_key: str, installation_id: str,
+    """A GitHub App's installation tokens. `issuer` is the app's client id, or its app id."""
+
+    def __init__(self, caller: Caller, issuer: str, private_key: str, installation_id: str,
                  clock: Callable[[], float] = time.time):
-        self.caller, self.app_id, self.key, self.installation_id = caller, app_id, private_key, installation_id
+        self.caller, self.issuer, self.key, self.installation_id = caller, issuer, private_key, installation_id
         self.clock = clock
         self._token: tuple[str, float] = ("", 0.0)
         self._lock = threading.Lock()
@@ -48,7 +53,7 @@ class AppToken:
                 return token
             response = self.caller.call(PLUGIN, "mint-in-app", Request(
                 "POST", f"{API}/app/installations/{self.installation_id}/access_tokens",
-                {"Authorization": f"Bearer {signed_jwt(self.app_id, self.key, int(self.clock()))}",
+                {"Authorization": f"Bearer {signed_jwt(self.issuer, self.key, int(self.clock()))}",
                  "Accept": "application/vnd.github+json"}))
             if not response.ok:
                 raise Refused(PLUGIN, "mint-in-app", f"HTTP {response.status}")

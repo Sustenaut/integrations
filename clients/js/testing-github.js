@@ -39,9 +39,10 @@
 //
 // token(ctx) is the token the code under test calls GitHub with: the recorder app's when
 // recording, a stand-in replaying. The org is INTEGRATIONS_TEST_ORG, else SustenautTest;
-// the recorder app's credentials are GITHUB_TEST_RECORDER_APP_ID, GITHUB_TEST_RECORDER_APP_KEY
+// the recorder app's credentials are GITHUB_TEST_RECORDER_CLIENT_ID, GITHUB_TEST_RECORDER_APP_KEY
 // and GITHUB_TEST_RECORDER_INSTALLATION_ID (or GITHUB_TEST_RECORDER_TOKEN), which
-// ./with-secrets exports from Bitwarden.
+// ./with-secrets exports from Bitwarden. The client id (Iv, then letters, digits and .) is
+// the JWT's issuer, which GitHub takes in place of the app's id.
 
 import { Caller } from "./caller.js";
 import { LIVE, MARKER, MODE, NAMES, label, namesFrom } from "./transports.js";
@@ -50,9 +51,11 @@ export const CUSTOMER = "github.test";
 export const ORG = "INTEGRATIONS_TEST_ORG";
 export const DEFAULT_ORG = "SustenautTest";
 export const TOKEN = "GITHUB_TEST_RECORDER_TOKEN";
-export const APP_ID = "GITHUB_TEST_RECORDER_APP_ID";
+export const CLIENT_ID = "GITHUB_TEST_RECORDER_CLIENT_ID";
 export const APP_KEY = "GITHUB_TEST_RECORDER_APP_KEY";
 export const INSTALLATION_ID = "GITHUB_TEST_RECORDER_INSTALLATION_ID";
+// What a GitHub App's client id looks like, as pubsec app-secrets checks it.
+const CLIENT_ID_SHAPE = /^Iv[A-Za-z0-9.]{4,}$/;
 export const DESCRIPTION = "A recording's repository: its run deletes it, and the janitor any left after a day";
 // A token's stand-in in replay: a request's Authorization is neither recorded nor matched.
 export const REPLAY_TOKEN = `ghs_${"0".repeat(36)}`;
@@ -90,12 +93,13 @@ class Refused extends Error {
 
 const b64url = (data) => Buffer.from(data).toString("base64url");
 
-// The recorder app's installation token, minted with a JWT its key signs.
-async function mint(caller, appId, key, installationId) {
+// The recorder app's installation token, minted with a JWT its key signs, issued by its
+// client id.
+async function mint(caller, clientId, key, installationId) {
   const { createSign } = await import("node:crypto");
   const now = Math.floor(Date.now() / 1000);
   const head = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = b64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: String(appId) }));
+  const claims = b64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: String(clientId) }));
   const signature = createSign("RSA-SHA256").update(`${head}.${claims}`).sign(key, "base64url");
   const answer = await caller.call("github.app-token", "mint-in-app", {
     method: "POST", url: `${API}/app/installations/${installationId}/access_tokens`,
@@ -105,16 +109,20 @@ async function mint(caller, appId, key, installationId) {
   return answer.json().token;
 }
 
-// The recorder app's token: GITHUB_TEST_RECORDER_TOKEN, else minted from its id, key and
-// installation id (once). Throws, naming them, when they are not set.
+// The recorder app's token: GITHUB_TEST_RECORDER_TOKEN, else minted from its client id, key
+// and installation id (once). Throws, naming them, when they are not set, and saying so,
+// without its value, when the client id is not one.
 export function tokenFromEnv(caller, vars = env()) {
   if (vars[TOKEN]) return async () => vars[TOKEN];
-  const missing = [APP_ID, APP_KEY, INSTALLATION_ID].filter((n) => !vars[n]);
+  const missing = [CLIENT_ID, APP_KEY, INSTALLATION_ID].filter((n) => !vars[n]);
   if (missing.length) {
-    throw new Error(`the GitHub test org needs the recorder app's credentials, and ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set: run it through ./with-secrets, which exports ${APP_ID}, ${APP_KEY} and ${INSTALLATION_ID} from Bitwarden's github-test-recorder-* items (or set ${TOKEN} to an installation token)`);
+    throw new Error(`the GitHub test org needs the recorder app's credentials, and ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set: run it through ./with-secrets, which exports ${CLIENT_ID}, ${APP_KEY} and ${INSTALLATION_ID} from Bitwarden's github-test-recorder-* items (or set ${TOKEN} to an installation token)`);
+  }
+  if (!CLIENT_ID_SHAPE.test(vars[CLIENT_ID])) {
+    throw new Error(`${CLIENT_ID} is not a client id: it starts Iv, then letters, digits and . (the app's client id, not its app id)`);
   }
   let minted = null;
-  return async () => (minted ??= mint(caller, vars[APP_ID], vars[APP_KEY], vars[INSTALLATION_ID]));
+  return async () => (minted ??= mint(caller, vars[CLIENT_ID], vars[APP_KEY], vars[INSTALLATION_ID]));
 }
 
 const message = (answer) => {

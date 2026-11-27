@@ -180,6 +180,10 @@
     {
       "name": "SUSTENAUT_DEPLOY_SSH_KEY",
       "reason": "An SSH key to our own server"
+    },
+    {
+      "name": "TEST_RECORDER_APP_CLIENT_ID",
+      "reason": "The recorder app's client id, which github.app-token mints with; integrations#98 adds CLIENT_ID to its env pattern, and this entry goes then"
     }
   ],
   "own_hosts": [

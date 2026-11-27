@@ -145,7 +145,7 @@ from integrations.clients.github_app_token import AppToken
 from integrations.clients.github_edit_pr import Change, EditPullRequests
 
 caller = Caller("my-repo", "web", modes=read_modes(Path(".")))
-token = AppToken(caller, app_id, private_key, installation_id)
+token = AppToken(caller, client_id, private_key, installation_id)  # the app's client id, the JWT's issuer
 pulls = EditPullRequests(caller, token, "owner/name")
 url = pulls.propose(stem="edit/card-", changes=[Change("a.md", old, new)], title=title, body=body)
 ```
@@ -476,19 +476,21 @@ processes) never pick the same name, and n counts the process's repositories, th
 number when one is taken all the same. Nothing else in the test org may be named `rec-*`:
 the janitor deletes every such repository older than a day. The org is
 `INTEGRATIONS_TEST_ORG`, else `SustenautTest`. The recorder app's credentials are
-`GITHUB_TEST_RECORDER_APP_ID`, `GITHUB_TEST_RECORDER_APP_KEY` and
+`GITHUB_TEST_RECORDER_CLIENT_ID`, `GITHUB_TEST_RECORDER_APP_KEY` and
 `GITHUB_TEST_RECORDER_INSTALLATION_ID` (or an installation token in
 `GITHUB_TEST_RECORDER_TOKEN`), which `./with-secrets` exports from Bitwarden's
 `github-test-recorder-*` items: recording without them stops at the first step, naming
-them. The calls are `github.repo-ops`' `test-org`, the token `github.app-token`'s.
+them. The client id (`Iv`, then letters, digits and `.`) is the JWT's issuer, which
+GitHub takes in place of the app's id; one of another shape stops it too, without
+showing the value. The calls are `github.repo-ops`' `test-org`, the token `github.app-token`'s.
 
 **The janitor.** `integrations test-org sweep [--org ORG] [--older-than-hours 24]` deletes
 the test org's `rec-*` repositories made more than that long ago (`github.repo-ops`'
 `test-org-sweep`), for a run cut short. The `test-org` workflow runs it daily as the
-recorder app, with the token `actions/create-github-app-token` mints from the
-`TEST_RECORDER_APP_ID` variable and the `TEST_RECORDER_APP_KEY` secret, which
-`./with-secrets ./pubsec app-secrets` sends from pubrules.json's `github_app` block; until
-they are there, it does nothing.
+recorder app, with the token `actions/create-github-app-token` mints from its
+`client-id`, the `TEST_RECORDER_APP_CLIENT_ID` variable (a secret of that name wins),
+and the `TEST_RECORDER_APP_KEY` secret, which `./with-secrets ./pubsec app-secrets` sends
+from pubrules.json's `github_app` block; until the variable is there, it does nothing.
 
 #### Later steps
 

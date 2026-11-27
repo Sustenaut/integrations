@@ -3,10 +3,11 @@
 # deletes its own repositories as each scenario ends; this takes what a run cut
 # short left, so nothing else in the test org may be named rec-*. It acts as the
 # recorder app, installed on the test org only, with the token
-# actions/create-github-app-token mints from its id and key (TEST_RECORDER_APP_ID,
-# a variable, and TEST_RECORDER_APP_KEY, a secret, which `./with-secrets ./pubsec
-# app-secrets` sends from pubrules.json's github_app block). Until they are there,
-# it does nothing.
+# actions/create-github-app-token mints from its client id and key
+# (TEST_RECORDER_APP_CLIENT_ID, a variable, which a secret of that name overrides,
+# and TEST_RECORDER_APP_KEY, a secret, which `./with-secrets ./pubsec app-secrets`
+# sends from pubrules.json's github_app block). Until the variable is there, it does
+# nothing: a job's if cannot read secrets.
 name: test-org
 
 on:
@@ -23,7 +24,7 @@ concurrency:
 
 jobs:
   sweep:
-    if: vars.TEST_RECORDER_APP_ID != ''
+    if: vars.TEST_RECORDER_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,7 +36,7 @@ jobs:
         id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ vars.TEST_RECORDER_APP_ID }}
+          client-id: ${{ secrets.TEST_RECORDER_APP_CLIENT_ID || vars.TEST_RECORDER_APP_CLIENT_ID }}
           private-key: ${{ secrets.TEST_RECORDER_APP_KEY }}
           owner: SustenautTest
           permission-administration: write

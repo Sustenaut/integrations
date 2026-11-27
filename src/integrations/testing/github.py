@@ -47,10 +47,11 @@ recorder app's installation token; replaying, a stand-in (a request's
 Authorization is never recorded, nor matched).
 
 The org is INTEGRATIONS_TEST_ORG, else SustenautTest; the recorder app's
-credentials are GITHUB_TEST_RECORDER_APP_ID, GITHUB_TEST_RECORDER_APP_KEY and
+credentials are GITHUB_TEST_RECORDER_CLIENT_ID, GITHUB_TEST_RECORDER_APP_KEY and
 GITHUB_TEST_RECORDER_INSTALLATION_ID (or GITHUB_TEST_RECORDER_TOKEN), which
-./with-secrets exports from Bitwarden: recording without them stops at the first
-step, naming them. The consumer is the repository under test's name (its origin's,
+./with-secrets exports from Bitwarden; the client id (Iv, then letters, digits and .)
+is the JWT's issuer. Recording without them stops at the first step, naming them, as
+does a client id that is not one. The consumer is the repository under test's name (its origin's,
 else its directory's), the run is PUBTEST_RUN, the process six hex digits of its
 own (so parallel workers never pick the same name), and n counts the process's
 repositories; a name taken all the same takes the next number. Nothing else in the

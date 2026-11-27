@@ -29,7 +29,7 @@ class StandInGitHub:
         self.commits: dict[str, dict] = {}
         self.tokens = set(tokens)
         self.public_key = None  # the app's, to check a JWT's signature
-        self.app_id: str | None = None
+        self.client_id: str | None = None
         self.requests: list[dict] = []
         self.taken: int = 0  # this many names are taken, as another process's
         self.refuse: dict[str, int] = {}  # "METHOD /path-pattern" -> status
@@ -170,7 +170,7 @@ class StandInGitHub:
         return self._json(200, [self._shown(self.repos[n]) for n in names])
 
     def _mint(self, auth: str) -> Response:
-        """A JWT the app's key signed, naming the app, is answered with a token."""
+        """A JWT the app's key signed, issued by its client id, is answered with a token."""
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -179,7 +179,7 @@ class StandInGitHub:
             head, claims, signature = jwt.split(".")
             pad = lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))  # noqa: E731
             self.public_key.verify(pad(signature), f"{head}.{claims}".encode(), padding.PKCS1v15(), hashes.SHA256())
-            if json.loads(pad(claims))["iss"] != self.app_id:
+            if json.loads(pad(claims))["iss"] != self.client_id:
                 raise ValueError("another app")
         except Exception:  # noqa: BLE001 - any JWT that does not check out is refused, as GitHub does
             return self._json(401, {"message": "A JSON web token could not be decoded"})

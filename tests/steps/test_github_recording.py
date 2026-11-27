@@ -65,19 +65,25 @@ def standin_refuses(ctx, rule, status):
     standin(ctx).refuse[rule] = status
 
 
-@given(parsers.parse('the recorder app\'s id "{app}", installation id "{installation}" and a key of its own are '
-                     'in the environment'))
-def app_credentials(ctx, monkeypatch, app, installation):
+@given(parsers.parse('the recorder app\'s client id "{client_id}", installation id "{installation}" and a key of '
+                     'its own are in the environment'))
+def app_credentials(ctx, monkeypatch, client_id, installation):
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
-    monkeypatch.setenv("GITHUB_TEST_RECORDER_APP_ID", app)
+    monkeypatch.setenv("GITHUB_TEST_RECORDER_CLIENT_ID", client_id)
     monkeypatch.setenv("GITHUB_TEST_RECORDER_INSTALLATION_ID", installation)
     monkeypatch.setenv("GITHUB_TEST_RECORDER_APP_KEY", pem)
-    standin(ctx).public_key, standin(ctx).app_id = key.public_key(), app
+    standin(ctx).public_key, standin(ctx).client_id = key.public_key(), client_id
+
+
+@then(parsers.parse('the refusal does not show "{value}"'))
+def refusal_hides(ctx, value):
+    assert ctx.refused is not None, "it was not refused"
+    assert value not in ctx.refused.message, f"the refusal shows {value!r}: {ctx.refused.message!r}"
 
 
 def shown(ctx, value):

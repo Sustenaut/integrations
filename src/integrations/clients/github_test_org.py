@@ -10,15 +10,18 @@ recorded into a cassette.
 
 The org is INTEGRATIONS_TEST_ORG, else SustenautTest. The token is
 GITHUB_TEST_RECORDER_TOKEN when it is set (an installation token, as a workflow's
-actions/create-github-app-token mints), else minted from GITHUB_TEST_RECORDER_APP_ID,
+actions/create-github-app-token mints), else minted from GITHUB_TEST_RECORDER_CLIENT_ID,
 GITHUB_TEST_RECORDER_APP_KEY and GITHUB_TEST_RECORDER_INSTALLATION_ID, which
-./with-secrets exports from Bitwarden's github-test-recorder-* items.
+./with-secrets exports from Bitwarden's github-test-recorder-* items. The client id
+(Iv, then letters, digits and .) is the JWT's issuer, which GitHub takes in place of
+the app's id.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -34,9 +37,11 @@ API = "https://api.github.com"
 ORG = "INTEGRATIONS_TEST_ORG"
 DEFAULT_ORG = "SustenautTest"
 TOKEN = "GITHUB_TEST_RECORDER_TOKEN"
-APP_ID = "GITHUB_TEST_RECORDER_APP_ID"
+CLIENT_ID = "GITHUB_TEST_RECORDER_CLIENT_ID"
 APP_KEY = "GITHUB_TEST_RECORDER_APP_KEY"
 INSTALLATION_ID = "GITHUB_TEST_RECORDER_INSTALLATION_ID"
+# What a GitHub App's client id looks like, as pubsec app-secrets checks it.
+CLIENT_ID_SHAPE = re.compile(r"Iv[A-Za-z0-9.]{4,}")
 PREFIX = "rec-"
 DESCRIPTION = "A recording's repository: its run deletes it, and the janitor any left after a day"
 # A repository GitHub has just made may not have its first branch yet: asked again this
@@ -45,7 +50,7 @@ SETTLE_TRIES = 10
 
 
 class MissingCredentials(RuntimeError):
-    """The recorder app's credentials are not in the environment."""
+    """The recorder app's credentials are not in the environment, or its client id is not one."""
 
 
 def org_name(env: dict[str, str] | None = None) -> str:
@@ -56,19 +61,25 @@ def org_name(env: dict[str, str] | None = None) -> str:
 
 def token_from_env(caller: Caller, env: dict[str, str] | None = None) -> Callable[[], str]:
     """The recorder app's installation token: GITHUB_TEST_RECORDER_TOKEN, else one minted
-    from its id, key and installation id. Raises `MissingCredentials` naming them."""
+    from its client id (the JWT's issuer), key and installation id. Raises
+    `MissingCredentials` naming those not set, or saying the client id is not one,
+    without its value."""
     env = os.environ if env is None else env
     if env.get(TOKEN):
         token = env[TOKEN]
         return lambda: token
-    missing = [name for name in (APP_ID, APP_KEY, INSTALLATION_ID) if not env.get(name)]
+    missing = [name for name in (CLIENT_ID, APP_KEY, INSTALLATION_ID) if not env.get(name)]
     if missing:
         raise MissingCredentials(
             f"the GitHub test org needs the recorder app's credentials, and {', '.join(missing)} "
             f"{'is' if len(missing) == 1 else 'are'} not set: run it through ./with-secrets, which exports "
-            f"{APP_ID}, {APP_KEY} and {INSTALLATION_ID} from Bitwarden's github-test-recorder-* items "
+            f"{CLIENT_ID}, {APP_KEY} and {INSTALLATION_ID} from Bitwarden's github-test-recorder-* items "
             f"(or set {TOKEN} to an installation token)")
-    return AppToken(caller, env[APP_ID], env[APP_KEY], env[INSTALLATION_ID], clock=time.time)
+    if not (env[CLIENT_ID].isascii() and CLIENT_ID_SHAPE.fullmatch(env[CLIENT_ID])):
+        raise MissingCredentials(
+            f"{CLIENT_ID} is not a client id: it starts Iv, then letters, digits and . "
+            f"(the app's client id, not its app id)")
+    return AppToken(caller, env[CLIENT_ID], env[APP_KEY], env[INSTALLATION_ID], clock=time.time)
 
 
 class GitHubTestOrg:

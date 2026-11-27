@@ -190,22 +190,22 @@ Feature: Recording against the GitHub test org in Node: GitHub's test steps, as 
     And the environment sets "PUBTEST_RUN" to "run1"
     And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
     And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
-    And the environment does not set "GITHUB_TEST_RECORDER_APP_ID"
+    And the environment does not set "GITHUB_TEST_RECORDER_CLIENT_ID"
     And the environment does not set "GITHUB_TEST_RECORDER_APP_KEY"
     And the environment does not set "GITHUB_TEST_RECORDER_INSTALLATION_ID"
     And a stand-in GitHub test org
     And the scenario runs under pubtest's harness
     When I set up the GitHub repository "o/r" holding "{}"
-    Then it is refused, saying "the GitHub test org needs the recorder app's credentials, and GITHUB_TEST_RECORDER_APP_ID, GITHUB_TEST_RECORDER_APP_KEY, GITHUB_TEST_RECORDER_INSTALLATION_ID are not set: run it through ./with-secrets"
+    Then it is refused, saying "the GitHub test org needs the recorder app's credentials, and GITHUB_TEST_RECORDER_CLIENT_ID, GITHUB_TEST_RECORDER_APP_KEY, GITHUB_TEST_RECORDER_INSTALLATION_ID are not set: run it through ./with-secrets"
 
-  Scenario: Recording with the app's id, key and installation id mints its installation token
+  Scenario: Recording with the app's client id, key and installation id mints its installation token
     Given the environment sets "INTEGRATIONS_MODE" to "record"
     And the environment sets "PUBTEST_RUN" to "run1"
     And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
     And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
     And a stand-in GitHub test org
     And the scenario runs under pubtest's harness
-    And the recorder app's id "123", installation id "456" and a key of its own are in the environment
+    And the recorder app's client id "Iv23liTestRecorder", installation id "456" and a key of its own are in the environment
     And the GitHub repository "o/r" holds:
       """
       {}
@@ -216,6 +216,25 @@ Feature: Recording against the GitHub test org in Node: GitHub's test steps, as 
       [{"call": "github.app-token mint-in-app POST /app/installations/456/access_tokens", "auth": "a JWT"},
        {"call": "github.repo-ops test-org POST /orgs/SustenautTest/repos", "auth": "Bearer ghs_minted"}]
       """
+
+  Scenario Outline: Recording with a client id that is not one stops, without showing it: <what>
+    Given the environment sets "INTEGRATIONS_MODE" to "record"
+    And the environment sets "PUBTEST_RUN" to "run1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
+    And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
+    And a stand-in GitHub test org
+    And the scenario runs under pubtest's harness
+    And the recorder app's client id "<value>", installation id "456" and a key of its own are in the environment
+    When I set up the GitHub repository "o/r" holding "{}"
+    Then it is refused, saying "GITHUB_TEST_RECORDER_CLIENT_ID is not a client id: it starts Iv, then letters, digits and . (the app's client id, not its app id)"
+    And the refusal does not show "<value>"
+
+    Examples:
+      | what                 | value              |
+      | the app's id         | 5551234            |
+      | a lower-case iv      | iv23liTestRecorder |
+      | a space in it        | Iv23 liTestRecord  |
+      | too short            | Iv1.               |
 
   Scenario Outline: The token the code under test calls with: <mode>
     Given the environment sets "INTEGRATIONS_MODE" to "<mode>"

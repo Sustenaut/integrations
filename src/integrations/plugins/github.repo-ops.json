@@ -26,7 +26,7 @@
   ],
   "setup": [
     "Grant the workflow the permission it needs, or sign in to gh",
-    "For the test org: install the recorder app on it, its id, key and installation id in Bitwarden (github-test-recorder-*)"
+    "For the test org: install the recorder app on it, its client id, key and installation id in Bitwarden (github-test-recorder-*)"
   ],
   "detect": {
     "hosts": [
