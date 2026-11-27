@@ -24,7 +24,7 @@
       "actions/create-github-app-token"
     ],
     "env": [
-      "[A-Z_]+_APP_(?:ID|KEY|INSTALLATION_ID)"
+      "[A-Z_]+_APP_(?:ID|CLIENT_ID|KEY|INSTALLATION_ID)"
     ],
     "hosts": [
       "api.github.com"
