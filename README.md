@@ -127,8 +127,13 @@ permissions:
 
 jobs:
   integrations:
-    uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit> # main
+    uses: Sustenaut/integrations/.github/workflows/scan.yml@<commit of vX.Y.Z> # vX.Y.Z
 ```
+
+Pin a release, by its tag's commit with the version in a comment, as any other
+reusable workflow: the pubrules nightly then moves the pin to each new release,
+in the same pull request as the repository's other pins. A pin to a commit of
+`main` (`# main`) is moved to the latest release by the next nightly.
 
 The scan runs on GitHub's `ubuntu-latest` unless the caller names other
 runners, such as a self-hosted runner scale set, with

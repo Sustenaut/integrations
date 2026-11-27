@@ -1,0 +1,4 @@
+{
+  "category": "internal",
+  "change": "The README and scan.yml tell a repository to pin the scan by a release's commit (# vX.Y.Z), which the pubrules nightly moves, instead of a commit of main"
+}
