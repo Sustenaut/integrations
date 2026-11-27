@@ -1,0 +1,4 @@
+{
+  "category": "changed",
+  "change": "Recording mints the GitHub test org's token from the recorder app's client id, GITHUB_TEST_RECORDER_CLIENT_ID (the JWT's issuer, checked to start Iv, never shown), in place of GITHUB_TEST_RECORDER_APP_ID, which nothing reads any more (both languages); AppToken and signed_jwt name their first argument issuer, the app's client id or its id; the test-org workflow mints with client-id from TEST_RECORDER_APP_CLIENT_ID, which pubrules.json's github_app block sends"
+}

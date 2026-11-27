@@ -59,6 +59,10 @@
     "key": {
       "from": "github-test-recorder-app-key",
       "to": "TEST_RECORDER_APP_KEY"
+    },
+    "client_id": {
+      "from": "github-test-recorder-client-id",
+      "to": "TEST_RECORDER_APP_CLIENT_ID"
     }
   },
   "deploy": {

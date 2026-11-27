@@ -42,13 +42,13 @@ Given("the scenario runs under pubtest's harness", function () {
   });
 });
 
-Given("the recorder app's id {string}, installation id {string} and a key of its own are in the environment", function (app, installation) {
+Given("the recorder app's client id {string}, installation id {string} and a key of its own are in the environment", function (clientId, installation) {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const was = Object.fromEntries(["GITHUB_TEST_RECORDER_APP_ID", "GITHUB_TEST_RECORDER_INSTALLATION_ID", "GITHUB_TEST_RECORDER_APP_KEY"].map((n) => [n, process.env[n]]));
-  process.env.GITHUB_TEST_RECORDER_APP_ID = app;
+  const was = Object.fromEntries(["GITHUB_TEST_RECORDER_CLIENT_ID", "GITHUB_TEST_RECORDER_INSTALLATION_ID", "GITHUB_TEST_RECORDER_APP_KEY"].map((n) => [n, process.env[n]]));
+  process.env.GITHUB_TEST_RECORDER_CLIENT_ID = clientId;
   process.env.GITHUB_TEST_RECORDER_INSTALLATION_ID = installation;
   process.env.GITHUB_TEST_RECORDER_APP_KEY = privateKey.export({ type: "pkcs8", format: "pem" });
-  Object.assign(this.standin, { publicKey, appId: app });
+  Object.assign(this.standin, { publicKey, clientId });
   this.pubtest.cleanup(() => {
     for (const [n, v] of Object.entries(was)) {
       if (v === undefined) delete process.env[n];
@@ -227,4 +227,10 @@ Given("the harness's sleep is kept", function () {
 
 When("I ask how long the harness slept", async function () {
   await this.attempt(() => this.slept);
+});
+
+Then("the refusal does not show {string}", function (value) {
+  const { refused } = this.pubtest;
+  if (!refused) throw new Error("it was not refused");
+  if (refused.message.includes(value)) throw new Error(`the refusal shows ${JSON.stringify(value)}: ${JSON.stringify(refused.message)}`);
 });

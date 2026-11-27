@@ -18,7 +18,7 @@ export class StandInGitHub {
   refuse = {}; // "METHOD /path-pattern" -> status
   unsettled = 0; // a new repository's first branch is not there for this many asks
   publicKey = null;
-  appId = null;
+  clientId = null;
 
   constructor(org = "SustenautTest", tokens = []) {
     this.org = org;
@@ -147,12 +147,12 @@ export class StandInGitHub {
     return json(200, Object.keys(this.repos).sort().slice((page - 1) * perPage, page * perPage).map((n) => this.shown(this.repos[n])));
   }
 
-  // A JWT the app's key signed, naming the app, is answered with a token.
+  // A JWT the app's key signed, issued by its client id, is answered with a token.
   #mint(auth) {
     try {
       const [head, claims, signature] = auth.replace(/^Bearer /, "").split(".");
       const good = verify("RSA-SHA256", Buffer.from(`${head}.${claims}`), this.publicKey, Buffer.from(signature, "base64url"));
-      if (!good || JSON.parse(Buffer.from(claims, "base64url").toString()).iss !== this.appId) throw new Error("not the app's");
+      if (!good || JSON.parse(Buffer.from(claims, "base64url").toString()).iss !== this.clientId) throw new Error("not the app's");
     } catch {
       return json(401, { message: "A JSON web token could not be decoded" });
     }

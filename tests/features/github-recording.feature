@@ -253,13 +253,13 @@ Feature: Recording against the GitHub test org: GitHub's test steps, and the jan
     Then the result's "refused" includes "writing a tree in SustenautTest/rec-"
     And the result's "left" is "[]"
 
-  Scenario: Recording with the app's id, key and installation id mints its installation token
+  Scenario: Recording with the app's client id, key and installation id mints its installation token
     Given the environment sets "INTEGRATIONS_MODE" to "record"
     And the environment sets "PUBTEST_RUN" to "run1"
     And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
     And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
     And a stand-in GitHub test org
-    And the recorder app's id "123", installation id "456" and a key of its own are in the environment
+    And the recorder app's client id "Iv23liTestRecorder", installation id "456" and a key of its own are in the environment
     And the GitHub repository "o/r" holds:
       """
       {}
@@ -270,6 +270,24 @@ Feature: Recording against the GitHub test org: GitHub's test steps, and the jan
       [{"call": "github.app-token mint-in-app POST /app/installations/456/access_tokens", "auth": "a JWT"},
        {"call": "github.repo-ops test-org POST /orgs/SustenautTest/repos", "auth": "Bearer ghs_minted"}]
       """
+
+  Scenario Outline: Recording with a client id that is not one stops, without showing it: <what>
+    Given the environment sets "INTEGRATIONS_MODE" to "record"
+    And the environment sets "PUBTEST_RUN" to "run1"
+    And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
+    And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
+    And a stand-in GitHub test org
+    And the recorder app's client id "<value>", installation id "456" and a key of its own are in the environment
+    When I set up the GitHub repository "o/r" holding "{}"
+    Then it is refused, saying "GITHUB_TEST_RECORDER_CLIENT_ID is not a client id: it starts Iv, then letters, digits and . (the app's client id, not its app id)"
+    And the refusal does not show "<value>"
+
+    Examples:
+      | what                 | value              |
+      | the app's id         | 5551234            |
+      | a lower-case iv      | iv23liTestRecorder |
+      | a space in it        | Iv23 liTestRecord  |
+      | too short            | Iv1.               |
 
   Scenario: The token the code under test calls with is the recorder app's when recording
     Given the environment sets "INTEGRATIONS_MODE" to "record"
@@ -294,12 +312,12 @@ Feature: Recording against the GitHub test org: GitHub's test steps, and the jan
     And the environment sets "PUBTEST_RUN" to "run1"
     And the environment sets "INTEGRATIONS_CASSETTE" to "c.json"
     And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
-    And the environment does not set "GITHUB_TEST_RECORDER_APP_ID"
+    And the environment does not set "GITHUB_TEST_RECORDER_CLIENT_ID"
     And the environment does not set "GITHUB_TEST_RECORDER_APP_KEY"
     And the environment does not set "GITHUB_TEST_RECORDER_INSTALLATION_ID"
     And a stand-in GitHub test org
     When I set up the GitHub repository "o/r" holding "{}"
-    Then it is refused, saying "the GitHub test org needs the recorder app's credentials, and GITHUB_TEST_RECORDER_APP_ID, GITHUB_TEST_RECORDER_APP_KEY, GITHUB_TEST_RECORDER_INSTALLATION_ID are not set: run it through ./with-secrets"
+    Then it is refused, saying "the GitHub test org needs the recorder app's credentials, and GITHUB_TEST_RECORDER_CLIENT_ID, GITHUB_TEST_RECORDER_APP_KEY, GITHUB_TEST_RECORDER_INSTALLATION_ID are not set: run it through ./with-secrets"
 
   Scenario: The test org is INTEGRATIONS_TEST_ORG when it is set
     Given the environment sets "INTEGRATIONS_MODE" to "record"
@@ -357,12 +375,12 @@ Feature: Recording against the GitHub test org: GitHub's test steps, and the jan
   Scenario: The janitor without the recorder app's credentials stops, naming them
     Given the program under test is "integrations"
     And the environment does not set "GITHUB_TEST_RECORDER_TOKEN"
-    And the environment does not set "GITHUB_TEST_RECORDER_APP_ID"
+    And the environment does not set "GITHUB_TEST_RECORDER_CLIENT_ID"
     And the environment does not set "GITHUB_TEST_RECORDER_APP_KEY"
     And the environment does not set "GITHUB_TEST_RECORDER_INSTALLATION_ID"
     When I run "integrations test-org sweep"
     Then the exit code is 2
-    And stderr mentions "are not set: run it through ./with-secrets, which exports GITHUB_TEST_RECORDER_APP_ID, GITHUB_TEST_RECORDER_APP_KEY and GITHUB_TEST_RECORDER_INSTALLATION_ID from Bitwarden's github-test-recorder-* items"
+    And stderr mentions "are not set: run it through ./with-secrets, which exports GITHUB_TEST_RECORDER_CLIENT_ID, GITHUB_TEST_RECORDER_APP_KEY and GITHUB_TEST_RECORDER_INSTALLATION_ID from Bitwarden's github-test-recorder-* items"
 
   Scenario: The janitor's age is more than nothing
     Given the program under test is "integrations"
