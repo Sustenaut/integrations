@@ -3,7 +3,9 @@
   "bin": "integrations",
   "ci": {
     "language": "python",
-    "release": {}
+    "release": {
+      "pubrel": "0.7.1"
+    }
   },
   "protect": {
     "checks": [
@@ -65,13 +67,13 @@
     "providers": [
       {
         "distribution": "pubdeploy",
-        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl",
-        "sha256": "b51b7551a0da6cc9165e3429f443a0a3b9a2a311871f759fb27d11d68501aed2"
+        "wheel": "https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.2/pubdeploy-0.8.2-py3-none-any.whl",
+        "sha256": "f1175aa1e67ad20eeb01e1c222ba1112c04a39e6ac8e304115438e5f17de976c"
       },
       {
         "distribution": "pubsec",
-        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.4.0/pubsec-0.4.0-py3-none-any.whl",
-        "sha256": "b6e493d2b05c10ce0524a5e97397bd2a459a9ac67f6059eea7646457698bed45"
+        "wheel": "https://github.com/Sustenaut/pubsec/releases/download/v0.4.1/pubsec-0.4.1-py3-none-any.whl",
+        "sha256": "49aca88917f2856dcefce4be89826e95dc5c9cb17f0f0a2fdafecba6cc13de53"
       }
     ],
     "namespace": "integrations",
