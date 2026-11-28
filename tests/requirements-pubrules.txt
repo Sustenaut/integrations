@@ -15,5 +15,5 @@ hypothesis==6.170.5
 pubtestrules>=0.4.0
 pubrules==0.49.1
 # deploy.providers' packages, whose need types `pubrules sync --check` reads:
-pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.1/pubdeploy-0.8.1-py3-none-any.whl
-pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.4.0/pubsec-0.4.0-py3-none-any.whl
+pubdeploy @ https://github.com/Sustenaut/pubdeploy/releases/download/v0.8.2/pubdeploy-0.8.2-py3-none-any.whl
+pubsec @ https://github.com/Sustenaut/pubsec/releases/download/v0.4.1/pubsec-0.4.1-py3-none-any.whl

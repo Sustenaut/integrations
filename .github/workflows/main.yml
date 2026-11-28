@@ -70,8 +70,8 @@ jobs:
   release:
     needs: passed
     if: ${{ !cancelled() && needs.passed.result == 'success' }}
-    uses: Sustenaut/pubrel/.github/workflows/release.yml@931f3016d6fec63315e413060cde079d77730b52 # v0.7.0
-    with: {"pubrel-version": "v0.7.0"}
+    uses: Sustenaut/pubrel/.github/workflows/release.yml@d0295449195990fc2813ba91945b265a8c0cf040 # v0.7.1
+    with: {"pubrel-version": "v0.7.1"}
     secrets: { RELEASE_APP_ID: '${{ secrets.RELEASE_APP_ID }}', RELEASE_APP_KEY: '${{ secrets.RELEASE_APP_KEY }}' }
     permissions:
       contents: write
